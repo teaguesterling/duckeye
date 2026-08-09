@@ -118,6 +118,24 @@ if command -v pandoc >/dev/null; then
   has 'rst search'   'beta body'   $DUCKEYE -s widget "$TMP/t.rst"
   pandoc "$TMP/t.rst" -t json >"$TMP/t.json" 2>/dev/null
   has 'pandoc ast json' 'Beta'     $DUCKEYE -t "$TMP/t.json"
+
+  # pandoc cannot infer these two from the extension; .mediawiki in particular
+  # fails quietly (warns, falls back to markdown, exits 0), so duckeye names the
+  # reader explicitly. Regression guard for that.
+  printf '= Guide =\n\nintro\n\n== Usage ==\n\nusage body\n' >"$TMP/w.mediawiki"
+  has 'mediawiki reader named' 'Usage'      $DUCKEYE -t "$TMP/w.mediawiki"
+  has 'mediawiki section'      'usage body' $DUCKEYE -S Usage "$TMP/w.mediawiki"
+
+  # man page source, both as .man and as a numbered section
+  if [[ -r /usr/share/man/man1/ls.1.gz ]]; then
+    zcat /usr/share/man/man1/ls.1.gz >"$TMP/ls.1" 2>/dev/null
+    cp "$TMP/ls.1" "$TMP/ls.man"
+    has 'man .1 outline'  'SYNOPSIS'   $DUCKEYE -t "$TMP/ls.1"
+    has 'man .1 section'  'ls [OPTION' $DUCKEYE -S SYNOPSIS "$TMP/ls.1"
+    has 'man .man outline' 'SYNOPSIS'  $DUCKEYE -t "$TMP/ls.man"
+  else
+    skipping 'man pages' 'no /usr/share/man/man1/ls.1.gz'
+  fi
 else
   skipping 'pandoc formats' 'pandoc not installed'
 fi

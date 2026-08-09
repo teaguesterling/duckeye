@@ -53,8 +53,9 @@ Formats:
   .md .markdown        markdown extension
   .htm .html           webbed extension
   .json                Pandoc AST
-  .docx .odt .epub .rst .org .tex .ipynb .rtf .textile .man .mediawiki
+  .docx .odt .epub .rst .org .tex .ipynb .rtf .textile .mediawiki
                        via pandoc(1)
+  .man .1 ... .9       man page source, via pandoc(1)
   .zim  zim://...      zim extension (see ZIM archives below)
   -r bypasses this table entirely and hands FILE to DuckDB, so the format is
   whatever DuckDB's replacement scan makes of the extension. Under -r a .json
@@ -237,9 +238,19 @@ case "${f,,}" in                   # NB: patterns unquoted, or globbing is disab
     doc="SELECT html_to_duck_blocks(content) AS blocks FROM read_text('$src')" ;;
   *.json)                          # assumed to be a Pandoc AST
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;
-  *.docx|*.odt|*.epub|*.rst|*.org|*.tex|*.ipynb|*.rtf|*.textile|*.man|*.mediawiki)
+  *.docx|*.odt|*.epub|*.rst|*.org|*.tex|*.ipynb|*.rtf|*.textile|*.man|*.mediawiki|\
+  *.[1-9])
     command -v pandoc >/dev/null ||
       die "${f##*.} needs pandoc, which is not installed" 3
+    # Name the reader rather than letting pandoc infer it: .man, .mediawiki and the
+    # numbered man sections all defeat inference, and .mediawiki fails *quietly* —
+    # pandoc warns, falls back to markdown, exits 0, and renders near-nonsense.
+    case "${f,,}" in
+      *.tex)         from=latex ;;
+      *.mediawiki)   from=mediawiki ;;
+      *.man|*.[1-9]) from=man ;;      # ls.1, printf.3, crontab.5, …
+      *)             from=${f##*.}; from=${from,,} ;;
+    esac
     via_pandoc=1
     # read_pandoc_ast() silently returns [] on a pipe (constant-folded double-read,
     # teaguesterling/duckdb_duck_block_utils#18), so stdin goes via read_text().
@@ -308,7 +319,7 @@ out=$(mktemp "${TMPDIR:-/tmp}/duckeye.XXXXXX") || die 'cannot create temp file'
 trap 'rm -f "$out"' EXIT
 
 if [[ -n $via_pandoc ]]; then
-  pandoc "$f" -t json | "${duck[@]}" >"$out"
+  pandoc -f "$from" "$f" -t json | "${duck[@]}" >"$out"
   st=("${PIPESTATUS[@]}")
   (( st[0] )) && die "pandoc failed on $f" "${st[0]}"
   (( st[1] )) && exit "${st[1]}"

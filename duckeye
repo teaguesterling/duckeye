@@ -25,9 +25,12 @@ set -uo pipefail
 
 usage() {
   cat <<'EOF'
-usage: duckeye [OPTION]... FILE
+usage: duckeye [OPTION]... [FILE]
 
 Pretty-print a document in the terminal via DuckDB duck_blocks.
+
+FILE of "-", or no FILE at all when something is piped in, reads standard
+input. Piped input is sniffed for its format; -f overrides the guess.
 
 Options:
   -p, --page             page the output through $DUCKEYE_PAGER (default: less -R)
@@ -40,6 +43,9 @@ Options:
                          TEXT, headings and code blocks included
   -r, --raw              read FILE as data, not prose: SELECT * FROM FILE
                          rendered as a table (parquet, csv, json, xlsx, ...)
+  -f, --format FMT       treat the input as FMT rather than guessing from the
+                         filename: md, html, rst, docx, man, 1, tex, zim, ...
+                         Under -r, FMT names a DuckDB reader: csv, parquet, json
   -w, --where EXPR       SQL WHERE clause for -r; implies -r
   -n, --limit N          cap the rows any listing prints (-r, and .zim -t/-s)
       --init             install the DuckDB extensions duckeye needs, then exit
@@ -123,8 +129,44 @@ init() {
 # SQL single-quoted literal: double the quotes.
 q() { printf '%s' "${1//\'/\'\'}"; }
 
-do_page= mode=full arg= where= limit=
+do_page= mode=full arg= where= limit= fmt=
 setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -t, -S, -s, -r' 64; mode=$1; }
+
+# Guess a format from the first bytes, for stdin with no -f. Only claims what it can
+# actually tell apart; anything else falls through to markdown, which is the format
+# most likely to be piped around and degrades into readable plain text regardless.
+sniff() {
+  # Magic bytes first, read as hex so a binary file cannot trip the shell's
+  # null-byte warning on command substitution.
+  local magic; magic=$(od -An -tx1 -N4 <"$1" 2>/dev/null | tr -d ' \n')
+  case $magic in
+    25504446*) echo pdf; return ;;             # %PDF
+    504b0304*) sniff_zip "$1"; return ;;       # PK\x03\x04 — docx/epub/odt
+  esac
+  local h; h=$(head -c 1024 "$1" 2>/dev/null | tr -d '\0')
+  case $h in
+    '<!DOCTYPE html'*|'<!doctype html'*) echo html; return ;;
+    '<!DOCTYPE HTML'*|'<html'*|'<HTML'*) echo html; return ;;
+  esac
+  case $h in
+    *'"pandoc-api-version"'*)            echo json; return ;;   # a Pandoc AST
+    '.TH '*|'.\"'*|"'\\\""*|'.SH '*)     echo man;  return ;;   # roff
+    '<?xml'*|'<'*)                       echo html; return ;;
+  esac
+  echo md
+}
+
+# docx/epub/odt are all zip containers; their manifests tell them apart.
+sniff_zip() {
+  command -v unzip >/dev/null || { echo zip; return; }
+  local names; names=$(unzip -Z1 "$1" 2>/dev/null)
+  case $names in
+    *word/document.xml*) echo docx ;;
+    *mimetype*epub*|*OEBPS*|*META-INF/container.xml*) echo epub ;;
+    *content.xml*)       echo odt ;;
+    *)                   echo zip ;;
+  esac
+}
 
 while (( $# )); do
   case $1 in
@@ -135,21 +177,70 @@ while (( $# )); do
     -r|--raw)      setmode raw ;;
     -S|--section)  [[ $# -ge 2 ]] || die '-S needs a section name' 64; setmode section; arg=$2; shift ;;
     -s|--search)   [[ $# -ge 2 ]] || die '-s needs search text' 64; setmode search; arg=$2; shift ;;
+    -f|--format)   [[ $# -ge 2 ]] || die '-f needs a format' 64; fmt=${2,,}; shift ;;
     -w|--where)    [[ $# -ge 2 ]] || die '-w needs a WHERE expression' 64; setmode raw; where=$2; shift ;;
     -n|--limit)    [[ $# -ge 2 ]] || die '-n needs a row count' 64
                    [[ $2 =~ ^[0-9]+$ ]] || die "-n needs a non-negative integer, got '$2'" 64
                    limit=$2; shift ;;
     --)            shift; break ;;
+    -)             break ;;                      # the conventional name for stdin
     -*)            die "unknown option: $1" 64 ;;
     *)             break ;;
   esac
   shift
 done
 
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/duckeye.XXXXXX") || die 'cannot create temp directory'
+trap 'rm -rf "$tmp"' EXIT
+
 f=${1:-}
-[[ -n $f ]] || { usage >&2; exit 64; }
 [[ $# -le 1 ]] || die 'only one FILE at a time' 64
+
+# Standard input: an explicit "-", or no FILE at all with something piped in. It is
+# spooled to a file rather than streamed because pandoc needs to seek (a .docx is a zip),
+# because the section and search queries read the document more than once, and because
+# sniffing has to look at the first bytes without consuming them.
+if [[ $f == - || ( -z $f && ! -t 0 ) ]]; then
+  f=$tmp/stdin from_stdin=1
+  cat >"$f" || die 'cannot read standard input'
+  [[ -s $f ]] || die 'standard input was empty'
+  if [[ -z $fmt ]]; then
+    # Sniffing recognises document formats. Under -r the input is data, where the
+    # candidates are indistinguishable often enough that guessing would be a liability.
+    [[ $mode == raw ]] &&
+      die 'reading data from standard input needs -f (csv, parquet, json, ...)' 64
+    fmt=$(sniff "$f")
+    case $fmt in
+      pdf) die 'standard input looks like a PDF, which duckeye cannot read' 2 ;;
+      zip) die 'standard input is a zip container of an unknown kind; name it with -f' 2 ;;
+    esac
+  fi
+fi
+
+[[ -n $f ]] || { usage >&2; exit 64; }
 [[ $f == zim://* || -r $f ]] || die "cannot read $f"   # zim:// resolves inside the archive
+
+# Dispatch on -f when given, otherwise on the filename. Synthesising an extension lets
+# one table below serve both, so a format name is exactly the extension that implies it.
+# Normalise into a synthetic extension for the document table only. $fmt itself stays
+# as typed, because raw mode reads it as a DuckDB reader name where txt means csv, not
+# markdown.
+norm=$fmt
+case $norm in
+  latex)          norm=tex ;;
+  markdown)       norm=md ;;
+  htm)            norm=html ;;
+  text|txt|plain) norm=md ;;    # plain text is legible markdown
+esac
+key=${f,,}
+[[ -n $norm ]] && key=".$norm"
+
+# Some producers check the filename, not just the bytes — read_markdown_blocks rejects
+# anything not ending in .md — so spooled input is named for the format it turned out
+# to be rather than left extensionless.
+if [[ -n ${from_stdin:-} && -n $norm ]]; then
+  mv "$f" "$f.$norm" && f=$f.$norm
+fi
 
 src=$(q "$f")
 pat=$(q "$arg")
@@ -177,7 +268,16 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
 # loads duck_block_utils: DuckDB's own box renderer streams where the ANSI block
 # renderer goes superlinear, and it costs nothing when duck_blocks isn't needed.
 if [[ $mode == raw ]]; then
-  sql="SELECT * FROM '$src'"
+  # Bare '<path>' leans on DuckDB's replacement scan, which reads the extension — so a
+  # spooled stdin, having none, needs the reader named. That is what -f supplies here.
+  case $fmt in
+    '')                from="'$src'" ;;
+    csv|tsv|txt|text)  from="read_csv('$src')" ;;
+    parquet|pq)        from="read_parquet('$src')" ;;
+    json|ndjson|jsonl) from="read_json('$src')" ;;
+    *)                 from="read_$fmt('$src')" ;;   # DuckDB reports an unknown reader
+  esac
+  sql="SELECT * FROM $from"
   [[ -n $where ]] && sql+=" WHERE $where"     # arbitrary SQL, spliced verbatim
   [[ -n $limit ]] && sql+=" LIMIT $limit"
   load=
@@ -192,7 +292,7 @@ fi
 # one document: -t indexes it, -s runs the archive's own Xapian full-text search,
 # -S opens an article. Reaching *into* an article is what the zim:// form below is
 # for, and there the ordinary document verbs apply unchanged.
-if [[ ${f,,} == *.zim ]]; then
+if [[ $key == *.zim ]]; then
   if [[ $mode == section ]]; then
     # zim_suggest walks the title index, so this stays fast on a full Wikipedia.
     # zim_get_text pulls the article's bytes straight through, no filesystem hop.
@@ -223,7 +323,7 @@ if [[ ${f,,} == *.zim ]]; then
 fi
 
 [[ -n $doc ]] ||                   # already resolved above (an opened zim article)
-case "${f,,}" in                   # NB: patterns unquoted, or globbing is disabled
+case "$key" in                     # NB: patterns unquoted, or globbing is disabled
   zim://*)                         # zim://<archive>.zim/<entry> names one entry
     rest=${f#zim://}
     [[ $rest == *.zim/* ]] || die "zim:// needs an entry path: zim://ARCHIVE.zim/ENTRY" 64
@@ -241,15 +341,15 @@ case "${f,,}" in                   # NB: patterns unquoted, or globbing is disab
   *.docx|*.odt|*.epub|*.rst|*.org|*.tex|*.ipynb|*.rtf|*.textile|*.man|*.mediawiki|\
   *.[1-9])
     command -v pandoc >/dev/null ||
-      die "${f##*.} needs pandoc, which is not installed" 3
+      die "${key##*.} needs pandoc, which is not installed" 3
     # Name the reader rather than letting pandoc infer it: .man, .mediawiki and the
     # numbered man sections all defeat inference, and .mediawiki fails *quietly* —
     # pandoc warns, falls back to markdown, exits 0, and renders near-nonsense.
-    case "${f,,}" in
+    case "$key" in
       *.tex)         from=latex ;;
       *.mediawiki)   from=mediawiki ;;
       *.man|*.[1-9]) from=man ;;      # ls.1, printf.3, crontab.5, …
-      *)             from=${f##*.}; from=${from,,} ;;
+      *)             from=${key##*.} ;;
     esac
     via_pandoc=1
     # read_pandoc_ast() silently returns [] on a pipe (constant-folded double-read,
@@ -315,8 +415,7 @@ duck+=(-s "$sql")
 page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
 
 # Buffered so an empty result can be reported instead of printed as silence.
-out=$(mktemp "${TMPDIR:-/tmp}/duckeye.XXXXXX") || die 'cannot create temp file'
-trap 'rm -f "$out"' EXIT
+out=$tmp/out
 
 if [[ -n $via_pandoc ]]; then
   pandoc -f "$from" "$f" -t json | "${duck[@]}" >"$out"

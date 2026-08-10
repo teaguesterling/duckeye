@@ -6,6 +6,7 @@ man pages, an offline Wikipedia — parsed by [DuckDB](https://duckdb.org), rend
 
 ```console
 $ duckeye README.md                         # render, unpaged
+$ zcat ls.1.gz | duckeye -t -               # or read a pipe, format sniffed
 $ dep README.md                             # same, paged
 $ duckeye -t spec.md                        # outline it
 $ duckeye -S 'Runbook Steps' spec.md        # one section
@@ -54,9 +55,7 @@ Man page source works too — `.man` and the numbered sections `.1` … `.9` —
 jump straight to the part you wanted:
 
 ```console
-$ zcat /usr/share/man/man1/ls.1.gz > ls.1        # most man pages ship gzipped
-
-$ duckeye -t ls.1
+$ zcat /usr/share/man/man1/ls.1.gz | duckeye -t -
 NAME
 SYNOPSIS
 DESCRIPTION
@@ -66,11 +65,46 @@ REPORTING BUGS
 COPYRIGHT
 SEE ALSO
 
-$ duckeye -S SYNOPSIS ls.1
+$ zcat /usr/share/man/man1/ls.1.gz | duckeye -S SYNOPSIS
 ▍ SYNOPSIS
 
 ls [OPTION]... [FILE]...
 ```
+
+No temporary file and no `-f`: piped input is sniffed, and roff is recognisable.
+
+## Standard input, and telling duckeye what it's looking at
+
+`-` means standard input, and so does a bare pipe with no FILE at all:
+
+```console
+$ curl -s https://example.com | duckeye -           # sniffed as HTML
+$ pandoc notes.txt -t json | duckeye -t -           # sniffed as a Pandoc AST
+$ git show HEAD:README.md | duckeye -S Install      # read a doc at a revision
+$ unzip -p archive.zip doc.docx | duckeye -t -      # sniffed as DOCX
+```
+
+Sniffing reads magic bytes first (`%PDF`, and the zip container that `.docx`, `.epub`
+and `.odt` all really are — told apart by their manifests), then falls back to text
+markers: an HTML doctype, a Pandoc AST's `pandoc-api-version`, roff's `.TH`. Anything
+else is treated as markdown, which degrades into legible plain text.
+
+When the guess is wrong, or a filename lies, `-f` settles it:
+
+```console
+$ duckeye -t -f man ls.1                    # a format name is just its extension
+$ duckeye -t -f html page.txt               # extension says otherwise
+$ cat data.parquet | duckeye -r -f parquet -    # under -r it names a DuckDB reader
+$ cat log.csv | duckeye -f csv -w "level = 'ERROR'" -
+```
+
+Under `-r` the input is data rather than prose, and the candidates are too easily
+confused for guessing to be safe, so stdin there requires `-f` rather than picking for
+you.
+
+Input is spooled to a temporary file rather than streamed, because pandoc needs to seek
+(a `.docx` is a zip), the section and search queries read the document more than once,
+and sniffing has to look at the first bytes without consuming them.
 
 ## Navigating instead of scrolling
 
@@ -204,6 +238,7 @@ hundreds of thousands of entries with no mimetype at all.
 | `.docx` `.odt` `.epub` `.rst` `.org` `.tex` `.ipynb` `.rtf` `.textile` `.mediawiki` | `pandoc(1)` |
 | `.man`, `.1`–`.9` | `pandoc(1)` — man page source |
 | anything DuckDB reads, under `-r` | parquet, csv, json, xlsx, … |
+| standard input | sniffed, or named with `-f` |
 
 duckeye names the pandoc reader explicitly rather than letting pandoc infer it from the
 extension — `.man` and `.mediawiki` defeat inference, and `.mediawiki` fails *quietly*,
@@ -220,6 +255,8 @@ it to `DUCKEYE_EXTS`.
 -S, --section NAME     one section
 -s, --search TEXT      matching sections
 -r, --raw              read as data: SELECT * FROM FILE
+-f, --format FMT       treat input as FMT instead of guessing; under -r,
+                       names a DuckDB reader (csv, parquet, json)
 -w, --where EXPR       SQL WHERE clause; implies -r
 -n, --limit N          cap rows in any listing (-r, and .zim -t/-s)
     --init             install the DuckDB extensions

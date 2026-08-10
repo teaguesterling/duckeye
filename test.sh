@@ -18,13 +18,13 @@ strip() { sed 's/\x1b\[[0-9;]*m//g'; }
 # no NAME CMD...        — must exit non-zero
 # has NAME PATTERN CMD... — must exit 0 and its output must match PATTERN
 ok() { local n=$1; shift
-  if "$@" >/dev/null 2>&1; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  if "$@" >/dev/null 2>&1 </dev/null; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
   else fail=$((fail+1)); printf '  FAIL %s\n' "$n"; fi; }
 no() { local n=$1; shift
-  if "$@" >/dev/null 2>&1; then fail=$((fail+1)); printf '  FAIL %s (expected nonzero)\n' "$n"
+  if "$@" >/dev/null 2>&1 </dev/null; then fail=$((fail+1)); printf '  FAIL %s (expected nonzero)\n' "$n"
   else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
 has() { local n=$1 pat=$2; shift 2
-  local out; out=$("$@" 2>/dev/null | strip)
+  local out; out=$("$@" 2>/dev/null </dev/null | strip)
   if [[ $out == *"$pat"* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
   else fail=$((fail+1)); printf '  FAIL %s (no match for %q)\n' "$n" "$pat"; fi; }
 skipping() { skip=$((skip+1)); printf '  skip %s (%s)\n' "$1" "$2"; }
@@ -99,6 +99,27 @@ cp "$TMP/doc.md" "$TMP/it's a doc.md"
 has 'apostrophe in filename' 'alpha body' $DUCKEYE -S Alpha "$TMP/it's a doc.md"
 no  'sql injection is inert'              $DUCKEYE -S "x'; DROP TABLE t; --" "$TMP/doc.md"
 
+echo 'stdin and -f'
+has 'explicit - reads stdin'   'alpha body' bash -c "$DUCKEYE -S Alpha - <'$TMP/doc.md'"
+has 'bare pipe reads stdin'    'alpha body' bash -c "$DUCKEYE -S Alpha <'$TMP/doc.md'"
+has 'sniffs markdown'          '  Alpha'    bash -c "$DUCKEYE -t - <'$TMP/doc.md'"
+has 'sniffs html'              'Head'       bash -c "$DUCKEYE -t - <'$TMP/doc.html'"
+has 'refuses a PDF by magic'   ''           bash -c "printf '%%PDF-1.4\njunk' | $DUCKEYE -t - 2>&1"
+no  'PDF exits nonzero'        bash -c "printf '%%PDF-1.4\njunk' | $DUCKEYE -t -"
+# -f must beat the filename, or it isn't an override
+cp "$TMP/doc.html" "$TMP/liar.md"
+has '-f overrides extension'   'Head'       $DUCKEYE -t -f html "$TMP/liar.md"
+no  '-f needs an argument'                  $DUCKEYE -f
+# stdin has no extension, so a producer that checks the name must still be satisfied
+has 'spooled stdin gets named' '  Alpha'    bash -c "cat '$TMP/doc.md' | $DUCKEYE -t -f md -"
+no  'empty stdin is an error'               bash -c "printf '' | $DUCKEYE -t -"
+if command -v pandoc >/dev/null && command -v unzip >/dev/null; then
+  pandoc "$TMP/doc.md" -o "$TMP/z.docx" 2>/dev/null
+  has 'sniffs docx in a zip'   'Alpha'      bash -c "$DUCKEYE -t - <'$TMP/z.docx'"
+else
+  skipping 'zip container sniffing' 'needs pandoc and unzip'
+fi
+
 echo 'raw'
 has 'raw parquet'  'name_1' $DUCKEYE -r "$TMP/d.parquet"
 has 'raw csv'      'name_1' $DUCKEYE -r "$TMP/d.csv"
@@ -108,6 +129,11 @@ if [[ $($DUCKEYE -w 'score > 6' "$TMP/d.parquet") == *'name_1'* ]]; then
 else pass=$((pass+1)); echo '  ok   where excludes non-matches'; fi
 has 'where with quotes' 'name_3' $DUCKEYE -w "name = 'name_3'" "$TMP/d.parquet"
 ok  'limit'                      $DUCKEYE -r -n 2 "$TMP/d.parquet"
+has 'raw reads a named parquet from stdin' 'name_1' \
+    bash -c "$DUCKEYE -r -f parquet - <'$TMP/d.parquet'"
+has 'raw reads a named csv from stdin'     'name_4' \
+    bash -c "$DUCKEYE -f csv -w 'id > 3' - <'$TMP/d.csv'"
+no  'raw stdin refuses to guess'           bash -c "$DUCKEYE -r - <'$TMP/d.parquet'"
 
 echo 'pandoc formats'
 if command -v pandoc >/dev/null; then

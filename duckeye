@@ -48,6 +48,9 @@ Options:
                          Under -r, FMT names a DuckDB reader: csv, parquet, json
   -w, --where EXPR       SQL WHERE clause for -r; implies -r
   -n, --limit N          cap the rows any listing prints (-r, and .zim -t/-s)
+      --color WHEN       auto (default), always, never. auto means colour when
+                         stdout is a terminal, or when -p is paging through
+                         less -R. $NO_COLOR disables it
       --init             install the DuckDB extensions duckeye needs, then exit
   -h, --help             show this help
 
@@ -129,7 +132,21 @@ init() {
 # SQL single-quoted literal: double the quotes.
 q() { printf '%s' "${1//\'/\'\'}"; }
 
-do_page= mode=full arg= where= limit= fmt=
+do_page= mode=full arg= where= limit= fmt= color=auto
+
+# Colour when a terminal will see the escapes: stdout is a tty, or -p is about to hand
+# the output to less -R, which reads them. Honours the NO_COLOR convention.
+want_color() {
+  case $color in
+    always) return 0 ;;
+    never)  return 1 ;;
+    auto)   ;;
+    *)      die "--color takes auto, always or never, got '$color'" 64 ;;
+  esac
+  [[ -n ${NO_COLOR:-} ]] && return 1
+  [[ -n $do_page ]] && return 0
+  [[ -t 1 ]]
+}
 setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -t, -S, -s, -r' 64; mode=$1; }
 
 # Guess a format from the first bytes, for stdin with no -f. Only claims what it can
@@ -178,6 +195,9 @@ while (( $# )); do
     -S|--section)  [[ $# -ge 2 ]] || die '-S needs a section name' 64; setmode section; arg=$2; shift ;;
     -s|--search)   [[ $# -ge 2 ]] || die '-s needs search text' 64; setmode search; arg=$2; shift ;;
     -f|--format)   [[ $# -ge 2 ]] || die '-f needs a format' 64; fmt=${2,,}; shift ;;
+    --color)       [[ $# -ge 2 ]] || die '--color needs auto, always or never' 64
+                   color=${2,,}; shift ;;
+    --color=*)     color=${1#--color=}; color=${color,,} ;;
     -w|--where)    [[ $# -ge 2 ]] || die '-w needs a WHERE expression' 64; setmode raw; where=$2; shift ;;
     -n|--limit)    [[ $# -ge 2 ]] || die '-n needs a row count' 64
                    [[ $2 =~ ^[0-9]+$ ]] || die "-n needs a non-negative integer, got '$2'" 64
@@ -436,4 +456,10 @@ if ! grep -q '[^[:space:]]' "$out"; then
   esac
 fi
 
-"${page[@]}" <"$out"
+# The block renderer always emits SGR, so stripping here is what makes the escapes
+# conditional. Only SGR (m) sequences go, leaving the layout the renderer computed.
+if want_color; then
+  "${page[@]}" <"$out"
+else
+  sed 's/\x1b\[[0-9;]*m//g' "$out" | "${page[@]}"
+fi

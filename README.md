@@ -140,6 +140,19 @@ only ever appears inside `**bold**` or a fenced block is still found.
 Both match case-insensitively as substrings, both accept SQL `LIKE` wildcards (`%`, `_`),
 and `-S` also matches a heading's slug id exactly.
 
+## Colour
+
+Colour is on when a terminal will actually see it: stdout is a tty, or `-p` is handing
+the output to `less -R`, which renders escapes. Piping anywhere else strips them, so
+
+```console
+$ duckeye spec.md | grep -n 'retry'
+$ duckeye report.docx > report.txt
+```
+
+give you clean text rather than escape sequences. `--color=always` forces them back on,
+`--color=never` off, and `NO_COLOR` is honoured.
+
 ## Scripting
 
 `-S` and `-s` exit `1` when nothing matches, so they behave like `grep`:
@@ -257,6 +270,7 @@ it to `DUCKEYE_EXTS`.
 -r, --raw              read as data: SELECT * FROM FILE
 -f, --format FMT       treat input as FMT instead of guessing; under -r,
                        names a DuckDB reader (csv, parquet, json)
+    --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies -r
 -n, --limit N          cap rows in any listing (-r, and .zim -t/-s)
     --init             install the DuckDB extensions

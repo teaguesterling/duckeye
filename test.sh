@@ -120,6 +120,21 @@ else
   skipping 'zip container sniffing' 'needs pandoc and unzip'
 fi
 
+echo 'colour'
+esc=$(printf '\033')
+# the helpers strip SGR, so these check the raw bytes instead
+nocolor() { [[ $("$@" 2>/dev/null </dev/null) != *"$esc"* ]]; }
+ok  'piped output has no escapes'   nocolor $DUCKEYE "$TMP/doc.md"
+no  '--color=always keeps them'     nocolor $DUCKEYE --color=always "$TMP/doc.md"
+ok  '--color=never strips them'     nocolor $DUCKEYE --color=never --color=never "$TMP/doc.md"
+ok  'NO_COLOR is honoured'          env NO_COLOR=1 $DUCKEYE "$TMP/doc.md"
+# -p hands output to less -R, which renders escapes — so paging must keep them even
+# though duckeye's own stdout is then a pipe rather than a tty
+no  '-p keeps colour through less' \
+    env DUCKEYE_PAGER=cat bash -c "$DUCKEYE -p '$TMP/doc.md' | grep -q '$esc' && exit 1 || exit 0"
+no  '--color rejects a bad value'   $DUCKEYE --color=purple "$TMP/doc.md"
+has 'stripping preserves content'   'alpha body' $DUCKEYE --color=never -S Alpha "$TMP/doc.md"
+
 echo 'raw'
 has 'raw parquet'  'name_1' $DUCKEYE -r "$TMP/d.parquet"
 has 'raw csv'      'name_1' $DUCKEYE -r "$TMP/d.csv"

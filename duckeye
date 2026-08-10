@@ -43,6 +43,10 @@ Options:
                          TEXT, headings and code blocks included
   -r, --raw              read FILE as data, not prose: SELECT * FROM FILE
                          rendered as a table (parquet, csv, json, xlsx, ...)
+  -o, --output FMT       write the document as ansi (default), text, md, html,
+                         pandoc (a Pandoc AST) or blocks (duck_blocks JSON).
+                         Applies after -S/-s, so a section converts on its own.
+                         Not for -r, -t, or an archive's corpus listings
   -f, --format FMT       treat the input as FMT rather than guessing from the
                          filename: md, html, rst, docx, man, 1, tex, zim, ...
                          Under -r, FMT names a DuckDB reader: csv, parquet, json
@@ -132,7 +136,21 @@ init() {
 # SQL single-quoted literal: double the quotes.
 q() { printf '%s' "${1//\'/\'\'}"; }
 
-do_page= mode=full arg= where= limit= fmt= color=auto
+do_page= mode=full arg= where= limit= fmt= color=auto out_fmt=ansi
+
+# Wrap an expression yielding LIST(duck_block) in whichever serializer -o asked for.
+# These are the duck_blocks pipeline's own writers, which is the whole point: they run
+# after -S/-s have already cut the document down, so a section can come out as markdown.
+emit() {
+  case $out_fmt in
+    ansi)      printf 'db_render_blocks(%s)' "$1" ;;
+    text)      printf 'db_blocks_to_text(%s)' "$1" ;;
+    html)      printf 'duck_blocks_to_html(%s)' "$1" ;;
+    blocks)    printf 'to_json(%s)' "$1" ;;
+    pandoc|md) printf 'db_to_pandoc_json(%s)' "$1" ;;
+    *)         die "unknown output format: $out_fmt (ansi, text, md, html, pandoc, blocks)" 64 ;;
+  esac
+}
 
 # Colour when a terminal will see the escapes: stdout is a tty, or -p is about to hand
 # the output to less -R, which reads them. Honours the NO_COLOR convention.
@@ -148,6 +166,17 @@ want_color() {
   [[ -t 1 ]]
 }
 setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -t, -S, -s, -r' 64; mode=$1; }
+
+# duck_blocks_to_pandoc_ast stamps pandoc-api-version [1,20], which pandoc 3.x refuses
+# outright (teaguesterling/duckdb_duck_block_utils#22). The encoding itself is fine, so
+# ask the local pandoc what version it speaks and stamp that instead.
+pandoc_apiver() {
+  local v
+  command -v pandoc >/dev/null &&
+    v=$(printf 'x\n' | pandoc -t json 2>/dev/null |
+        sed -n 's/^{*"pandoc-api-version":\[\([0-9,]*\)\].*/[\1]/p' | head -1)
+  printf '%s' "${v:-[1,20]}"
+}
 
 # Guess a format from the first bytes, for stdin with no -f. Only claims what it can
 # actually tell apart; anything else falls through to markdown, which is the format
@@ -195,6 +224,7 @@ while (( $# )); do
     -S|--section)  [[ $# -ge 2 ]] || die '-S needs a section name' 64; setmode section; arg=$2; shift ;;
     -s|--search)   [[ $# -ge 2 ]] || die '-s needs search text' 64; setmode search; arg=$2; shift ;;
     -f|--format)   [[ $# -ge 2 ]] || die '-f needs a format' 64; fmt=${2,,}; shift ;;
+    -o|--output)   [[ $# -ge 2 ]] || die '-o needs an output format' 64; out_fmt=${2,,}; shift ;;
     --color)       [[ $# -ge 2 ]] || die '--color needs auto, always or never' 64
                    color=${2,,}; shift ;;
     --color=*)     color=${1#--color=}; color=${color,,} ;;
@@ -209,6 +239,14 @@ while (( $# )); do
   esac
   shift
 done
+
+if [[ $out_fmt != ansi ]]; then
+  emit x >/dev/null                       # reject an unknown format before doing work
+  [[ $mode == raw ]] && die '-o does not apply to -r: raw output is a data table' 64
+  [[ $mode == toc ]] && die '-o does not apply to -t: the outline is already plain text' 64
+  [[ $out_fmt == md ]] && ! command -v pandoc >/dev/null &&
+    die '-o md converts through pandoc, which is not installed' 3
+fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/duckeye.XXXXXX") || die 'cannot create temp directory'
 trap 'rm -rf "$tmp"' EXIT
@@ -317,11 +355,16 @@ if [[ $key == *.zim ]]; then
     # zim_suggest walks the title index, so this stays fast on a full Wikipedia.
     # zim_get_text pulls the article's bytes straight through, no filesystem hop.
     exts="webbed markdown zim"
-    premacro=$zim_macro
+    premacro+=$zim_macro
     doc="SELECT zim_to_blocks('$src', s.path) AS blocks
          FROM (SELECT path FROM zim_suggest('$src', '$pat', max_results := 1)) s"
     mode=full zim_open=1        # an opened article renders whole
   else
+    # The corpus verbs print tables of archive metadata, not documents, so there are no
+    # blocks for a serializer to act on. -S drops through to the branch above, where it
+    # opens an article and -o applies normally.
+    [[ $out_fmt == ansi ]] ||
+      die "-o applies to documents; for an archive it only makes sense with -S" 64
     case $mode in
       full)   zsql="SELECT UNNEST(zim_info('$src'));" ;;
       # OFFSET 0 blocks filter pushdown: read_zim silently ignores a pushed-down
@@ -348,7 +391,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     rest=${f#zim://}
     [[ $rest == *.zim/* ]] || die "zim:// needs an entry path: zim://ARCHIVE.zim/ENTRY" 64
     exts="webbed markdown zim"
-    premacro=$zim_macro
+    premacro+=$zim_macro
     doc="SELECT zim_to_blocks('$(q "${rest%%.zim/*}.zim")', '$(q "${rest#*.zim/}")') AS blocks" ;;
   *.md|*.markdown)
     exts="markdown"
@@ -388,7 +431,7 @@ cte="WITH doc AS MATERIALIZED ($doc)"
 # and inline children share the block's order span, so they slice along with it.
 case $mode in
   full)
-    sql="$cte SELECT db_render_blocks(blocks) FROM doc;" ;;
+    sql="$cte SELECT $(emit blocks) FROM doc;" ;;
   toc)
     sql="$cte, t AS (SELECT unnest(db_blocks_toc(blocks)) AS e FROM doc)
          SELECT string_agg(repeat('  ', e.indent) || e.title, chr(10) ORDER BY e.element_order)
@@ -402,9 +445,15 @@ case $mode in
          sec AS (SELECT h1.ord AS s, coalesce(min(h2.ord) - 1, 2147483647) AS e
                  FROM h h1 LEFT JOIN h h2 ON h2.ord > h1.ord AND h2.lvl <= h1.lvl
                  WHERE h1.title ILIKE '%$pat%' OR h1.id = '$pat'
-                 GROUP BY h1.ord)
-         SELECT db_render_blocks(db_blocks_slice(doc.blocks, sec.s, sec.e))
-         FROM doc, sec ORDER BY sec.s;" ;;
+                 GROUP BY h1.ord),
+         -- A substring can match both a chapter and a section inside it. The chapter
+         -- already carries the child, so keeping both printed it twice; drop any span
+         -- another span contains.
+         top AS (SELECT s, e FROM sec a
+                 WHERE NOT EXISTS (SELECT 1 FROM sec b
+                                   WHERE b.s <= a.s AND b.e >= a.e AND (b.s, b.e) <> (a.s, a.e)))
+         SELECT $(emit "db_blocks_reorder(flatten(list(db_blocks_slice(doc.blocks, top.s, top.e) ORDER BY top.s)))")
+         FROM doc, top HAVING count(*) > 0;" ;;
   search)
     # Spans here stop at the next heading of *any* level, so a hit reports the
     # innermost section that holds it rather than nesting parent inside child.
@@ -421,9 +470,17 @@ case $mode in
          hit AS (SELECT s, e FROM doc, span
                  WHERE db_blocks_to_text(db_blocks_slice(doc.blocks, span.s, span.e), ' ')
                        ILIKE '%$pat%')
-         SELECT db_render_blocks(db_blocks_slice(doc.blocks, hit.s, hit.e))
-         FROM doc, hit ORDER BY hit.s;" ;;
+         SELECT $(emit "db_blocks_reorder(flatten(list(db_blocks_slice(doc.blocks, hit.s, hit.e) ORDER BY hit.s)))")
+         FROM doc, hit HAVING count(*) > 0;" ;;
 esac
+
+[[ $out_fmt == html ]] && exts+=" webbed"     # duck_blocks_to_html lives there
+if [[ $out_fmt == pandoc || $out_fmt == md ]]; then
+  premacro+="CREATE OR REPLACE TEMP MACRO db_to_pandoc_json(b) AS (
+    json_object('pandoc-api-version', '$(pandoc_apiver)'::JSON,
+                'meta',   duck_blocks_to_pandoc_ast(b).meta::JSON,
+                'blocks', duck_blocks_to_pandoc_ast(b).blocks::JSON)); "
+fi
 
 load=
 for e in $DUCKEYE_BASE $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
@@ -444,6 +501,11 @@ if [[ -n $via_pandoc ]]; then
   (( st[1] )) && exit "${st[1]}"
 else
   "${duck[@]}" >"$out" || exit $?
+fi
+
+if [[ $out_fmt == md ]]; then
+  pandoc -f json -t markdown <"$out" >"$tmp/md" || die 'pandoc could not read the AST'
+  mv "$tmp/md" "$out"
 fi
 
 # duckdb prints a blank line for a single NULL row, so test for real content.

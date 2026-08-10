@@ -120,6 +120,27 @@ else
   skipping 'zip container sniffing' 'needs pandoc and unzip'
 fi
 
+echo 'output formats'
+has '-o text drops escapes'  'alpha body'   $DUCKEYE -o text -S Alpha "$TMP/doc.md"
+has '-o html is real html'   '<h2'          $DUCKEYE -o html -S Alpha "$TMP/doc.md"
+has '-o blocks is duck_blocks json' '"element_type":"heading"' \
+                                            $DUCKEYE -o blocks -S Alpha "$TMP/doc.md"
+# the AST must carry the local pandoc's api version, not the extension's hardcoded one
+has '-o pandoc stamps local api version' '"pandoc-api-version"' \
+                                            $DUCKEYE -o pandoc -S Alpha "$TMP/doc.md"
+if command -v pandoc >/dev/null; then
+  has '-o pandoc is readable by pandoc' 'Alpha' \
+      bash -c "$DUCKEYE -o pandoc -S Alpha '$TMP/doc.md' | pandoc -f json -t markdown"
+  has '-o md converts a section'  '## Alpha' $DUCKEYE -o md -S Alpha "$TMP/doc.md"
+  # -o composes with -S, which is the point: extract, then convert
+  has '-o md keeps inline code'   '`'        bash -c "printf '# T\n\n## S\n\nrun \`x\` now\n' | $DUCKEYE -o md -S S -"
+else
+  skipping '-o md' 'pandoc not installed'
+fi
+no  '-o rejects -r'                         $DUCKEYE -o md -r "$TMP/d.parquet"
+no  '-o rejects -t'                         $DUCKEYE -o md -t "$TMP/doc.md"
+no  '-o rejects an unknown format'          $DUCKEYE -o bogus "$TMP/doc.md"
+
 echo 'colour'
 esc=$(printf '\033')
 # the helpers strip SGR, so these check the raw bytes instead

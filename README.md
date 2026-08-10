@@ -140,6 +140,39 @@ only ever appears inside `**bold**` or a fenced block is still found.
 Both match case-insensitively as substrings, both accept SQL `LIKE` wildcards (`%`, `_`),
 and `-S` also matches a heading's slug id exactly.
 
+## Converting, not just reading
+
+`-o` writes the document through duck_blocks' own serializers rather than the terminal
+renderer:
+
+| `-o` | Output |
+|---|---|
+| `ansi` | styled terminal text (default) |
+| `text` | plain text |
+| `md` | markdown, via a Pandoc AST |
+| `html` | HTML, via `duck_blocks_to_html` |
+| `pandoc` | a Pandoc AST, ready to pipe into `pandoc -f json` |
+| `blocks` | the duck_blocks structures themselves, as JSON |
+
+The point is that it runs **after** `-S` and `-s`, so it converts what you selected
+rather than the whole file — which is the thing pandoc alone cannot do:
+
+```console
+$ duckeye -S Usage -o md proposal.docx
+## Usage
+
+usage body
+
+$ duckeye -s 'rate limit' -o md api-spec.epub > excerpt.md
+$ duckeye -S Install -o html README.md
+$ duckeye -o pandoc spec.rst | pandoc -f json -t docx -o spec.docx
+```
+
+`-o pandoc` stamps the `pandoc-api-version` your local pandoc actually speaks, since the
+extension hardcodes an old one (see below). `-o` doesn't apply to `-r` (that output is a
+data table), to `-t` (already plain text), or to an archive's corpus listings — but it
+does apply to `-S` on an archive, which opens a document.
+
 ## Colour
 
 Colour is on when a terminal will actually see it: stdout is a tty, or `-p` is handing
@@ -270,6 +303,7 @@ it to `DUCKEYE_EXTS`.
 -r, --raw              read as data: SELECT * FROM FILE
 -f, --format FMT       treat input as FMT instead of guessing; under -r,
                        names a DuckDB reader (csv, parquet, json)
+-o, --output FMT       ansi (default), text, md, html, pandoc, blocks
     --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies -r
 -n, --limit N          cap rows in any listing (-r, and .zim -t/-s)
@@ -317,6 +351,18 @@ against the libraries, not duckeye:
 - **`-t` on a ZIM archive works around a `read_zim` pushdown bug** that silently ignores
   a `mimetype` filter and returns every row
   ([duckdb_zim#29](https://github.com/teaguesterling/duckdb_zim/issues/29)).
+- **`-o pandoc` needs its version stamp rewritten**, which duckeye does for you:
+  `duck_blocks_to_pandoc_ast` hardcodes `pandoc-api-version [1,20]`, which pandoc 3.x
+  rejects outright
+  ([duck_block_utils#22](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/22)).
+- **`-o md` and `-o pandoc` fail on documents containing tables**, because the AST
+  encodes `Table` with duck_blocks' `{headers, rows}` object where pandoc expects an
+  array
+  ([duck_block_utils#23](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/23)).
+  `-o html` and `-o text` are unaffected.
+- **`-o text` runs words together** around inline markup, since `db_blocks_to_text`
+  concatenates a block's inline children rather than walking them
+  ([duck_block_utils#20](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/20)).
 
 ## License
 

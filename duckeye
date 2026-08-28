@@ -20,7 +20,7 @@ set -uo pipefail
 
 # --init only. Separate from the LOAD lists above because installing needs to
 # know which repository each extension comes from; LOAD does not.
-: "${DUCKEYE_OFFICIAL:=}"
+: "${DUCKEYE_OFFICIAL:=http aws}"
 : "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim}"
 
 usage() {
@@ -276,7 +276,12 @@ if [[ $f == - || ( -z $f && ! -t 0 ) ]]; then
 fi
 
 [[ -n $f ]] || { usage >&2; exit 64; }
-[[ $f == zim://* || -r $f ]] || die "cannot read $f"   # zim:// resolves inside the archive
+# Allow HTTP, HTTPS, and S3 URLs; load appropriate extensions
+if [[ $f == zim://* || -r $f || $f == http*://* || $f == https*://* || $f == s3*://* ]]; then
+    :
+else
+    die "cannot read $f"   # zim:// resolves inside the archive
+fi
 
 # Dispatch on -f when given, otherwise on the filename. Synthesising an extension lets
 # one table below serve both, so a format name is exactly the extension that implies it.
@@ -385,6 +390,7 @@ if [[ $key == *.zim ]]; then
   fi
 fi
 
+
 [[ -n $doc ]] ||                   # already resolved above (an opened zim article)
 case "$key" in                     # NB: patterns unquoted, or globbing is disabled
   zim://*)                         # zim://<archive>.zim/<entry> names one entry
@@ -398,7 +404,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     doc="SELECT list(b) AS blocks FROM read_markdown_blocks('$src') b" ;;
   *.htm|*.html)
     exts="webbed"                  # webbed has no read_html_blocks; scalar over read_text
-    doc="SELECT html_to_duck_blocks(content) AS blocks FROM read_text('$src')" ;;
+    doc="SELECT html_to_duck_blocks(html) AS blocks FROM read_html_objects('$src')" ;;
   *.json)                          # assumed to be a Pandoc AST
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;
   *.docx|*.odt|*.epub|*.rst|*.org|*.tex|*.ipynb|*.rtf|*.textile|*.man|*.mediawiki|\
@@ -418,9 +424,20 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     # read_pandoc_ast() silently returns [] on a pipe (constant-folded double-read,
     # teaguesterling/duckdb_duck_block_utils#18), so stdin goes via read_text().
     doc="SELECT pandoc_ast_to_blocks(content) AS blocks FROM read_text('/dev/stdin')" ;;
+  http*://*)
+    # Assume http(s):// with no extension is HTML
+    exts="webbed"                  # webbed has no read_html_blocks; scalar over read_text
+    doc="SELECT html_to_duck_blocks(html) AS blocks FROM read_html_objects('$src')" ;;
   *)
     die "unsupported extension: $f" 2 ;;
 esac
+
+
+if [[ $key == "http*://*" ]]; then
+  exts="$exts http"
+elif [[ $key == "s3://*" ]]; then
+  exts="$exts aws http"
+fi
 
 # MATERIALIZED: the section/search queries reference the document more than once,
 # and the pandoc path's source is stdin, which can only be read one time.

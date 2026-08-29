@@ -44,15 +44,17 @@ Options:
                          TEXT, headings and code blocks included
   -r, --raw              read FILE as data, not prose: SELECT * FROM FILE
                          rendered as a table (parquet, csv, json, xlsx, ...)
+  -z, --summary          summarize data columns via DuckDB SUMMARIZE; implies -r
+  -Z, --profile          smart column profile with sparklines & category frequencies
   -o, --output FMT       write the document as ansi (default), text, md, html,
                          pandoc (a Pandoc AST) or blocks (duck_blocks JSON).
                          Applies after -S/-s, so a section converts on its own.
-                         Not for -r, -t, or an archive's corpus listings
+                         Not for -r, -z, -Z, -t, or an archive's corpus listings
   -f, --format FMT       treat the input as FMT rather than guessing from the
                          filename: md, html, pdf, rst, docx, man, 1, tex, zim, ...
-                         Under -r, FMT names a DuckDB reader: csv, parquet, json, pdf
-  -w, --where EXPR       SQL WHERE clause for -r; implies -r
-  -n, --limit N          cap the rows any listing prints (-r, and .zim -t/-s)
+                         Under -r, FMT names a DuckDB reader: csv, parquet, json, pdf, yaml, ...
+  -w, --where EXPR       SQL WHERE clause for data modes (-r, -z, -Z); implies -r
+  -n, --limit N          cap the rows any listing prints (-r, -z, -Z, and .zim -t/-s)
       --color WHEN       auto (default), always, never. auto means colour when
                          stdout is a terminal, or when -p is paging through
                          less -R. $NO_COLOR disables it
@@ -60,8 +62,8 @@ Options:
   -h, --help             show this help
 
 NAME and TEXT match case-insensitively as substrings; SQL LIKE wildcards
-(% and _) work. -S also matches a heading's slug id exactly. -t, -S, -s and -r
-are mutually exclusive. -S and -s exit 1 when nothing matches.
+(% and _) work. -S also matches a heading's slug id exactly. -t, -S, -s, -r, -z
+and -Z are mutually exclusive. -S and -s exit 1 when nothing matches.
 
 Formats:
   .md .markdown        markdown extension
@@ -167,7 +169,7 @@ want_color() {
   [[ -n $do_page ]] && return 0
   [[ -t 1 ]]
 }
-setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -t, -S, -s, -r' 64; mode=$1; }
+setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -t, -S, -s, -r, -z, -Z' 64; mode=$1; }
 
 # duck_blocks_to_pandoc_ast stamps pandoc-api-version [1,20], which pandoc 3.x refuses
 # outright (teaguesterling/duckdb_duck_block_utils#22). The encoding itself is fine, so
@@ -226,6 +228,8 @@ while (( $# )); do
     --init)        init; exit $? ;;
     -t|--toc)      setmode toc ;;
     -r|--raw)      setmode raw ;;
+    -z|--summary|--summarize) setmode summary ;;
+    -Z|--profile|--smart-summary) setmode profile ;;
     -S|--section)  [[ $# -ge 2 ]] || die '-S needs a section name' 64; setmode section; arg=$2; shift ;;
     -s|--search)   [[ $# -ge 2 ]] || die '-s needs search text' 64; setmode search; arg=$2; shift ;;
     -f|--format)   [[ $# -ge 2 ]] || die '-f needs a format' 64; fmt=${2,,}; shift ;;
@@ -233,7 +237,9 @@ while (( $# )); do
     --color)       [[ $# -ge 2 ]] || die '--color needs auto, always or never' 64
                    color=${2,,}; shift ;;
     --color=*)     color=${1#--color=}; color=${color,,} ;;
-    -w|--where)    [[ $# -ge 2 ]] || die '-w needs a WHERE expression' 64; setmode raw; where=$2; shift ;;
+    -w|--where)    [[ $# -ge 2 ]] || die '-w needs a WHERE expression' 64
+                   [[ $mode == full ]] && setmode raw
+                   where=$2; shift ;;
     -n|--limit)    [[ $# -ge 2 ]] || die '-n needs a row count' 64
                    [[ $2 =~ ^[0-9]+$ ]] || die "-n needs a non-negative integer, got '$2'" 64
                    limit=$2; shift ;;
@@ -262,7 +268,7 @@ fi
 
 if [[ $out_fmt != ansi ]]; then
   emit x >/dev/null                       # reject an unknown format before doing work
-  [[ $mode == raw ]] && die '-o does not apply to -r: raw output is a data table' 64
+  [[ $mode == raw || $mode == summary || $mode == profile ]] && die '-o does not apply to data modes: output is a data table' 64
   [[ $mode == toc ]] && die '-o does not apply to -t: the outline is already plain text' 64
   [[ $out_fmt == md ]] && ! command -v pandoc >/dev/null &&
     die '-o md converts through pandoc, which is not installed' 3
@@ -348,10 +354,9 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
                       || ': ' || entry || ')')
   END);"
 
-# Raw mode is a plain scan, so it skips the extension table below and never
-# loads duck_block_utils: DuckDB's own box renderer streams where the ANSI block
-# renderer goes superlinear, and it costs nothing when duck_blocks isn't needed.
-if [[ $mode == raw ]]; then
+# Data modes (raw, summary, profile) operate directly on tables/scans without duck_block_utils:
+# DuckDB's own box renderer streams and emits clean tabular output.
+if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   # Bare '<path>' leans on DuckDB's replacement scan, which reads the extension — so a
   # spooled stdin, having none, needs the reader named. That is what -f supplies here.
   case $fmt in
@@ -392,12 +397,110 @@ if [[ $mode == raw ]]; then
     lines)             from="read_lines('$src')"; exts="read_lines" ;;
     *)                 from="read_$fmt('$src')" ;;   # DuckDB reports an unknown reader
   esac
-  sql="SELECT * FROM $from"
-  [[ -n $where ]] && sql+=" WHERE $where"     # arbitrary SQL, spliced verbatim
-  [[ -n $limit ]] && sql+=" LIMIT $limit"
+
+  target_query="SELECT * FROM $from"
+  [[ -n $where ]] && target_query+=" WHERE $where"
+  [[ -n $limit ]] && target_query+=" LIMIT $limit"
+
+  if [[ $mode == summary ]]; then
+    sql="SUMMARIZE ($target_query);"
+  elif [[ $mode == profile ]]; then
+    exts+=" textplot"
+    load=
+    for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
+    cols_raw=$(duckdb -dark-mode -noheader -csv -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name, column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
+
+    term_cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
+    [[ $term_cols =~ ^[0-9]+$ && $term_cols -gt 0 ]] || term_cols=120
+    if [[ $term_cols -le 85 ]]; then
+      summary_budget=$(( term_cols - 68 > 10 ? term_cols - 68 : 12 ))
+      cat_limit=1
+      cat_max_len=$(( summary_budget - 8 > 6 ? summary_budget - 8 : 6 ))
+    elif [[ $term_cols -le 115 ]]; then
+      summary_budget=$(( term_cols - 72 ))
+      cat_limit=2
+      cat_max_len=$(( summary_budget / 2 - 8 > 8 ? summary_budget / 2 - 8 : 8 ))
+    else
+      summary_budget=$(( term_cols - 75 ))
+      cat_limit=3
+      cat_max_len=$(( summary_budget / 3 - 6 > 10 ? summary_budget / 3 - 6 : 10 ))
+    fi
+
+    queries=()
+    while IFS=, read -r col type; do
+      [[ -z $col ]] && continue
+      col="${col%\"}"; col="${col#\"}"
+      type="${type%\"}"; type="${type#\"}"
+      col_esc=$(printf '%s' "${col//\'/\'\'}")
+      col_id="\"$col_esc\""
+
+      case "${type^^}" in
+        TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|UHUGEINT|FLOAT|DOUBLE|DECIMAL*|REAL|NUMERIC)
+          q="SELECT
+  '$col_esc' AS \"column\",
+  '$type' AS \"type\",
+  count($col_id)::BIGINT AS non_null,
+  (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
+  count(DISTINCT $col_id)::BIGINT AS approx_unique,
+  COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+     SELECT b.i AS bin, COALESCE(count(d.$col_id), 0)::DOUBLE AS cnt
+     FROM range(10) b(i)
+     LEFT JOIN (
+       SELECT floor(9.999 * ($col_id - stats.min_v) / NULLIF(stats.max_v - stats.min_v, 0))::INT AS bin, $col_id
+       FROM __duckeye_src, (SELECT min($col_id) AS min_v, max($col_id) AS max_v FROM __duckeye_src) stats
+       WHERE $col_id IS NOT NULL
+     ) d ON b.i = d.bin
+     GROUP BY b.i
+  )), '')::VARCHAR AS distribution,
+  ('min: ' || COALESCE(min($col_id)::VARCHAR, 'NULL') || ', avg: ' || COALESCE(round(avg($col_id), 2)::VARCHAR, 'NULL') || ', max: ' || COALESCE(max($col_id)::VARCHAR, 'NULL'))::VARCHAR AS summary
+FROM __duckeye_src"
+          ;;
+        *\[\]|LIST*|STRUCT*|MAP*|JSON)
+          q="SELECT
+  '$col_esc' AS \"column\",
+  '$type' AS \"type\",
+  count($col_id)::BIGINT AS non_null,
+  (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
+  count(DISTINCT $col_id)::BIGINT AS approx_unique,
+  ''::VARCHAR AS distribution,
+  COALESCE(('e.g. ' || substr(any_value($col_id)::VARCHAR, 1, $summary_budget)), '')::VARCHAR AS summary
+FROM __duckeye_src"
+          ;;
+        *)
+          q="SELECT
+  '$col_esc' AS \"column\",
+  '$type' AS \"type\",
+  count($col_id)::BIGINT AS non_null,
+  (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
+  count(DISTINCT $col_id)::BIGINT AS approx_unique,
+  ''::VARCHAR AS distribution,
+  COALESCE((SELECT string_agg((CASE WHEN length(k) > $cat_max_len THEN substr(k, 1, $cat_max_len - 3) || '...' ELSE k END) || ' (' || round(100.0 * v / NULLIF((SELECT count(*) FROM __duckeye_src), 0), 1) || '%)', ', ' ORDER BY v DESC)
+   FROM (
+     SELECT unnest(map_keys(histogram($col_id::VARCHAR)))::VARCHAR AS k,
+            unnest(map_values(histogram($col_id::VARCHAR))) AS v
+     FROM __duckeye_src
+     LIMIT $cat_limit
+   )
+  ), '')::VARCHAR AS summary
+FROM __duckeye_src"
+          ;;
+      esac
+      queries+=("$q")
+    done <<< "$cols_raw"
+
+    sql="CREATE VIEW __duckeye_src AS $target_query; "
+    for i in "${!queries[@]}"; do
+      [[ $i -gt 0 ]] && sql+=" UNION ALL "
+      sql+="${queries[$i]}"
+    done
+    sql+=";"
+  else
+    sql="$target_query;"
+  fi
+
   load=
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
-  duck=(duckdb -box -s "$load" -s "$sql;")
+  duck=(duckdb -dark-mode -box -s "$load" -s "$sql;")
   page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
   "${duck[@]}" | "${page[@]}"
   exit "${PIPESTATUS[0]}"
@@ -437,7 +540,7 @@ if [[ $key == *.zim ]]; then
     load="LOAD zim; "
     for e in $DUCKEYE_EXTS; do load+="LOAD $e; "; done
     page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
-    duckdb -box -s "$load" -s "$zsql" | "${page[@]}"
+    duckdb -dark-mode -box -s "$load" -s "$zsql" | "${page[@]}"
     exit "${PIPESTATUS[0]}"
   fi
 fi

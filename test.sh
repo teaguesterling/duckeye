@@ -225,6 +225,16 @@ has 'raw reads a named parquet from stdin' 'name_1' \
     bash -c "$DUCKEYE -r -f parquet - <'$TMP/d.parquet'"
 has 'raw reads a named csv from stdin'     'name_4' \
     bash -c "$DUCKEYE -f csv -w 'id > 3' - <'$TMP/d.csv'"
+has 'summary with -z' 'null_percentage' $DUCKEYE -z "$TMP/d.parquet"
+has 'profile with -Z' 'distribution'    $DUCKEYE -Z "$TMP/d.parquet"
+has 'profile with -Z and -w' 'name_5'   $DUCKEYE -Z -w 'score > 6' "$TMP/d.parquet"
+w80=$(COLUMNS=80 $DUCKEYE -Z "$TMP/d.parquet" | wc -L)
+w140=$(COLUMNS=140 $DUCKEYE -Z "$TMP/d.parquet" | wc -L)
+if [[ $w80 -le $w140 ]]; then
+  pass=$((pass+1)); echo '  ok   profile scales with terminal width'
+else
+  fail=$((fail+1)); echo "  FAIL profile width scaling: w80=$w80 > w140=$w140"
+fi
 no  'raw stdin refuses to guess'           bash -c "$DUCKEYE -r - <'$TMP/d.parquet'"
 
 echo 'pandoc formats'

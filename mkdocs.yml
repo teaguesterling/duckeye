@@ -1,0 +1,64 @@
+site_name: duckeye
+site_description: Pretty-print documents and explore data in the terminal via DuckDB
+site_url: https://duckeye.readthedocs.io/
+
+repo_name: teaguesterling/duckeye
+repo_url: https://github.com/teaguesterling/duckeye
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - tables
+  - admonition
+  - pymdownx.details
+  - toc:
+      permalink: true
+
+nav:
+  - Overview: index.md
+  - Installation: installation.md
+  - Supported Formats: formats.md
+  - Document Navigation: navigation.md
+  - Data & Profiling: data_profiling.md
+  - ZIM Archives: zim_archives.md
+  - CLI Reference: cli_reference.md
+  - AI Agent Skill: skill.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/teaguesterling/duckeye

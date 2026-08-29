@@ -61,6 +61,9 @@ duckeye -o blocks FILE              # duck_blocks JSON
 ```sh
 duckeye -r data.parquet             # tabular view (DuckDB box renderer)
 duckeye -r data.csv
+duckeye -z data.parquet             # quick column summary (min, max, avg, quantiles, nulls)
+duckeye -Z data.parquet             # smart column profile (sparklines, category frequencies, null %)
+duckeye -Z -w "category = 'tools'" products.parquet  # profile filtered subset
 duckeye -r config.yaml              # YAML as data table
 duckeye -r Cargo.toml               # TOML configuration table
 duckeye -r spreadsheet.xlsx         # Excel spreadsheet
@@ -68,7 +71,7 @@ duckeye -r report.pdf               # inspect PDF pages as data table
 duckeye -r archive.zip              # inspect zip archive contents
 duckeye -r .git                     # inspect git commit log
 duckeye -r -f lines script.sh       # inspect file with line numbers & offsets
-duckeye -w "score > 90" data.parquet  # -w implies -r, full SQL WHERE syntax
+duckeye -w "score > 90" data.parquet  # -w implies data mode, full SQL WHERE syntax
 duckeye -r -n 20 huge.csv           # limit rows
 ```
 

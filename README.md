@@ -204,25 +204,53 @@ done
 Errors are separated too: `64` for a usage mistake, `2` for an unsupported extension,
 `3` when a format needs `pandoc` and it isn't installed, `1` for everything else.
 
-## Data files
+## Data files and profiling
 
-`-r` reads a file as data rather than prose — anything DuckDB can open:
+`-r` reads a file as data rather than prose — parquet, csv, json, yaml, toml, xlsx, zip contents, git commits, and line-indexed text:
 
 ```console
 $ duckeye -r events.parquet
 $ duckeye -r results.csv
-$ duckeye -r records.ndjson
-$ duckeye -w "level = 'ERROR'" events.parquet     # -w implies -r
+$ duckeye -r config.yaml
+$ duckeye -r Cargo.toml
+$ duckeye -r spreadsheet.xlsx
+$ duckeye -r archive.zip                           # inspect files within a zip
+$ duckeye -r .git                                  # query git commit history
+$ duckeye -r -f lines script.sh                    # table with line numbers & offsets
+$ duckeye -w "level = 'ERROR'" events.parquet     # -w implies data mode
 $ duckeye -r -n 20 huge.csv                       # first 20 rows
 ```
 
-Raw mode prints through DuckDB's own box renderer rather than `duck_blocks`. That's
-deliberate: it streams a million rows in about a second where the ANSI block renderer
-stalls past twenty thousand, and it emits plain UTF-8, so it pipes into `grep` and `awk`
-like any other tool.
+Raw mode prints through DuckDB's own box renderer rather than `duck_blocks`. It streams
+a million rows in about a second and emits plain UTF-8, so it pipes cleanly into unix pipelines.
 
-`-w` is spliced into the query verbatim, so the whole SQL expression language is
-available:
+### Native Summary (`-z`) and Smart Profiling (`-Z`)
+
+When inspecting unfamiliar datasets, `-z` and `-Z` summarize column distributions:
+
+```console
+# Fast DuckDB SUMMARIZE breakdown (min, max, avg, quantiles, null %)
+$ duckeye -z data.parquet
+
+# Smart column profile with sparklines, category distributions, and null %
+$ duckeye -Z data.parquet
+┌──────────┬─────────┬──────────┬──────────┬───────────────┬──────────────────────┬────────────────────────────────────────────────────────┐
+│  column  │  type   │ non_null │ null_pct │ approx_unique │     distribution     │                        summary                         │
+├──────────┼─────────┼──────────┼──────────┼───────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
+│ id       │ BIGINT  │ 1000     │ 0.0%     │ 1000          │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │ min: 1, avg: 500.5, max: 1000                          │
+│ category │ VARCHAR │ 1000     │ 0.0%     │ 3             │                      │ electronics (40.0%), groceries (40.0%), tools (20.0%)  │
+│ price    │ DOUBLE  │ 980      │ 2.0%     │ 850           │ ██                ▄▄ │ min: 0.99, avg: 45.20, max: 1299.99                    │
+│ in_stock │ BOOLEAN │ 1000     │ 0.0%     │ 2             │                      │ true (85.0%), false (15.0%)                            │
+│ tags     │ VARCHAR │ 1000     │ 0.0%     │ 45            │                      │ [sale] (25.0%), [new] (20.0%), [clearance] (10.0%)     │
+└──────────┴─────────┴──────────┴──────────┴───────────────┴──────────────────────┴────────────────────────────────────────────────────────┘
+
+# Profile a filtered slice
+$ duckeye -Z -w "category = 'electronics'" data.parquet
+```
+
+`-Z` inspects the terminal width (`tput cols` or `$COLUMNS`) and budget-allocates character space for the `summary` column, automatically scaling category frequencies and truncating strings so output never runs off screen.
+
+`-w` is spliced into the query verbatim, so the whole SQL expression language is available:
 
 ```console
 $ duckeye -w "ts > '2026-01-01' AND status NOT IN (200, 204)" access.parquet
@@ -305,17 +333,19 @@ it to `DUCKEYE_EXTS`.
 -S, --section NAME     one section
 -s, --search TEXT      matching sections
 -r, --raw              read as data: SELECT * FROM FILE
--f, --format FMT       treat input as FMT instead of guessing; under -r,
+-z, --summary          native column summary (DuckDB SUMMARIZE)
+-Z, --profile          smart column profile with sparklines & category frequencies
+-f, --format FMT       treat input as FMT instead of guessing; under data modes,
                        names a DuckDB reader (csv, parquet, json, yaml, toml, xlsx, pdf, lines, zip, git)
 -o, --output FMT       ansi (default), text, md, html, pandoc, blocks
     --color WHEN       auto (default), always, never
--w, --where EXPR       SQL WHERE clause; implies -r
--n, --limit N          cap rows in any listing (-r, and .zim -t/-s)
+-w, --where EXPR       SQL WHERE clause; implies data mode
+-n, --limit N          cap rows in any listing (-r, -z, -Z, and .zim -t/-s)
     --init             install the DuckDB extensions
 -h, --help             full help
 ```
 
-`-t`, `-S`, `-s` and `-r` are mutually exclusive.
+`-t`, `-S`, `-s`, `-r`, `-z` and `-Z` are mutually exclusive.
 
 ## Environment
 
@@ -326,6 +356,7 @@ it to `DUCKEYE_EXTS`.
 | `DUCKEYE_PAGER` | pager `-p` uses (default `less -R`) |
 | `DUCKEYE_OFFICIAL` | `--init` installs these from the core repo |
 | `DUCKEYE_COMMUNITY` | `--init` installs these from the community repo |
+| `COLUMNS` | overrides terminal column width for table rendering and profiling |
 
 ## Tests
 

@@ -2,7 +2,7 @@
 name: duckeye
 description: >-
   Use this skill when the user asks about reading, rendering, searching,
-  navigating, or converting documents (markdown, HTML, DOCX, EPUB, LaTeX,
+  navigating, or converting documents (markdown, HTML, PDF, DOCX, EPUB, LaTeX,
   Jupyter notebooks, man pages, ZIM archives) in the terminal, or when the
   user wants to inspect structured data files (parquet, CSV, JSON) from the
   command line. Also activate when the user mentions duckeye, dep, or
@@ -25,7 +25,8 @@ dispatches to DuckDB extensions for parsing and renders via `duck_block_utils`.
 ```sh
 duckeye FILE                        # render to stdout, unpaged
 duckeye -p FILE                     # paged (alias: dep FILE)
-cat FILE | duckeye -                # read from stdin (format sniffed)
+duckeye -P 1-5 manual.pdf           # page range of a PDF
+cat FILE | duckeye -                # read from stdin (format sniffed, including PDF)
 duckeye -f html page.txt            # override format detection
 ```
 
@@ -60,6 +61,13 @@ duckeye -o blocks FILE              # duck_blocks JSON
 ```sh
 duckeye -r data.parquet             # tabular view (DuckDB box renderer)
 duckeye -r data.csv
+duckeye -r config.yaml              # YAML as data table
+duckeye -r Cargo.toml               # TOML configuration table
+duckeye -r spreadsheet.xlsx         # Excel spreadsheet
+duckeye -r report.pdf               # inspect PDF pages as data table
+duckeye -r archive.zip              # inspect zip archive contents
+duckeye -r .git                     # inspect git commit log
+duckeye -r -f lines script.sh       # inspect file with line numbers & offsets
 duckeye -w "score > 90" data.parquet  # -w implies -r, full SQL WHERE syntax
 duckeye -r -n 20 huge.csv           # limit rows
 ```
@@ -72,6 +80,7 @@ duckeye -t wiki.zim                 # list all articles
 duckeye -s 'photosynthesis' wiki.zim  # full-text Xapian search
 duckeye -S 'Chlorophyll' wiki.zim   # open an article
 duckeye -t 'zim://wiki.zim/Chlorophyll'  # TOC within one article
+duckeye 'zim://wiki.zim/_assets_/doc.pdf' # read embedded PDFs in ZIM
 ```
 
 ### Piping and scripting
@@ -98,19 +107,22 @@ duckeye -S Results -o md paper.docx > results.md
 2. **Use `-t` first to discover structure**, then `-S` to extract specific
    sections. This avoids dumping entire large documents.
 
-3. **Prefer duckeye over `cat` for non-plaintext files** — DOCX, EPUB, HTML,
+3. **Prefer duckeye over `cat` for non-plaintext files** — PDF, DOCX, EPUB, HTML,
    LaTeX, notebooks, and man pages are all supported and rendered as readable
    text.
 
-4. **For data inspection, use `-r`** rather than raw `duckdb` commands — duckeye
+4. **For PDFs, use `-P 1-5`** to read specific page ranges, or `-S` to jump
+   to specific sections based on the document's outline.
+
+5. **For data inspection, use `-r`** rather than raw `duckdb` commands — duckeye
    handles extension loading automatically.
 
-5. **Stdin requires `-f` under `-r`** — data format cannot be safely sniffed.
-   Document formats (md, html, docx) are sniffed automatically from magic bytes.
+6. **Stdin requires `-f` under `-r`** — data format cannot be safely sniffed.
+   Document formats (md, html, pdf, docx) are sniffed automatically from magic bytes.
 
-6. **`-S` and `-s` exit 1 on no match** — use this in conditionals.
+7. **`-S` and `-s` exit 1 on no match** — use this in conditionals.
 
-7. **Section extraction is hierarchical**: asking for a parent heading with `-S`
+8. **Section extraction is hierarchical**: asking for a parent heading with `-S`
    includes all its children. `-s` does the opposite: it reports only the
    innermost section containing the match.
 
@@ -122,10 +134,11 @@ duckeye -S Results -o md paper.docx > results.md
 |---|---|
 | `.md` `.markdown` | `markdown` DuckDB extension |
 | `.htm` `.html` | `webbed` DuckDB extension |
+| `.pdf` | `pdf` DuckDB extension |
 | `.json` | Pandoc AST |
-| `.zim`, `zim://…` | `zim` DuckDB extension |
+| `.zim`, `zim://…` | `zim` DuckDB extension (handles HTML, markdown, and embedded PDFs) |
 | `.docx` `.odt` `.epub` `.rst` `.org` `.tex` `.ipynb` `.rtf` `.textile` `.mediawiki` `.man` `.1`–`.9` | `pandoc(1)` |
-| anything under `-r` | DuckDB replacement scan (parquet, csv, json, xlsx, …) |
+| anything under `-r` | DuckDB reader (parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, …) |
 
 ---
 

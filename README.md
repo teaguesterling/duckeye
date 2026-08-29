@@ -1,6 +1,6 @@
 # duckeye
 
-Read documents in the terminal. Markdown, HTML, DOCX, EPUB, LaTeX, Jupyter notebooks,
+Read documents in the terminal. Markdown, HTML, PDF, DOCX, EPUB, LaTeX, Jupyter notebooks,
 man pages, an offline Wikipedia — parsed by [DuckDB](https://duckdb.org), rendered by
 [`duck_block_utils`](https://github.com/teaguesterling/duckdb_duck_block_utils).
 
@@ -10,6 +10,7 @@ $ zcat ls.1.gz | duckeye -t -               # or read a pipe, format sniffed
 $ dep README.md                             # same, paged
 $ duckeye -t spec.md                        # outline it
 $ duckeye -S 'Runbook Steps' spec.md        # one section
+$ duckeye -P 1-5 manual.pdf                 # page range of a PDF
 $ duckeye -s tmux spec.md                   # every section mentioning tmux
 $ duckeye -r data.parquet                   # look at data, not prose
 $ duckeye -s photosynthesis wikipedia.zim   # search 19M offline articles
@@ -22,19 +23,20 @@ extension, with `pandoc` filling the gaps.
 
 ```sh
 git clone https://github.com/teaguesterling/duckeye.git
-ln -s "$PWD/duckeye/duckeye" ~/.local/bin/duckeye
-duckeye --init                              # install the DuckDB extensions
+./duckeye/install.sh
 ```
 
-`--init` reports each extension and which repository it came from, and tells you whether
-`pandoc` is present. It needs [`duckdb`](https://duckdb.org/docs/installation/) already
-on your `PATH`.
+The install script symlinks the `duckeye` binary into `~/.local/bin`, runs
+`--init` to install the DuckDB extensions, and auto-detects any AI agent
+configs to install the [skill](#ai-agent-integration) into. Use `--global` for
+`/usr/local/bin`, `--no-bin` to skip the binary, or `--help` for the full list
+of flags.
 
-Output is unpaged by default so duckeye composes in pipelines. Add the alias for a paged
-reading view:
+Or install manually:
 
 ```sh
-alias dep='duckeye -p'
+ln -s "$PWD/duckeye/duckeye" ~/.local/bin/duckeye
+duckeye --init
 ```
 
 ---
@@ -279,11 +281,12 @@ hundreds of thousands of entries with no mimetype at all.
 |---|---|
 | `.md` `.markdown` | [`markdown`](https://github.com/teaguesterling/duckdb_markdown) |
 | `.htm` `.html` | [`webbed`](https://github.com/teaguesterling/duckdb_webbed) |
+| `.pdf` | [`pdf`](https://github.com/asubbarao/duckdb-pdf) |
 | `.json` | Pandoc AST |
-| `.zim`, `zim://…` | [`zim`](https://github.com/teaguesterling/duckdb_zim) |
+| `.zim`, `zim://…` | [`zim`](https://github.com/teaguesterling/duckdb_zim) (handles HTML, markdown, and embedded PDFs) |
 | `.docx` `.odt` `.epub` `.rst` `.org` `.tex` `.ipynb` `.rtf` `.textile` `.mediawiki` | `pandoc(1)` |
 | `.man`, `.1`–`.9` | `pandoc(1)` — man page source |
-| anything DuckDB reads, under `-r` | parquet, csv, json, xlsx, … |
+| anything DuckDB reads, under `-r` | parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, … |
 | standard input | sniffed, or named with `-f` |
 
 duckeye names the pandoc reader explicitly rather than letting pandoc infer it from the
@@ -297,12 +300,13 @@ it to `DUCKEYE_EXTS`.
 
 ```
 -p, --page             page through $DUCKEYE_PAGER (default: less -R)
+-P, --pages RANGE      page or page range for PDFs (e.g. 3, 1-5, 1..5, -10, 5-)
 -t, --toc              table of contents
 -S, --section NAME     one section
 -s, --search TEXT      matching sections
 -r, --raw              read as data: SELECT * FROM FILE
 -f, --format FMT       treat input as FMT instead of guessing; under -r,
-                       names a DuckDB reader (csv, parquet, json)
+                       names a DuckDB reader (csv, parquet, json, yaml, toml, xlsx, pdf, lines, zip, git)
 -o, --output FMT       ansi (default), text, md, html, pandoc, blocks
     --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies -r
@@ -332,6 +336,20 @@ DUCKEYE_TEST_ZIM=~/wikipedia.zim ./test.sh    # include the ZIM cases
 
 Covers every format and mode against fixtures it generates, plus the error paths and the
 quoting edge cases. ZIM cases skip unless `DUCKEYE_TEST_ZIM` points at an archive.
+
+## AI agent integration
+
+A [skill file](skills/duckeye/SKILL.md) teaches AI coding agents how to use
+duckeye. `install.sh` auto-detects and installs it for any agent harness it
+finds. To install or skip specific agents:
+
+```sh
+./install.sh --no-bin --claude --no-agy   # skills only, Claude but not agy
+./install.sh --uninstall                  # remove everything
+```
+
+Supported agents: Antigravity (`--agy`), Claude Code (`--claude`),
+OpenCode (`--opencode`).
 
 ## Known upstream issues
 

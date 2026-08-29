@@ -20,8 +20,8 @@ set -uo pipefail
 
 # --init only. Separate from the LOAD lists above because installing needs to
 # know which repository each extension comes from; LOAD does not.
-: "${DUCKEYE_OFFICIAL:=http aws}"
-: "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim}"
+: "${DUCKEYE_OFFICIAL:=http aws excel}"
+: "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot}"
 
 usage() {
   cat <<'EOF'
@@ -34,6 +34,7 @@ input. Piped input is sniffed for its format; -f overrides the guess.
 
 Options:
   -p, --page             page the output through $DUCKEYE_PAGER (default: less -R)
+  -P, --pages RANGE      page or page range for PDFs (e.g. 3, 1-5, 1..5, -10, 5-)
   -t, --toc              print the table of contents, one heading per line,
                          indented by level (feeds straight into -S)
   -S, --section NAME     print only the section whose heading matches NAME,
@@ -48,8 +49,8 @@ Options:
                          Applies after -S/-s, so a section converts on its own.
                          Not for -r, -t, or an archive's corpus listings
   -f, --format FMT       treat the input as FMT rather than guessing from the
-                         filename: md, html, rst, docx, man, 1, tex, zim, ...
-                         Under -r, FMT names a DuckDB reader: csv, parquet, json
+                         filename: md, html, pdf, rst, docx, man, 1, tex, zim, ...
+                         Under -r, FMT names a DuckDB reader: csv, parquet, json, pdf
   -w, --where EXPR       SQL WHERE clause for -r; implies -r
   -n, --limit N          cap the rows any listing prints (-r, and .zim -t/-s)
       --color WHEN       auto (default), always, never. auto means colour when
@@ -65,6 +66,7 @@ are mutually exclusive. -S and -s exit 1 when nothing matches.
 Formats:
   .md .markdown        markdown extension
   .htm .html           webbed extension
+  .pdf                 pdf extension (via pdf_to_markdown or read_pdf)
   .json                Pandoc AST
   .docx .odt .epub .rst .org .tex .ipynb .rtf .textile .mediawiki
                        via pandoc(1)
@@ -136,7 +138,7 @@ init() {
 # SQL single-quoted literal: double the quotes.
 q() { printf '%s' "${1//\'/\'\'}"; }
 
-do_page= mode=full arg= where= limit= fmt= color=auto out_fmt=ansi
+do_page= mode=full arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 
 # Wrap an expression yielding LIST(duck_block) in whichever serializer -o asked for.
 # These are the duck_blocks pipeline's own writers, which is the whole point: they run
@@ -217,6 +219,9 @@ sniff_zip() {
 while (( $# )); do
   case $1 in
     -p|--page)     do_page=1 ;;
+    -P|--pages)    [[ $# -ge 2 ]] || die '-P/--pages needs a page or range (e.g. 3, 1-5, 1..5)' 64
+                   pages=$2; shift ;;
+    --pages=*)     pages=${1#--pages=} ;;
     -h|--help)     usage; exit 0 ;;
     --init)        init; exit $? ;;
     -t|--toc)      setmode toc ;;
@@ -239,6 +244,21 @@ while (( $# )); do
   esac
   shift
 done
+
+p_first= p_last=
+if [[ -n $pages ]]; then
+  if [[ $pages =~ ^([0-9]+)-([0-9]+)$ || $pages =~ ^([0-9]+)\.\.([0-9]+)$ ]]; then
+    p_first=${BASH_REMATCH[1]} p_last=${BASH_REMATCH[2]}
+  elif [[ $pages =~ ^([0-9]+)-$ ]]; then
+    p_first=${BASH_REMATCH[1]}
+  elif [[ $pages =~ ^-([0-9]+)$ ]]; then
+    p_first=1 p_last=${BASH_REMATCH[1]}
+  elif [[ $pages =~ ^([0-9]+)$ ]]; then
+    p_first=${BASH_REMATCH[1]} p_last=${BASH_REMATCH[1]}
+  else
+    die "invalid page range: '$pages' (expected N, N-M, N..M, N-, or -M)" 64
+  fi
+fi
 
 if [[ $out_fmt != ansi ]]; then
   emit x >/dev/null                       # reject an unknown format before doing work
@@ -269,7 +289,6 @@ if [[ $f == - || ( -z $f && ! -t 0 ) ]]; then
       die 'reading data from standard input needs -f (csv, parquet, json, ...)' 64
     fmt=$(sniff "$f")
     case $fmt in
-      pdf) die 'standard input looks like a PDF, which duckeye cannot read' 2 ;;
       zip) die 'standard input is a zip container of an unknown kind; name it with -f' 2 ;;
     esac
   fi
@@ -320,6 +339,8 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
       THEN html_to_duck_blocks(zim_get_text(archive, entry))
     WHEN zim_mimetype(archive, entry) LIKE 'text/markdown%'
       THEN parse_markdown_to_duck_blocks(zim_get_text(archive, entry))
+    WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
+      THEN parse_markdown_to_duck_blocks(pdf_to_text(zim_get_content(archive, entry)))
     WHEN zim_mimetype(archive, entry) LIKE 'text/%'
       THEN db_code(zim_get_text(archive, entry))
     ELSE db_paragraph('(no renderer for '
@@ -334,17 +355,48 @@ if [[ $mode == raw ]]; then
   # Bare '<path>' leans on DuckDB's replacement scan, which reads the extension — so a
   # spooled stdin, having none, needs the reader named. That is what -f supplies here.
   case $fmt in
-    '')                from="'$src'" ;;
+    '')
+      if [[ $key == *.pdf ]]; then
+        from="read_pdf('$src')"
+        exts="pdf"
+      elif [[ $key == *.yaml || $key == *.yml ]]; then
+        from="read_yaml('$src')"
+        exts="yaml"
+      elif [[ $key == *.toml ]]; then
+        from="(SELECT parse_toml(content) AS toml FROM read_text('$src'))"
+        exts="toml"
+      elif [[ $key == *.xlsx || $key == *.xls ]]; then
+        from="read_xlsx('$src')"
+        exts="excel"
+      elif [[ $key == *.zip ]]; then
+        from="zip_contents('$src')"
+        exts="zipfs"
+      elif [[ $key == *.git || $key == */.git || $key == .git ]]; then
+        local_repo=${src%/.git}
+        local_repo=${local_repo%.git}
+        from="git_log('${local_repo:-.}')"
+        exts="duck_tails"
+      else
+        from="'$src'"
+      fi ;;
     csv|tsv|txt|text)  from="read_csv('$src')" ;;
     parquet|pq)        from="read_parquet('$src')" ;;
     json|ndjson|jsonl) from="read_json('$src')" ;;
+    pdf)               from="read_pdf('$src')"; exts="pdf" ;;
+    yaml|yml)          from="read_yaml('$src')"; exts="yaml" ;;
+    toml)              from="(SELECT parse_toml(content) AS toml FROM read_text('$src'))"; exts="toml" ;;
+    excel|xlsx|xls)    from="read_xlsx('$src')"; exts="excel" ;;
+    zip)               from="zip_contents('$src')"; exts="zipfs" ;;
+    git)               local_repo=${src%/.git}; local_repo=${local_repo%.git}
+                       from="git_log('${local_repo:-.}')"; exts="duck_tails" ;;
+    lines)             from="read_lines('$src')"; exts="read_lines" ;;
     *)                 from="read_$fmt('$src')" ;;   # DuckDB reports an unknown reader
   esac
   sql="SELECT * FROM $from"
   [[ -n $where ]] && sql+=" WHERE $where"     # arbitrary SQL, spliced verbatim
   [[ -n $limit ]] && sql+=" LIMIT $limit"
   load=
-  for e in $DUCKEYE_EXTS; do load+="LOAD $e; "; done
+  for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
   duck=(duckdb -box -s "$load" -s "$sql;")
   page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
   "${duck[@]}" | "${page[@]}"
@@ -359,7 +411,7 @@ if [[ $key == *.zim ]]; then
   if [[ $mode == section ]]; then
     # zim_suggest walks the title index, so this stays fast on a full Wikipedia.
     # zim_get_text pulls the article's bytes straight through, no filesystem hop.
-    exts="webbed markdown zim"
+    exts="webbed markdown zim pdf"
     premacro+=$zim_macro
     doc="SELECT zim_to_blocks('$src', s.path) AS blocks
          FROM (SELECT path FROM zim_suggest('$src', '$pat', max_results := 1)) s"
@@ -396,7 +448,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
   zim://*)                         # zim://<archive>.zim/<entry> names one entry
     rest=${f#zim://}
     [[ $rest == *.zim/* ]] || die "zim:// needs an entry path: zim://ARCHIVE.zim/ENTRY" 64
-    exts="webbed markdown zim"
+    exts="webbed markdown zim pdf"
     premacro+=$zim_macro
     doc="SELECT zim_to_blocks('$(q "${rest%%.zim/*}.zim")', '$(q "${rest#*.zim/}")') AS blocks" ;;
   *.md|*.markdown)
@@ -405,6 +457,19 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
   *.htm|*.html)
     exts="webbed"                  # webbed has no read_html_blocks; scalar over read_text
     doc="SELECT html_to_duck_blocks(html) AS blocks FROM read_html_objects('$src')" ;;
+  *.pdf)
+    exts="markdown pdf"
+    if [[ -n $p_first || -n $p_last ]]; then
+      p_args=
+      [[ -n $p_first ]] && p_args+="first_page := $p_first"
+      [[ -n $p_last ]] && p_args+="${p_args:+, }last_page := $p_last"
+      doc="SELECT parse_markdown_to_duck_blocks(
+             string_agg('## Page ' || page || chr(10) || chr(10) || coalesce(text, ''),
+                        chr(10) || chr(10) ORDER BY page)
+           ) AS blocks FROM read_pdf('$src'${p_args:+, $p_args})"
+    else
+      doc="SELECT parse_markdown_to_duck_blocks(pdf_to_markdown('$src')) AS blocks"
+    fi ;;
   *.json)                          # assumed to be a Pandoc AST
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;
   *.docx|*.odt|*.epub|*.rst|*.org|*.tex|*.ipynb|*.rtf|*.textile|*.man|*.mediawiki|\

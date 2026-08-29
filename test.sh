@@ -203,8 +203,8 @@ no  '--color rejects a bad value'   $DUCKEYE --color=purple "$TMP/doc.md"
 has 'stripping preserves content'   'alpha body' $DUCKEYE --color=never -S Alpha "$TMP/doc.md"
 ok  'DUCKEYE_THEME=light runs'      env DUCKEYE_THEME=light $DUCKEYE -r -n 1 "$TMP/d.parquet"
 ok  'DUCKEYE_THEME=dark runs'       env DUCKEYE_THEME=dark $DUCKEYE -r -n 1 "$TMP/d.parquet"
-ok  'COLORFGBG dark detection'      env COLORFGBG="15;0" $DUCKEYE -Z -n 1 "$TMP/d.parquet"
-ok  'COLORFGBG light detection'     env COLORFGBG="0;15" $DUCKEYE -Z -n 1 "$TMP/d.parquet"
+ok  'COLORFGBG dark detection'      env COLORFGBG="15;0" $DUCKEYE -r -n 1 "$TMP/d.parquet"
+ok  'COLORFGBG light detection'     env COLORFGBG="0;15" $DUCKEYE -r -n 1 "$TMP/d.parquet"
 
 echo 'raw'
 has 'raw parquet'  'name_1' $DUCKEYE -r "$TMP/d.parquet"

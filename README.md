@@ -356,6 +356,7 @@ it to `DUCKEYE_EXTS`.
 | `DUCKEYE_PAGER` | pager `-p` uses (default `less -R`) |
 | `DUCKEYE_OFFICIAL` | `--init` installs these from the core repo |
 | `DUCKEYE_COMMUNITY` | `--init` installs these from the community repo |
+| `DUCKEYE_THEME` | `dark` or `light` theme override (default: auto-detected with 50ms probe) |
 | `COLUMNS` | overrides terminal column width for table rendering and profiling |
 
 ## Tests

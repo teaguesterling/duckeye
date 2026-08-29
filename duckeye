@@ -169,6 +169,50 @@ want_color() {
   [[ -n $do_page ]] && return 0
   [[ -t 1 ]]
 }
+
+# Determine dark vs light mode for DuckDB's box renderer.
+# Checks $DUCKEYE_THEME, $COLORFGBG, and runs a 50ms OSC 11 probe on interactive ttys
+# to avoid DuckDB's 5-second blocking background-color timeout in non-interactive shells.
+duckdb_color_mode() {
+  if [[ -n ${DUCKEYE_THEME:-} ]]; then
+    case "${DUCKEYE_THEME,,}" in
+      light) echo "-light-mode"; return ;;
+      dark)  echo "-dark-mode"; return ;;
+    esac
+  fi
+
+  if [[ -n ${COLORFGBG:-} ]]; then
+    local bg="${COLORFGBG##*;}"
+    if [[ $bg =~ ^[0-9]+$ ]]; then
+      if (( bg == 7 || bg == 15 )); then
+        echo "-light-mode"; return
+      else
+        echo "-dark-mode"; return
+      fi
+    fi
+  fi
+
+  if [[ -t 0 && -t 1 && -n ${TERM:-} && $TERM != "dumb" ]]; then
+    local resp
+    printf '\e]11;?\e\\' >/dev/tty 2>/dev/null
+    if read -t 0.05 -rs -d '\' resp </dev/tty 2>/dev/null; then
+      if [[ $resp =~ rgb:([0-9a-fA-F]+)/([0-9a-fA-F]+)/([0-9a-fA-F]+) ]]; then
+        local r="0x${BASH_REMATCH[1]:0:2}"
+        local g="0x${BASH_REMATCH[2]:0:2}"
+        local b="0x${BASH_REMATCH[3]:0:2}"
+        local lum=$(( (299 * r + 587 * g + 114 * b) / 1000 ))
+        if (( lum > 128 )); then
+          echo "-light-mode"; return
+        else
+          echo "-dark-mode"; return
+        fi
+      fi
+    fi
+  fi
+
+  echo "-dark-mode"
+}
+
 setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -t, -S, -s, -r, -z, -Z' 64; mode=$1; }
 
 # duck_blocks_to_pandoc_ast stamps pandoc-api-version [1,20], which pandoc 3.x refuses
@@ -408,7 +452,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     exts+=" textplot"
     load=
     for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
-    cols_raw=$(duckdb -dark-mode -noheader -csv -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name, column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
+    cols_raw=$(duckdb $(duckdb_color_mode) -noheader -csv -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name, column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
 
     term_cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
     [[ $term_cols =~ ^[0-9]+$ && $term_cols -gt 0 ]] || term_cols=120
@@ -500,7 +544,7 @@ FROM __duckeye_src"
 
   load=
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
-  duck=(duckdb -dark-mode -box -s "$load" -s "$sql;")
+  duck=(duckdb $(duckdb_color_mode) -box -s "$load" -s "$sql;")
   page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
   "${duck[@]}" | "${page[@]}"
   exit "${PIPESTATUS[0]}"
@@ -540,7 +584,7 @@ if [[ $key == *.zim ]]; then
     load="LOAD zim; "
     for e in $DUCKEYE_EXTS; do load+="LOAD $e; "; done
     page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
-    duckdb -dark-mode -box -s "$load" -s "$zsql" | "${page[@]}"
+    duckdb $(duckdb_color_mode) -box -s "$load" -s "$zsql" | "${page[@]}"
     exit "${PIPESTATUS[0]}"
   fi
 fi

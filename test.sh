@@ -201,6 +201,8 @@ no  '-p keeps colour through less' \
     env DUCKEYE_PAGER=cat bash -c "$DUCKEYE -p '$TMP/doc.md' | grep -q '$esc' && exit 1 || exit 0"
 no  '--color rejects a bad value'   $DUCKEYE --color=purple "$TMP/doc.md"
 has 'stripping preserves content'   'alpha body' $DUCKEYE --color=never -S Alpha "$TMP/doc.md"
+ok  'DUCKEYE_THEME=light runs'      env DUCKEYE_THEME=light $DUCKEYE -r -n 1 "$TMP/d.parquet"
+ok  'DUCKEYE_THEME=dark runs'       env DUCKEYE_THEME=dark $DUCKEYE -r -n 1 "$TMP/d.parquet"
 
 echo 'raw'
 has 'raw parquet'  'name_1' $DUCKEYE -r "$TMP/d.parquet"

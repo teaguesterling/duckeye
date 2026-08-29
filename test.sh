@@ -64,6 +64,39 @@ duckdb -s "COPY (SELECT i AS id, 'name_'||i AS name, i*1.5 AS score FROM range(1
            TO '$TMP/d.parquet';
            COPY (SELECT i AS id, 'name_'||i AS name FROM range(1,5) t(i)) TO '$TMP/d.csv';" >/dev/null 2>&1
 
+python3 -c "
+pdf = b'''%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R 6 0 R]/Count 2>>endobj
+3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 55>>stream
+BT /F1 18 Tf 72 720 Td (First PDF Page alpha body) Tj ET
+endstream
+endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+6 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Contents 7 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+7 0 obj<</Length 54>>stream
+BT /F1 18 Tf 72 720 Td (Second PDF Page beta body) Tj ET
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000120 00000 n 
+0000000271 00000 n 
+0000000377 00000 n 
+0000000455 00000 n 
+0000000606 00000 n 
+trailer<</Size 8/Root 1 0 R>>
+startxref
+711
+%%EOF'''
+with open('$TMP/doc.pdf', 'wb') as f:
+    f.write(pdf)
+" 2>/dev/null
+
 echo 'documents'
 ok  'md renders'                 $DUCKEYE "$TMP/doc.md"
 has 'md content'      'alpha body' $DUCKEYE "$TMP/doc.md"
@@ -81,6 +114,11 @@ if [[ $($DUCKEYE -S Alpha "$TMP/doc.md" | strip) == *'beta body'* ]]; then
   fail=$((fail+1)); echo '  FAIL S stops at next sibling'
 else pass=$((pass+1)); echo '  ok   S stops at next sibling'; fi
 no  'S no match exits 1'         $DUCKEYE -S Nope "$TMP/doc.md"
+# 'Alpha' matches both "Alpha" and "Alpha Child"; the parent subsumes the child
+out=$($DUCKEYE -S Alpha "$TMP/doc.md" | strip)
+count=$(printf '%s' "$out" | grep -c 'child body')
+if [[ $count -le 1 ]]; then pass=$((pass+1)); printf '  ok   %s\n' "S dedup nested matches"
+else fail=$((fail+1)); printf '  FAIL %s (child body appeared %d times)\n' "S dedup nested matches" "$count"; fi
 
 echo 'search'
 has 's finds body'        'widget'            $DUCKEYE -s widget "$TMP/doc.md"
@@ -94,6 +132,12 @@ if [[ $($DUCKEYE -s widget "$TMP/doc.md" | strip) == *'alpha body'* ]]; then
 else pass=$((pass+1)); echo '  ok   s reports innermost section'; fi
 no  's no match exits 1'         $DUCKEYE -s zzzqqq "$TMP/doc.md"
 
+echo 'wildcards'
+has 'S % wildcard'         'alpha body'  $DUCKEYE -S 'Al%a' "$TMP/doc.md"
+has 'S _ wildcard'         'beta body'   $DUCKEYE -S 'Bet_' "$TMP/doc.md"
+has 's % wildcard'         'widget'      $DUCKEYE -s 'wid%' "$TMP/doc.md"
+no  'S wildcard no match'                $DUCKEYE -S 'Zzz%' "$TMP/doc.md"
+
 echo 'quoting'
 cp "$TMP/doc.md" "$TMP/it's a doc.md"
 has 'apostrophe in filename' 'alpha body' $DUCKEYE -S Alpha "$TMP/it's a doc.md"
@@ -104,8 +148,7 @@ has 'explicit - reads stdin'   'alpha body' bash -c "$DUCKEYE -S Alpha - <'$TMP/
 has 'bare pipe reads stdin'    'alpha body' bash -c "$DUCKEYE -S Alpha <'$TMP/doc.md'"
 has 'sniffs markdown'          '  Alpha'    bash -c "$DUCKEYE -t - <'$TMP/doc.md'"
 has 'sniffs html'              'Head'       bash -c "$DUCKEYE -t - <'$TMP/doc.html'"
-has 'refuses a PDF by magic'   ''           bash -c "printf '%%PDF-1.4\njunk' | $DUCKEYE -t - 2>&1"
-no  'PDF exits nonzero'        bash -c "printf '%%PDF-1.4\njunk' | $DUCKEYE -t -"
+has 'sniffs pdf by magic'      'alpha body' bash -c "$DUCKEYE - <'$TMP/doc.pdf'"
 # -f must beat the filename, or it isn't an override
 cp "$TMP/doc.html" "$TMP/liar.md"
 has '-f overrides extension'   'Head'       $DUCKEYE -t -f html "$TMP/liar.md"
@@ -140,6 +183,9 @@ fi
 no  '-o rejects -r'                         $DUCKEYE -o md -r "$TMP/d.parquet"
 no  '-o rejects -t'                         $DUCKEYE -o md -t "$TMP/doc.md"
 no  '-o rejects an unknown format'          $DUCKEYE -o bogus "$TMP/doc.md"
+# -o composes with -s just as it does with -S
+has '-o text with -s'    'widget'            $DUCKEYE -o text -s widget "$TMP/doc.md"
+has '-o html with -s'    '<h'                $DUCKEYE -o html -s widget "$TMP/doc.md"
 
 echo 'colour'
 esc=$(printf '\033')
@@ -159,6 +205,16 @@ has 'stripping preserves content'   'alpha body' $DUCKEYE --color=never -S Alpha
 echo 'raw'
 has 'raw parquet'  'name_1' $DUCKEYE -r "$TMP/d.parquet"
 has 'raw csv'      'name_1' $DUCKEYE -r "$TMP/d.csv"
+printf 'name: test\nvalue: 42\n' >"$TMP/d.yaml"
+has 'raw yaml'     'test'   $DUCKEYE -r "$TMP/d.yaml"
+printf '[pkg]\nname = "test"\n' >"$TMP/d.toml"
+has 'raw toml'     'test'   $DUCKEYE -r "$TMP/d.toml"
+has 'raw lines'    'line_number' $DUCKEYE -r -f lines -n 2 "$TMP/doc.md"
+has 'raw git'      'commit_hash' $DUCKEYE -r -n 1 "$PWD/.git"
+if command -v zip >/dev/null; then
+  (cd "$TMP" && zip -q "$TMP/d.zip" d.yaml d.toml 2>/dev/null)
+  has 'raw zip'    'd.yaml' $DUCKEYE -r "$TMP/d.zip"
+fi
 has 'where filters' 'name_7' $DUCKEYE -w 'score > 6' "$TMP/d.parquet"
 if [[ $($DUCKEYE -w 'score > 6' "$TMP/d.parquet") == *'name_1'* ]]; then
   fail=$((fail+1)); echo '  FAIL where excludes non-matches'
@@ -188,6 +244,62 @@ if command -v pandoc >/dev/null; then
   has 'mediawiki reader named' 'Usage'      $DUCKEYE -t "$TMP/w.mediawiki"
   has 'mediawiki section'      'usage body' $DUCKEYE -S Usage "$TMP/w.mediawiki"
 
+  # docx/epub/odt — generated from the markdown fixture
+  pandoc "$TMP/doc.md" -o "$TMP/doc.docx" 2>/dev/null
+  pandoc "$TMP/doc.md" -o "$TMP/doc.epub" --metadata title=Test 2>/dev/null
+  pandoc "$TMP/doc.md" -o "$TMP/doc.odt"  2>/dev/null
+
+  has 'docx renders'    'alpha body'    $DUCKEYE "$TMP/doc.docx"
+  has 'docx toc'        'Alpha'         $DUCKEYE -t "$TMP/doc.docx"
+  has 'docx section'    'child body'    $DUCKEYE -S Alpha "$TMP/doc.docx"
+  has 'docx search'     'widget'        $DUCKEYE -s widget "$TMP/doc.docx"
+
+  has 'epub renders'    'alpha body'    $DUCKEYE "$TMP/doc.epub"
+  has 'epub toc'        'Alpha'         $DUCKEYE -t "$TMP/doc.epub"
+  has 'epub section'    'beta body'     $DUCKEYE -S Beta "$TMP/doc.epub"
+
+  has 'odt renders'     'alpha body'    $DUCKEYE "$TMP/doc.odt"
+  has 'odt toc'         'Alpha'         $DUCKEYE -t "$TMP/doc.odt"
+
+  # LaTeX
+  cat >"$TMP/doc.tex" <<'LATEX'
+\documentclass{article}
+\begin{document}
+\section{Alpha}
+alpha body
+\subsection{Alpha Child}
+child body with widget
+\section{Beta}
+beta body
+\end{document}
+LATEX
+  has 'tex renders'     'alpha body'    $DUCKEYE "$TMP/doc.tex"
+  has 'tex toc'         'Alpha'         $DUCKEYE -t "$TMP/doc.tex"
+  has 'tex section'     'child body'    $DUCKEYE -S Alpha "$TMP/doc.tex"
+
+  # Org-mode
+  cat >"$TMP/doc.org" <<'ORG'
+* Alpha
+
+alpha body
+
+** Alpha Child
+
+child body with widget
+
+* Beta
+
+beta body
+ORG
+  has 'org renders'     'alpha body'    $DUCKEYE "$TMP/doc.org"
+  has 'org toc'         'Alpha'         $DUCKEYE -t "$TMP/doc.org"
+  has 'org section'     'beta body'     $DUCKEYE -S Beta "$TMP/doc.org"
+
+  # Jupyter notebook
+  pandoc "$TMP/doc.md" -o "$TMP/doc.ipynb" 2>/dev/null
+  has 'ipynb renders'   'alpha body'    $DUCKEYE "$TMP/doc.ipynb"
+  has 'ipynb toc'       'Alpha'         $DUCKEYE -t "$TMP/doc.ipynb"
+
   # man page source, both as .man and as a numbered section
   if [[ -r /usr/share/man/man1/ls.1.gz ]]; then
     zcat /usr/share/man/man1/ls.1.gz >"$TMP/ls.1" 2>/dev/null
@@ -201,6 +313,16 @@ if command -v pandoc >/dev/null; then
 else
   skipping 'pandoc formats' 'pandoc not installed'
 fi
+
+echo 'pdf'
+has 'pdf renders'           'First PDF Page'   $DUCKEYE "$TMP/doc.pdf"
+has 'pdf search'            'beta body'        $DUCKEYE -s 'beta body' "$TMP/doc.pdf"
+has 'pdf page range'        'Second PDF Page'  $DUCKEYE -P 2 "$TMP/doc.pdf"
+has 'pdf page range 1-2'    'First PDF Page'   $DUCKEYE -P 1-2 "$TMP/doc.pdf"
+has 'pdf page range toc'    'Page 1'           $DUCKEYE -P 1-2 -t "$TMP/doc.pdf"
+has 'pdf raw'               'First PDF Page'   $DUCKEYE -r "$TMP/doc.pdf"
+has 'pdf -o text'           'alpha body'       $DUCKEYE -o text "$TMP/doc.pdf"
+no  'pdf invalid page range'                   $DUCKEYE -P abc "$TMP/doc.pdf"
 
 echo 'zim'
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then

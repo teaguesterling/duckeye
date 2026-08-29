@@ -1,0 +1,29 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y pandoc unzip
+
+      - name: Install DuckDB
+        run: |
+          curl -fsSL "https://github.com/duckdb/duckdb/releases/latest/download/duckdb_cli-linux-amd64.zip" \
+            -o /tmp/duckdb.zip
+          unzip /tmp/duckdb.zip -d /tmp
+          sudo install /tmp/duckdb /usr/local/bin/
+          duckdb --version
+
+      - name: Initialize duckeye extensions
+        run: ./duckeye --init
+
+      - name: Run tests
+        run: ./test.sh

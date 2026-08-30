@@ -15,6 +15,7 @@ $ duckeye -S handle_request server.go       # extract a single function definiti
 $ duckeye -P 1-5 manual.pdf                 # page range of a PDF
 $ duckeye -s tmux spec.md                   # every section mentioning tmux
 $ duckeye -r data.parquet                   # look at data, not prose
+$ duckeye -Q .fn#foo test.py                # Display the foo function (using ast_select)
 $ duckeye -s photosynthesis wikipedia.zim   # search 19M offline articles
 ```
 
@@ -152,6 +153,9 @@ $ duckeye -t 'src/**/*.py'             # outline all Python files in a directory
 $ duckeye -Q '.func' 'src/**/*.rs'      # extract all Rust functions across files
 $ duckeye -r 'data/*.parquet'          # query across parquet shards
 ```
+
+For the AST selectors, consult the [sitting_duck](https://sitting-duck.readthedocs.io/en/latest/reference/css-selectors/) 
+documentation for syntax and supported features.
 
 ## Converting, not just reading
 
@@ -361,6 +365,7 @@ it to `DUCKEYE_EXTS`.
 -o, --output FMT       ansi (default), text, md, html, pandoc, blocks
     --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies data mode
+-q                     AST selector for code definitions
 -n, --limit N          cap rows in any listing (-r, -z, -Z, and .zim -t/-s)
     --init             install the DuckDB extensions
 -h, --help             full help

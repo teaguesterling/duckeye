@@ -531,7 +531,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     exts+=" textplot"
     load=
     for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
-    cols_raw=$(duckdb $(duckdb_color_mode) -noheader -list -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name || chr(9) || column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
+    cols_raw=$(duckdb -dark-mode -noheader -list -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name || chr(9) || column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
 
     if [[ $term_cols -le 85 ]]; then
       summary_budget=$(( term_cols - 68 > 10 ? term_cols - 68 : 12 ))
@@ -719,12 +719,10 @@ FROM __duckeye_src"
 
   load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; "
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
-  if [[ $mode == profile ]]; then
-    duck=(duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth 0" -s "$load" -s "$sql")
-  elif want_color; then
-    duck=(duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth $term_cols" -s "$load" -s "$sql")
+  if want_color; then
+    duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -s "$load" -s "$sql")
   else
-    duck=(duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth 0" -s "$load" -s "$sql")
+    duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth 0" -s "$load" -s "$sql")
   fi
   page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
   "${duck[@]}" | "${page[@]}"
@@ -768,9 +766,9 @@ if [[ $key == *.zim ]]; then
     for e in $DUCKEYE_EXTS; do load+="LOAD $e; "; done
     page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
     if want_color; then
-      duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth $term_cols" -s "$load" -s "$zsql" | "${page[@]}"
+      duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -s "$load" -s "$zsql" | "${page[@]}"
     else
-      duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth 0" -s "$load" -s "$zsql" | "${page[@]}"
+      duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth 0" -s "$load" -s "$zsql" | "${page[@]}"
     fi
     exit "${PIPESTATUS[0]}"
   fi

@@ -141,7 +141,8 @@ init() {
 # SQL single-quoted literal: double the quotes.
 q() { printf '%s' "${1//\'/\'\'}"; }
 
-[[ $(basename "$0") == dep ]] && do_page=1 || do_page=
+# dep is the paging alias: auto-page only when stdout is a tty (not when piped or under test)
+[[ $(basename "$0") == dep && -t 1 ]] && do_page=1 || do_page=
 mode=full arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 
 # Wrap an expression yielding LIST(duck_block) in whichever serializer -o asked for.

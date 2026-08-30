@@ -8,8 +8,10 @@ man pages, an offline Wikipedia — parsed by [DuckDB](https://duckdb.org), rend
 $ duckeye README.md                         # render, unpaged
 $ zcat ls.1.gz | duckeye -t -               # or read a pipe, format sniffed
 $ dep README.md                             # same, paged
-$ duckeye -t spec.md                        # outline it
+$ duckeye -t spec.md                        # outline a document
+$ duckeye -t server.go                      # outline classes, functions & methods
 $ duckeye -S 'Runbook Steps' spec.md        # one section
+$ duckeye -S handle_request server.go       # extract a single function definition & body
 $ duckeye -P 1-5 manual.pdf                 # page range of a PDF
 $ duckeye -s tmux spec.md                   # every section mentioning tmux
 $ duckeye -r data.parquet                   # look at data, not prose
@@ -321,10 +323,11 @@ hundreds of thousands of entries with no mimetype at all.
 | `.pdf` | [`pdf`](https://github.com/asubbarao/duckdb-pdf) |
 | `.json` | Pandoc AST |
 | `.zim`, `zim://…` | [`zim`](https://github.com/teaguesterling/duckdb_zim) (handles HTML, markdown, and embedded PDFs) |
+| `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | [`sitting_duck`](https://github.com/teaguesterling/duckdb_sitting_duck) (Tree-sitter AST to duck_blocks) |
 | `.docx` `.odt` `.epub` `.rst` `.org` `.tex` `.ipynb` `.rtf` `.textile` `.mediawiki` | `pandoc(1)` |
 | `.man`, `.1`–`.9` | `pandoc(1)` — man page source |
-| anything DuckDB reads, under `-r` | parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, … |
-| standard input | sniffed, or named with `-f` |
+| anything DuckDB reads, under `-r` | parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, … |
+| standard input | sniffed (magic bytes, doctypes, shebangs), or named with `-f` |
 
 duckeye names the pandoc reader explicitly rather than letting pandoc infer it from the
 extension — `.man` and `.mediawiki` defeat inference, and `.mediawiki` fails *quietly*,
@@ -338,14 +341,14 @@ it to `DUCKEYE_EXTS`.
 ```
 -p, --page             page through $DUCKEYE_PAGER (default: less -R)
 -P, --pages RANGE      page or page range for PDFs (e.g. 3, 1-5, 1..5, -10, 5-)
--t, --toc              table of contents
--S, --section NAME     one section
--s, --search TEXT      matching sections
--r, --raw              read as data: SELECT * FROM FILE
+-t, --toc              table of contents / code definition outline
+-S, --section NAME     one section or function/method/class definition
+-s, --search TEXT      matching sections or AST definitions
+-r, --raw              read as data: SELECT * FROM FILE (reads AST on code files)
 -z, --summary          native column summary (DuckDB SUMMARIZE)
 -Z, --profile          smart column profile with sparklines & category frequencies
 -f, --format FMT       treat input as FMT instead of guessing; under data modes,
-                       names a DuckDB reader (csv, parquet, json, yaml, toml, xlsx, pdf, lines, zip, git)
+                       names a DuckDB reader (csv, parquet, json, yaml, toml, xlsx, pdf, lines, zip, git, ast)
 -o, --output FMT       ansi (default), text, md, html, pandoc, blocks
     --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies data mode

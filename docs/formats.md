@@ -19,6 +19,7 @@
 | **Jupyter Notebook**| `.ipynb` | `pandoc` | Markdown cells and executed code cells |
 | **MediaWiki** | `.mediawiki` | `pandoc` | Wikipedia markup, templates, section headers |
 | **Man Pages** | `.man`, `.1`–`.9` | `pandoc` | Unix roff manual pages with direct section jumping |
+| **Source Code ASTs**| `.py`, `.rs`, `.go`, `.c`, `.cpp`, `.js`, `.ts`, `.java`, `.kt`, `.cs`, `.swift`, `.rb`, `.php`, `.lua`, `.r`, `.sh`, `.zig`, `.dart`, `.sql`, `.gql`, `.tf`, `.css` (27 languages) | `sitting_duck` DuckDB extension | Tree-sitter AST parsing, class/function hierarchies, definition outlines, doc conversion |
 | **openZIM Archives**| `.zim`, `zim://...` | `zim` DuckDB extension | Multi-gigabyte offline archives, Xapian search, embedded PDFs |
 
 ---
@@ -38,6 +39,7 @@ Under data modes (`-r`, `-z`, `-Z`), `duckeye` opens files via DuckDB's fast col
 | **ZIP Archives** | `.zip` | `zipfs` extension | `zip_contents()` |
 | **Git Repositories**| `.git`, `*.git` | `duck_tails` extension | `git_log()` |
 | **Line-Indexed Text**| `-f lines <file>` | `read_lines` extension | `read_lines()` |
+| **Source Code AST**| `.py`, `.rs`, `.go`, `-f ast` | `sitting_duck` extension | `read_ast(..., peek := 'full')` |
 
 ---
 
@@ -50,4 +52,5 @@ When reading standard input (`cat file | duckeye -` or bare pipes), `duckeye` au
 * `<!DOCTYPE html` or `<html>` &rarr; HTML
 * `pandoc-api-version` &rarr; Pandoc AST JSON
 * `.TH ` roff macros &rarr; Man page source
+* Shebangs (`#!...python`, `#!...sh`, `#!...ruby`, `#!...node`) &rarr; Source code AST
 * Default fallback &rarr; Markdown

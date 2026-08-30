@@ -236,7 +236,7 @@ has 'raw reads a named csv from stdin'     'name_4' \
     bash -c "$DUCKEYE -f csv -w 'id > 3' - <'$TMP/d.csv'"
 has 'summary with -z' 'null_percentage' $DUCKEYE -z "$TMP/d.parquet"
 has 'profile with -Z' 'distribution'    $DUCKEYE -Z "$TMP/d.parquet"
-has 'profile with -Z and -w' 'name_5'   $DUCKEYE -Z -w 'score > 6' "$TMP/d.parquet"
+has 'profile with -Z and -w' '33.3%'     $DUCKEYE -Z -w 'score > 6' "$TMP/d.parquet"
 has 'profile temporal date' 'created_date' $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile temporal span' 'days' $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile list len' 'len min:' $DUCKEYE -Z "$TMP/d.parquet"
@@ -346,6 +346,38 @@ has 'pdf page range toc'    'Page 1'           $DUCKEYE -P 1-2 -t "$TMP/doc.pdf"
 has 'pdf raw'               'First PDF Page'   $DUCKEYE -r "$TMP/doc.pdf"
 has 'pdf -o text'           'alpha body'       $DUCKEYE -o text "$TMP/doc.pdf"
 no  'pdf invalid page range'                   $DUCKEYE -P abc "$TMP/doc.pdf"
+
+echo 'code AST (sitting_duck)'
+cat >"$TMP/test_code.py" <<'PY'
+class Service:
+    def execute(self, task: str) -> bool:
+        return True
+
+    def cancel(self) -> None:
+        pass
+PY
+has 'python renders'   'Service'        $DUCKEYE "$TMP/test_code.py"
+has 'python toc'       'execute'        $DUCKEYE -t "$TMP/test_code.py"
+has 'python section'   'return True'    $DUCKEYE -S execute "$TMP/test_code.py"
+has 'python search'    'execute'        $DUCKEYE -s task "$TMP/test_code.py"
+has 'python -o md'     'Service'        $DUCKEYE -o md "$TMP/test_code.py"
+
+cat >"$TMP/test_code.rs" <<'RS'
+pub struct Worker {
+    pub id: u64,
+}
+
+impl Worker {
+    pub fn process(&self) -> bool {
+        true
+    }
+}
+RS
+has 'rust renders'     'Worker'         $DUCKEYE "$TMP/test_code.rs"
+has 'rust toc'         'process'        $DUCKEYE -t "$TMP/test_code.rs"
+has 'rust section'     'true'           $DUCKEYE -S process "$TMP/test_code.rs"
+has 'shebang sniffing' 'Worker'         bash -c "printf '#!/usr/bin/env python3\nclass Worker:\n    pass\n' | $DUCKEYE -t -"
+has 'python raw AST with peek' 'def execute' $DUCKEYE -r -w "name = 'execute'" "$TMP/test_code.py"
 
 echo 'zim'
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then

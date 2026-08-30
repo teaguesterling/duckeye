@@ -381,6 +381,9 @@ has 'python raw AST with peek' 'def execute' $DUCKEYE -r -w "name = 'execute'" "
 has 'python -Q selector'       'execute'        $DUCKEYE -Q '.func#execute' "$TMP/test_code.py"
 has 'python -Q -o md'          'execute'        $DUCKEYE -Q '.func#execute' -o md "$TMP/test_code.py"
 has 'python raw -Q selector'   'function_definition' $DUCKEYE -r -Q '.func#execute' "$TMP/test_code.py"
+has 'script -f ast -t'         'usage()'        $DUCKEYE -f ast -t "$PWD/duckeye"
+has 'script bare -t'           'usage()'        $DUCKEYE -t "$PWD/duckeye"
+has 'script -S section'        'die()'          $DUCKEYE -S die "$PWD/duckeye"
 
 echo 'zim'
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then

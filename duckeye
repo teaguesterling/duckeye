@@ -370,15 +370,49 @@ case $norm in
   markdown)       norm=md ;;
   htm)            norm=html ;;
   text|txt|plain) norm=md ;;    # plain text is legible markdown
+  python)         norm=py ;;
+  bash|shell|zsh) norm=sh ;;
+  javascript)     norm=js ;;
+  typescript)     norm=ts ;;
+  rust)           norm=rs ;;
+  golang)         norm=go ;;
+  ruby)           norm=rb ;;
+  c++)            norm=cpp ;;
+  ast|code)
+    if [[ -f $f ]]; then
+      sniffed=$(sniff "$f")
+      case $sniffed in
+        py|sh|rb|js) norm=$sniffed ;;
+        *)           norm=auto ;;
+      esac
+    else
+      norm=auto
+    fi ;;
 esac
+
+# If no format specified and filename has no extension, sniff it (e.g. executable scripts)
+base=$(basename "$f")
+if [[ -z $norm && $base != *.* && -f $f && $f != zim://* ]]; then
+  sniffed=$(sniff "$f")
+  case $sniffed in
+    py|sh|rb|js) norm=$sniffed ;;
+  esac
+fi
+
 key=${f,,}
 [[ -n $norm ]] && key=".$norm"
 
-# Some producers check the filename, not just the bytes — read_markdown_blocks rejects
-# anything not ending in .md — so spooled input is named for the format it turned out
-# to be rather than left extensionless.
-if [[ -n ${from_stdin:-} && -n $norm ]]; then
-  mv "$f" "$f.$norm" && f=$f.$norm
+# Some producers check the filename, not just the bytes — read_markdown_blocks and
+# sitting_duck reject anything without the expected extension. Rename spooled stdin
+# or create a temporary symlink so DuckDB's scanners accept the file.
+if [[ -n $norm && $norm != auto && $base != *.$norm && $f != zim://* && ( -f $f || -n ${from_stdin:-} ) ]]; then
+  if [[ -n ${from_stdin:-} ]]; then
+    mv "$f" "$f.$norm" && f=$f.$norm
+  else
+    target_path=$(readlink -f "$f" 2>/dev/null || realpath "$f" 2>/dev/null || echo "$PWD/$f")
+    link_name="$tmp/$base.$norm"
+    ln -sf "$target_path" "$link_name" && f=$link_name
+  fi
 fi
 
 src=$(q "$f")
@@ -761,7 +795,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
   *.py|*.pyi|*.pyw|*.rs|*.go|*.c|*.h|*.cpp|*.hpp|*.cc|*.cxx|*.c++|*.hh|*.hxx|\
   *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.java|*.kt|*.kts|*.cs|*.swift|*.rb|*.ruby|\
   *.php|*.php3|*.php4|*.php5|*.phtml|*.lua|*.r|*.sh|*.bash|*.zsh|*.zig|*.dart|\
-  *.sql|*.gql|*.graphql|*.tf|*.tfvars|*.hcl|*.css)
+  *.sql|*.gql|*.graphql|*.tf|*.tfvars|*.hcl|*.css|.auto)
     exts="sitting_duck"
     if [[ -n ${selector:-} ]]; then
       premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');

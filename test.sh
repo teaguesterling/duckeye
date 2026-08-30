@@ -378,6 +378,9 @@ has 'rust toc'         'process'        $DUCKEYE -t "$TMP/test_code.rs"
 has 'rust section'     'true'           $DUCKEYE -S process "$TMP/test_code.rs"
 has 'shebang sniffing' 'Worker'         bash -c "printf '#!/usr/bin/env python3\nclass Worker:\n    pass\n' | $DUCKEYE -t -"
 has 'python raw AST with peek' 'def execute' $DUCKEYE -r -w "name = 'execute'" "$TMP/test_code.py"
+has 'python -Q selector'       'execute'        $DUCKEYE -Q '.func#execute' "$TMP/test_code.py"
+has 'python -Q -o md'          'execute'        $DUCKEYE -Q '.func#execute' -o md "$TMP/test_code.py"
+has 'python raw -Q selector'   'function_definition' $DUCKEYE -r -Q '.func#execute' "$TMP/test_code.py"
 
 echo 'zim'
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then

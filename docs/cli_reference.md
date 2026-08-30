@@ -13,6 +13,7 @@ usage: duckeye [OPTION]... [FILE]
 | `-t` | `--toc` | Print table of contents / outline, indented by level |
 | `-S` | `--section NAME`| Print only the section whose heading matches NAME |
 | `-s` | `--search TEXT` | Search and print only innermost sections matching TEXT |
+| `-Q` | `--select SEL` | Query code AST by CSS selector (e.g. `.func`, `.class#Name`, `.func:async`) |
 | `-r` | `--raw` | Read file as data table (parquet, csv, json, yaml, toml, xlsx, ...) |
 | `-z` | `--summary` | Quick DuckDB `SUMMARIZE` breakdown; implies data mode |
 | `-Z` | `--profile` | Smart column profile with sparklines & category frequencies |

@@ -42,6 +42,7 @@ Options:
                          level (so a chapter carries its subsections)
   -s, --search TEXT      print only the innermost sections whose text contains
                          TEXT, headings and code blocks included
+  -Q, --select SEL       query code AST by CSS selector (.func, .class#Name, .func:async, ...)
   -r, --raw              read FILE as data, not prose: SELECT * FROM FILE
                          rendered as a table (parquet, csv, json, xlsx, ...)
   -z, --summary          summarize data columns via DuckDB SUMMARIZE; implies -r
@@ -280,6 +281,8 @@ while (( $# )); do
     -Z|--profile|--smart-summary) setmode profile ;;
     -S|--section)  [[ $# -ge 2 ]] || die '-S needs a section name' 64; setmode section; arg=$2; shift ;;
     -s|--search)   [[ $# -ge 2 ]] || die '-s needs search text' 64; setmode search; arg=$2; shift ;;
+    -Q|--select)   [[ $# -ge 2 ]] || die '-Q/--select needs a CSS selector' 64; selector=$2; shift ;;
+    --select=*)    selector=${1#--select=} ;;
     -f|--format)   [[ $# -ge 2 ]] || die '-f needs a format' 64; fmt=${2,,}; shift ;;
     -o|--output)   [[ $# -ge 2 ]] || die '-o needs an output format' 64; out_fmt=${2,,}; shift ;;
     --color)       [[ $# -ge 2 ]] || die '--color needs auto, always or never' 64
@@ -440,7 +443,11 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
               $key == *.zsh || $key == *.zig || $key == *.dart || $key == *.sql || \
               $key == *.gql || $key == *.graphql || $key == *.tf || $key == *.hcl || \
               $key == *.css ]]; then
-        from="read_ast('$src', peek := 'full')"
+        if [[ -n ${selector:-} ]]; then
+          from="ast_select('$src', '$(q "$selector")')"
+        else
+          from="read_ast('$src', peek := 'full')"
+        fi
         exts="sitting_duck"
       else
         from="'$src'"
@@ -456,7 +463,12 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     git)               local_repo=${src%/.git}; local_repo=${local_repo%.git}
                        from="git_log('${local_repo:-.}')"; exts="duck_tails" ;;
     lines)             from="read_lines('$src')"; exts="read_lines" ;;
-    ast|code)          from="read_ast('$src', peek := 'full')"; exts="sitting_duck" ;;
+    ast|code)          if [[ -n ${selector:-} ]]; then
+                         from="ast_select('$src', '$(q "$selector")')"
+                       else
+                         from="read_ast('$src', peek := 'full')"
+                       fi
+                       exts="sitting_duck" ;;
     *)                 from="read_$fmt('$src')" ;;   # DuckDB reports an unknown reader
   esac
 
@@ -659,7 +671,7 @@ FROM __duckeye_src"
     sql="$target_query;"
   fi
 
-  load=
+  load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; "
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
   if want_color; then
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth $term_cols" -s "$load" -s "$sql")
@@ -751,7 +763,13 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
   *.php|*.php3|*.php4|*.php5|*.phtml|*.lua|*.r|*.sh|*.bash|*.zsh|*.zig|*.dart|\
   *.sql|*.gql|*.graphql|*.tf|*.tfvars|*.hcl|*.css)
     exts="sitting_duck"
-    doc="SELECT blocks FROM ast_to_blocks_list('$src')" ;;
+    if [[ -n ${selector:-} ]]; then
+      premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');
+CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(q "$selector")'); "
+      doc="SELECT list(block) AS blocks FROM ast_to_blocks_from('__sel')"
+    else
+      doc="SELECT blocks FROM ast_to_blocks_list('$src')"
+    fi ;;
   *.docx|*.odt|*.epub|*.rst|*.org|*.tex|*.ipynb|*.rtf|*.textile|*.man|*.mediawiki|\
   *.[1-9])
     command -v pandoc >/dev/null ||
@@ -844,7 +862,7 @@ if [[ $out_fmt == pandoc || $out_fmt == md ]]; then
                 'blocks', duck_blocks_to_pandoc_ast(b).blocks::JSON)); "
 fi
 
-load=
+load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; "
 for e in $DUCKEYE_BASE $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
 
 duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")

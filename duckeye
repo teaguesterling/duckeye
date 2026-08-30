@@ -141,7 +141,8 @@ init() {
 # SQL single-quoted literal: double the quotes.
 q() { printf '%s' "${1//\'/\'\'}"; }
 
-do_page= mode=full arg= where= limit= fmt= color=auto out_fmt=ansi pages=
+[[ $(basename "$0") == dep ]] && do_page=1 || do_page=
+mode=full arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 
 # Wrap an expression yielding LIST(duck_block) in whichever serializer -o asked for.
 # These are the duck_blocks pipeline's own writers, which is the whole point: they run

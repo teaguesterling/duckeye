@@ -16,10 +16,12 @@ usage: install.sh [OPTION]...
 
 Install duckeye and its AI agent skills via symlinks.
 
-Binary:
+Binary & Aliases:
   --user-bin       install to ~/.local/bin (default)
   --global         install to /usr/local/bin
   --no-bin         skip the binary
+  --aliases        create 'de' (alias for duckeye) and 'dep' (paged) symlinks (default)
+  --no-aliases     skip creating 'de' and 'dep' symlinks
 
 Agent skills (auto-detected by default):
   --agy            install the Antigravity (agy) skill
@@ -43,7 +45,7 @@ EOF
 die() { printf 'install.sh: %s\n' "$1" >&2; exit "${2:-1}"; }
 
 # ---------------------------------------------------------------- defaults
-bin_mode=auto do_init=1 uninstall=
+bin_mode=auto aliases=yes do_init=1 uninstall=
 agy=auto claude=auto opencode=auto
 
 while (( $# )); do
@@ -51,6 +53,8 @@ while (( $# )); do
     --user-bin)    bin_mode=user ;;
     --global)      bin_mode=global ;;
     --no-bin)      bin_mode=none ;;
+    --aliases)     aliases=yes ;;
+    --no-aliases)  aliases=no ;;
     --agy)         agy=yes ;;
     --no-agy)      agy=no ;;
     --claude)      claude=yes ;;
@@ -86,9 +90,16 @@ skill_dir=$here/skills/duckeye
 skill_md=$skill_dir/SKILL.md
 
 bin_dst=
+alias_dsts=()
 case $bin_mode in
-  user)   bin_dst=$HOME/.local/bin/duckeye ;;
-  global) bin_dst=/usr/local/bin/duckeye ;;
+  user)
+    bin_dst=$HOME/.local/bin/duckeye
+    alias_dsts=($HOME/.local/bin/de $HOME/.local/bin/dep)
+    ;;
+  global)
+    bin_dst=/usr/local/bin/duckeye
+    alias_dsts=(/usr/local/bin/de /usr/local/bin/dep)
+    ;;
   none)   ;;
 esac
 
@@ -135,6 +146,9 @@ unlink() {
 if [[ -n $uninstall ]]; then
   echo 'uninstalling'
   [[ -n $bin_dst ]] && unlink "$bin_dst" binary
+  for alias_dst in "${alias_dsts[@]}"; do
+    unlink "$alias_dst" alias
+  done
   for label in "${!skill_targets[@]}"; do
     unlink "${skill_targets[$label]}" "$label"
   done
@@ -153,8 +167,19 @@ if [[ -n $bin_dst ]]; then
     printf '  %-10s %s (needs sudo)\n' binary "$bin_dst"
     sudo mkdir -p "$(dirname "$bin_dst")"
     sudo ln -sf "$bin_src" "$bin_dst" && installed=$((installed + 1))
+    if [[ $aliases == yes ]]; then
+      for alias_dst in "${alias_dsts[@]}"; do
+        printf '  %-10s %s (needs sudo)\n' alias "$alias_dst"
+        sudo ln -sf "$bin_src" "$alias_dst" && installed=$((installed + 1))
+      done
+    fi
   else
     link "$bin_src" "$bin_dst" binary
+    if [[ $aliases == yes ]]; then
+      for alias_dst in "${alias_dsts[@]}"; do
+        link "$bin_src" "$alias_dst" alias
+      done
+    fi
   fi
 fi
 

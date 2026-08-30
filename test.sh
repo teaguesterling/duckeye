@@ -414,6 +414,10 @@ no  'unreadable file'            $DUCKEYE /nope/nope.md
 no  'no arguments'               $DUCKEYE
 ok  'toc pipes into section'     bash -c "$DUCKEYE -t '$TMP/doc.md' | while read -r l; do
        t=\${l#\"\${l%%[![:space:]]*}\"}; $DUCKEYE -S \"\$t\" '$TMP/doc.md' >/dev/null || exit 1; done"
+ln -sf "$DUCKEYE" "$TMP/de"
+ln -sf "$DUCKEYE" "$TMP/dep"
+ok  'de alias works'             "$TMP/de" -t "$TMP/doc.md"
+ok  'dep alias works'            "$TMP/dep" -t "$TMP/doc.md"
 
 printf '\n%d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip"
 (( fail == 0 ))

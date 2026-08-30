@@ -21,7 +21,7 @@ set -uo pipefail
 # --init only. Separate from the LOAD lists above because installing needs to
 # know which repository each extension comes from; LOAD does not.
 : "${DUCKEYE_OFFICIAL:=http aws excel}"
-: "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot}"
+: "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck}"
 
 usage() {
   cat <<'EOF'
@@ -42,6 +42,7 @@ Options:
                          level (so a chapter carries its subsections)
   -s, --search TEXT      print only the innermost sections whose text contains
                          TEXT, headings and code blocks included
+  -Q, --select SEL       query code AST by CSS selector (.func, .class#Name, .func:async, ...)
   -r, --raw              read FILE as data, not prose: SELECT * FROM FILE
                          rendered as a table (parquet, csv, json, xlsx, ...)
   -z, --summary          summarize data columns via DuckDB SUMMARIZE; implies -r
@@ -243,6 +244,10 @@ sniff() {
     '<!DOCTYPE HTML'*|'<html'*|'<HTML'*) echo html; return ;;
   esac
   case $h in
+    '#!'*python*)                        echo py;   return ;;
+    '#!'*bash*|'#!'*sh*|'#!'*zsh*)       echo sh;   return ;;
+    '#!'*ruby*)                          echo rb;   return ;;
+    '#!'*node*)                          echo js;   return ;;
     *'"pandoc-api-version"'*)            echo json; return ;;   # a Pandoc AST
     '.TH '*|'.\"'*|"'\\\""*|'.SH '*)     echo man;  return ;;   # roff
     '<?xml'*|'<'*)                       echo html; return ;;
@@ -276,6 +281,8 @@ while (( $# )); do
     -Z|--profile|--smart-summary) setmode profile ;;
     -S|--section)  [[ $# -ge 2 ]] || die '-S needs a section name' 64; setmode section; arg=$2; shift ;;
     -s|--search)   [[ $# -ge 2 ]] || die '-s needs search text' 64; setmode search; arg=$2; shift ;;
+    -Q|--select)   [[ $# -ge 2 ]] || die '-Q/--select needs a CSS selector' 64; selector=$2; shift ;;
+    --select=*)    selector=${1#--select=} ;;
     -f|--format)   [[ $# -ge 2 ]] || die '-f needs a format' 64; fmt=${2,,}; shift ;;
     -o|--output)   [[ $# -ge 2 ]] || die '-o needs an output format' 64; out_fmt=${2,,}; shift ;;
     --color)       [[ $# -ge 2 ]] || die '--color needs auto, always or never' 64
@@ -425,6 +432,23 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
         local_repo=${local_repo%.git}
         from="git_log('${local_repo:-.}')"
         exts="duck_tails"
+      elif [[ $key == *.py || $key == *.pyi || $key == *.pyw || $key == *.rs || \
+              $key == *.go || $key == *.c || $key == *.h || $key == *.cpp || \
+              $key == *.hpp || $key == *.cc || $key == *.cxx || $key == *.c++ || \
+              $key == *.hh || $key == *.hxx || $key == *.js || $key == *.jsx || \
+              $key == *.mjs || $key == *.cjs || $key == *.ts || $key == *.tsx || \
+              $key == *.java || $key == *.kt || $key == *.kts || $key == *.cs || \
+              $key == *.swift || $key == *.rb || $key == *.ruby || $key == *.php || \
+              $key == *.lua || $key == *.r || $key == *.sh || $key == *.bash || \
+              $key == *.zsh || $key == *.zig || $key == *.dart || $key == *.sql || \
+              $key == *.gql || $key == *.graphql || $key == *.tf || $key == *.hcl || \
+              $key == *.css ]]; then
+        if [[ -n ${selector:-} ]]; then
+          from="ast_select('$src', '$(q "$selector")')"
+        else
+          from="read_ast('$src', peek := 'full')"
+        fi
+        exts="sitting_duck"
       else
         from="'$src'"
       fi ;;
@@ -439,6 +463,12 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     git)               local_repo=${src%/.git}; local_repo=${local_repo%.git}
                        from="git_log('${local_repo:-.}')"; exts="duck_tails" ;;
     lines)             from="read_lines('$src')"; exts="read_lines" ;;
+    ast|code)          if [[ -n ${selector:-} ]]; then
+                         from="ast_select('$src', '$(q "$selector")')"
+                       else
+                         from="read_ast('$src', peek := 'full')"
+                       fi
+                       exts="sitting_duck" ;;
     *)                 from="read_$fmt('$src')" ;;   # DuckDB reports an unknown reader
   esac
 
@@ -641,7 +671,7 @@ FROM __duckeye_src"
     sql="$target_query;"
   fi
 
-  load=
+  load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; "
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
   if want_color; then
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth $term_cols" -s "$load" -s "$sql")
@@ -728,6 +758,18 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     fi ;;
   *.json)                          # assumed to be a Pandoc AST
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;
+  *.py|*.pyi|*.pyw|*.rs|*.go|*.c|*.h|*.cpp|*.hpp|*.cc|*.cxx|*.c++|*.hh|*.hxx|\
+  *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.java|*.kt|*.kts|*.cs|*.swift|*.rb|*.ruby|\
+  *.php|*.php3|*.php4|*.php5|*.phtml|*.lua|*.r|*.sh|*.bash|*.zsh|*.zig|*.dart|\
+  *.sql|*.gql|*.graphql|*.tf|*.tfvars|*.hcl|*.css)
+    exts="sitting_duck"
+    if [[ -n ${selector:-} ]]; then
+      premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');
+CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(q "$selector")'); "
+      doc="SELECT list(block) AS blocks FROM ast_to_blocks_from('__sel')"
+    else
+      doc="SELECT blocks FROM ast_to_blocks_list('$src')"
+    fi ;;
   *.docx|*.odt|*.epub|*.rst|*.org|*.tex|*.ipynb|*.rtf|*.textile|*.man|*.mediawiki|\
   *.[1-9])
     command -v pandoc >/dev/null ||
@@ -820,7 +862,7 @@ if [[ $out_fmt == pandoc || $out_fmt == md ]]; then
                 'blocks', duck_blocks_to_pandoc_ast(b).blocks::JSON)); "
 fi
 
-load=
+load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; "
 for e in $DUCKEYE_BASE $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
 
 duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")

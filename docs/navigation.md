@@ -49,7 +49,29 @@ Unlike `-S`, `-s` reports the **innermost** matching section, giving tight, focu
 
 ---
 
-## 4. PDF Page Range Slicing (`-P`)
+## 4. Source Code AST & CSS Selectors (`-Q`)
+
+When inspecting code files (`.py`, `.rs`, `.go`, `.c`, `.cpp`, `.js`, `.ts`, `.java`, etc.), `duckeye` parses Tree-sitter ASTs via `sitting_duck`.
+
+The `-Q, --select SELECTOR` flag queries and extracts specific code structures using standard CSS selectors:
+
+```console
+# Render all function definitions
+$ duckeye -Q '.func' service.py
+
+# Extract a specific class and its methods
+$ duckeye -Q '.class#Calculator' math_lib.py
+
+# Extract async functions
+$ duckeye -Q '.func:async' routes.js
+
+# Target test functions by name pattern
+$ duckeye -Q '.func[name^=test_]' test_suite.py
+```
+
+---
+
+## 5. PDF Page Range Slicing (`-P`)
 
 When reading PDFs, `-P, --pages RANGE` extracts specific pages or page ranges:
 
@@ -71,7 +93,7 @@ $ duckeye -P 1-5 -t manual.pdf
 
 ---
 
-## 5. Output Format Conversion (`-o`)
+## 6. Output Format Conversion (`-o`)
 
 The `-o, --output FMT` flag serializes the extracted document or section into different formats:
 

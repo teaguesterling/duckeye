@@ -67,4 +67,4 @@ duckeye --init
 Running `duckeye --init` installs:
 
 * **Official Extensions**: `http`, `aws`, `excel`
-* **Community Extensions**: `duck_block_utils`, `markdown`, `webbed`, `zim`, `pdf`, `yaml`, `toml`, `read_lines`, `duck_tails`, `zipfs`, `textplot`
+* **Community Extensions**: `duck_block_utils`, `markdown`, `webbed`, `zim`, `pdf`, `sitting_duck`, `yaml`, `toml`, `read_lines`, `duck_tails`, `zipfs`, `textplot`

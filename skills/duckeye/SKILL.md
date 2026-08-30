@@ -3,15 +3,17 @@ name: duckeye
 description: >-
   Use this skill when the user asks about reading, rendering, searching,
   navigating, or converting documents (markdown, HTML, PDF, DOCX, EPUB, LaTeX,
-  Jupyter notebooks, man pages, ZIM archives) in the terminal, or when the
-  user wants to inspect structured data files (parquet, CSV, JSON) from the
-  command line. Also activate when the user mentions duckeye, dep, or
+  Jupyter notebooks, man pages, ZIM archives) or source code ASTs (Python, Rust,
+  Go, C/C++, JS/TS, Java, Kotlin, Swift, Ruby, PHP, Lua, Bash, etc. via sitting_duck)
+  in the terminal, or when inspecting structured data files (parquet, CSV, JSON,
+  YAML, TOML, XLSX, ZIP, git logs). Also activate when querying code by CSS
+  selectors (-Q), or when the user mentions duckeye, dep, sitting_duck, or
   duck_block_utils.
 ---
 
-# duckeye — Terminal Document Reader
+# duckeye — Terminal Document & Source AST Reader
 
-duckeye renders documents in the terminal. One bash script, no build step — it
+duckeye renders documents and source code ASTs in the terminal. One bash script, no build step — it
 dispatches to DuckDB extensions for parsing and renders via `duck_block_utils`.
 
 **Location**: `~/.dotfiles/duckeye/duckeye` (symlinked onto `PATH`)
@@ -20,50 +22,57 @@ dispatches to DuckDB extensions for parsing and renders via `duck_block_utils`.
 
 ## Quick Reference
 
-### Reading documents
+### Reading documents & source code
 
 ```sh
 duckeye FILE                        # render to stdout, unpaged
 duckeye -p FILE                     # paged (alias: dep FILE)
 duckeye -P 1-5 manual.pdf           # page range of a PDF
-cat FILE | duckeye -                # read from stdin (format sniffed, including PDF)
+duckeye main.py                     # render Python AST with syntax code blocks
+cat FILE | duckeye -                # read from stdin (sniffs format, shebangs, & PDF magic)
 duckeye -f html page.txt            # override format detection
 ```
 
-### Navigating
+### Navigating & AST CSS Selectors
 
 ```sh
-duckeye -t FILE                     # table of contents (one heading per line)
-duckeye -S 'Section Name' FILE      # extract one section (+ its children)
-duckeye -s 'search term' FILE       # find innermost sections containing term
+duckeye -t FILE                     # table of contents / code definition outline
+duckeye -S 'Section Name' FILE      # extract one section or function (+ its children)
+duckeye -s 'search term' FILE       # find innermost sections/functions containing term
+duckeye -Q '.func' FILE             # query code AST by CSS selector (all functions)
+duckeye -Q '.class#Calculator' FILE # extract specific class & methods
+duckeye -Q '.func:async' FILE       # extract async functions
+duckeye -Q '.func[name^=test_]' FILE # extract test functions
 ```
 
 `-t`, `-S`, `-s`, and `-r` are **mutually exclusive**.
 
-Matching is case-insensitive substring; SQL `LIKE` wildcards (`%`, `_`) work.
+Matching for `-S` and `-s` is case-insensitive substring; SQL `LIKE` wildcards (`%`, `_`) work.
 `-S` also matches heading slug IDs exactly.
 
-### Converting (after extraction)
+### Converting (after extraction or AST selection)
 
 ```sh
 duckeye -o text FILE                # plain text (no ANSI escapes)
 duckeye -o md -S Install FILE       # extract a section as markdown
+duckeye -o md -Q '.func' FILE       # export all functions as markdown API docs
 duckeye -o html -S Usage FILE       # extract a section as HTML
 duckeye -o pandoc FILE              # Pandoc AST JSON
 duckeye -o blocks FILE              # duck_blocks JSON
 ```
 
-`-o` applies **after** `-S`/`-s`, so it converts only the selected content.
+`-o` applies **after** `-S`/`-s`/`-Q`, so it converts only the selected content.
 `-o` does not apply to `-r` or `-t`.
 
-### Data files
+### Data files & Tabular AST Exploration
 
 ```sh
-duckeye -r data.parquet             # tabular view (DuckDB box renderer)
+duckeye -r data.parquet             # tabular view (DuckDB box renderer, width-budgeted)
 duckeye -r data.csv
 duckeye -z data.parquet             # quick column summary (min, max, avg, quantiles, nulls)
 duckeye -Z data.parquet             # smart column profile (sparklines, category frequencies, null %)
 duckeye -Z -w "category = 'tools'" products.parquet  # profile filtered subset
+duckeye -r -Q '.call#eval' app.js   # query code AST nodes as table with line numbers & peek text
 duckeye -r config.yaml              # YAML as data table
 duckeye -r Cargo.toml               # TOML configuration table
 duckeye -r spreadsheet.xlsx         # Excel spreadsheet
@@ -97,6 +106,9 @@ duckeye -t spec.md | fzf | xargs -I{} duckeye -S {} spec.md
 
 # Convert a section of a DOCX to markdown
 duckeye -S Results -o md paper.docx > results.md
+
+# Query AST definitions programmatically
+duckeye -Q '.func#process' -o md src/worker.rs
 ```
 
 ---
@@ -107,27 +119,26 @@ duckeye -S Results -o md paper.docx > results.md
    ANSI escapes. Default `ansi` output contains SGR sequences that clutter
    tool output.
 
-2. **Use `-t` first to discover structure**, then `-S` to extract specific
-   sections. This avoids dumping entire large documents.
+2. **Use `-t` first to discover structure**, then `-S` or `-Q` to extract specific
+   sections or functions. This avoids dumping entire large files or codebases into context.
 
 3. **Prefer duckeye over `cat` for non-plaintext files** — PDF, DOCX, EPUB, HTML,
-   LaTeX, notebooks, and man pages are all supported and rendered as readable
-   text.
+   LaTeX, notebooks, man pages, and source code files (Python, Rust, Go, JS/TS, etc.)
+   are all parsed into clean, structured blocks.
 
-4. **For PDFs, use `-P 1-5`** to read specific page ranges, or `-S` to jump
+4. **Use `-Q` for code exploration** — CSS selectors (`.func`, `.class#Name`, `.func:async`, `.func[name^=test_]`)
+   allow precision extraction without scrolling or manual regex.
+
+5. **For PDFs, use `-P 1-5`** to read specific page ranges, or `-S` to jump
    to specific sections based on the document's outline.
 
-5. **For data inspection, use `-r`** rather than raw `duckdb` commands — duckeye
-   handles extension loading automatically.
+6. **For data inspection, use `-r`** rather than raw `duckdb` commands — duckeye
+   handles extension loading automatically and adapts column widths to terminal dimensions.
 
-6. **Stdin requires `-f` under `-r`** — data format cannot be safely sniffed.
-   Document formats (md, html, pdf, docx) are sniffed automatically from magic bytes.
+7. **Stdin requires `-f` under `-r`** — data format cannot be safely sniffed.
+   Document and code formats (md, html, pdf, docx, shebangs) are sniffed automatically.
 
-7. **`-S` and `-s` exit 1 on no match** — use this in conditionals.
-
-8. **Section extraction is hierarchical**: asking for a parent heading with `-S`
-   includes all its children. `-s` does the opposite: it reports only the
-   innermost section containing the match.
+8. **`-S` and `-s` exit 1 on no match** — use this in conditionals.
 
 ---
 
@@ -140,8 +151,9 @@ duckeye -S Results -o md paper.docx > results.md
 | `.pdf` | `pdf` DuckDB extension |
 | `.json` | Pandoc AST |
 | `.zim`, `zim://…` | `zim` DuckDB extension (handles HTML, markdown, and embedded PDFs) |
+| `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | `sitting_duck` DuckDB extension (Tree-sitter AST to duck_blocks & CSS selector engine) |
 | `.docx` `.odt` `.epub` `.rst` `.org` `.tex` `.ipynb` `.rtf` `.textile` `.mediawiki` `.man` `.1`–`.9` | `pandoc(1)` |
-| anything under `-r` | DuckDB reader (parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, …) |
+| anything under `-r` | DuckDB reader (parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, …) |
 
 ---
 
@@ -152,6 +164,8 @@ duckeye -S Results -o md paper.docx > results.md
 | `DUCKEYE_PAGER` | `less -R` | Pager for `-p` |
 | `DUCKEYE_BASE` | `duck_block_utils` | Base extension always loaded |
 | `DUCKEYE_EXTS` | _(empty)_ | Extra extensions to `LOAD` |
+| `DUCKEYE_THEME` | `auto` | `dark` or `light` theme override |
+| `COLUMNS` | `auto` | Column width for table rendering & profiling |
 
 ## Setup
 

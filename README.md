@@ -90,15 +90,18 @@ ls [OPTION]... [FILE]...
 
 No temporary file and no `-f`: piped input is sniffed, and roff is recognisable.
 
-## Standard input, and telling duckeye what it's looking at
+## Standard input, git revisions, and telling duckeye what it's looking at
 
-`-` means standard input, and so does a bare pipe with no FILE at all:
+`-` means standard input, and so does a bare pipe with no FILE at all. `duckeye` also natively speaks `git://` URIs (`git://<path>@<ref>`) to read historical versions directly from git without checking them out:
 
 ```console
-$ curl -s https://example.com | duckeye -           # sniffed as HTML
-$ pandoc notes.txt -t json | duckeye -t -           # sniffed as a Pandoc AST
-$ git show HEAD:README.md | duckeye -S Install      # read a doc at a revision
-$ unzip -p archive.zip doc.docx | duckeye -t -      # sniffed as DOCX
+$ curl -s https://example.com | duckeye -             # sniffed as HTML
+$ pandoc notes.txt -t json | duckeye -t -             # sniffed as a Pandoc AST
+$ duckeye 'git://README.md@v0.12.0'                   # read a doc at a git tag
+$ duckeye -t 'git://spec.md@HEAD~2'                   # outline a doc at a past commit
+$ duckeye -S Install 'git://README.md@HEAD~1'         # extract section from past revision
+$ duckeye -Q '.func' 'git://src/main.rs@main'         # AST query code at git branch
+$ unzip -p archive.zip doc.docx | duckeye -t -        # sniffed as DOCX
 ```
 
 Sniffing reads magic bytes first (`%PDF`, and the zip container that `.docx`, `.epub`

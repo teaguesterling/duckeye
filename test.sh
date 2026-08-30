@@ -8,6 +8,8 @@ set -uo pipefail
 
 cd "$(dirname "$0")" || exit 1
 DUCKEYE=${DUCKEYE:-./duckeye}
+export DUCKEYE_THEME=dark
+export COLUMNS=120
 TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
@@ -426,6 +428,9 @@ ok  'de alias works'             "$TMP/de" -t "$TMP/doc.md"
 ok  'dep alias works'            "$TMP/dep" -t "$TMP/doc.md"
 ok  'der alias works'            "$TMP/der" "$TMP/test_code.py"
 has 'der raw output'             'function_definition' "$TMP/der" "$TMP/test_code.py"
+ok  'git uri toc'                $DUCKEYE -t 'git://README.md@HEAD'
+has 'git uri section'            'Install' $DUCKEYE -S Install 'git://README.md@HEAD'
+ok  'git uri code ast toc'       $DUCKEYE -t 'git://test.sh@HEAD'
 
 printf '\n%d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip"
 (( fail == 0 ))

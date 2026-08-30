@@ -7,8 +7,9 @@ description: >-
   Go, C/C++, JS/TS, Java, Kotlin, Swift, Ruby, PHP, Lua, Bash, etc. via sitting_duck)
   in the terminal, or when inspecting structured data files (parquet, CSV, JSON,
   YAML, TOML, XLSX, ZIP, git logs). Also activate when querying code by CSS
-  selectors (-Q), or when the user mentions duckeye, dep, sitting_duck, or
+  selectors (-Q), or when the user mentions duckeye, dep, der, sitting_duck, or
   duck_block_utils.
+version: 0.14.0
 ---
 
 # duckeye — Terminal Document & Source AST Reader
@@ -28,6 +29,7 @@ dispatches to DuckDB extensions for parsing and renders via `duck_block_utils`.
 duckeye FILE                        # render to stdout, unpaged (alias: de FILE)
 duckeye -p FILE                     # paged (alias: dep FILE)
 der FILE                            # force raw data / tabular AST output
+duckeye 'git://README.md@v0.12.0'   # read historical version from git
 duckeye -P 1-5 manual.pdf           # page range of a PDF
 duckeye main.py                     # render Python AST with syntax code blocks
 cat FILE | duckeye -                # read from stdin (sniffs format, shebangs, & PDF magic)

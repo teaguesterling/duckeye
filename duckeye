@@ -355,8 +355,8 @@ if [[ $f == - || ( -z $f && ! -t 0 ) ]]; then
 fi
 
 [[ -n $f ]] || { usage >&2; exit 64; }
-# Allow HTTP, HTTPS, S3 URLs, and glob patterns (* or ?)
-if [[ $f == zim://* || -r $f || $f == http*://* || $f == https*://* || $f == s3*://* || $f == *\** || $f == *\?* ]]; then
+# Allow HTTP, HTTPS, S3, git URLs, and glob patterns (* or ?)
+if [[ $f == zim://* || $f == git://* || -r $f || $f == http*://* || $f == https*://* || $f == s3*://* || $f == *\** || $f == *\?* ]]; then
     :
 else
     die "cannot read $f"   # zim:// resolves inside the archive
@@ -397,8 +397,8 @@ esac
 
 # If no format specified and filename has no extension, sniff it (e.g. executable scripts)
 if [[ $f != *\** && $f != *\?* ]]; then
-  base=$(basename "$f")
-  if [[ -z $norm && $base != *.* && -f $f && $f != zim://* ]]; then
+  base=$(basename "${f%@*}")
+  if [[ -z $norm && $base != *.* && -f $f && $f != zim://* && $f != git://* ]]; then
     sniffed=$(sniff "$f")
     case $sniffed in
       py|sh|rb|js) norm=$sniffed ;;
@@ -407,7 +407,8 @@ if [[ $f != *\** && $f != *\?* ]]; then
   fi
 fi
 
-key=${f,,}
+f_no_ref="${f%@*}"
+key=${f_no_ref,,}
 [[ -n $norm ]] && key=".$norm"
 
 # Sniff json to distinguish Pandoc AST from structured data
@@ -538,7 +539,17 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
         fi
         exts="sitting_duck"
       else
-        from="'$src'"
+        if [[ $f == git://* ]]; then
+          if [[ $key == *.parquet || $key == *.pq ]]; then
+            from="read_parquet('$src')"
+          elif [[ $key == *.csv || $key == *.tsv ]]; then
+            from="read_csv('$src')"
+          else
+            from="read_text('$src')"
+          fi
+        else
+          from="'$src'"
+        fi
       fi ;;
     csv|tsv|txt|text)  from="read_csv('$src')" ;;
     parquet|pq)        from="read_parquet('$src')" ;;
@@ -557,8 +568,12 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
                          from="read_ast('$src', peek := 'full')"
                        fi
                        exts="sitting_duck" ;;
-    *)                 from="read_$fmt('$src')" ;;   # DuckDB reports an unknown reader
+    *)                 die "unknown format for -r: $fmt" ;;
   esac
+
+  if [[ $f == git://* ]]; then
+    exts="$exts duck_tails"
+  fi
 
   target_query="SELECT * FROM $from"
   [[ -n $where ]] && target_query+=" WHERE $where"
@@ -889,10 +904,12 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
 esac
 
 
-if [[ $key == "http*://*" ]]; then
+if [[ $f == http://* || $f == https://* ]]; then
   exts="$exts http"
-elif [[ $key == "s3://*" ]]; then
+elif [[ $f == s3://* ]]; then
   exts="$exts aws http"
+elif [[ $f == git://* ]]; then
+  exts="$exts duck_tails"
 fi
 
 # MATERIALIZED: the section/search queries reference the document more than once,

@@ -59,3 +59,20 @@ When reading standard input (`cat file | duckeye -` or bare pipes) or extensionl
 * `.TH ` roff macros &rarr; Man page source
 * Shebangs (`#!...python`, `#!...sh`, `#!...ruby`, `#!...node`) &rarr; Source code AST
 * Default fallback &rarr; Markdown
+
+---
+
+## Git URIs (`git://<path>@<ref>`)
+
+`duckeye` supports reading any document, AST, or data file directly from a git commit, tag, or branch using the `git://` protocol:
+
+```bash
+# Read markdown at a specific tag
+duckeye 'git://README.md@v0.12.0'
+
+# Outline code definitions at HEAD~1
+duckeye -t 'git://src/main.rs@HEAD~1'
+
+# Search past version of a document
+duckeye -s 'Install' 'git://docs/installation.md@v0.10.0'
+```

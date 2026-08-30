@@ -5,8 +5,9 @@
 `duckeye` turns your terminal into a universal document reader and structured data explorer. Markdown, HTML, PDF, DOCX, EPUB, LaTeX, Jupyter notebooks, man pages, offline Wikipedia archives (ZIM), 27 programming language source ASTs (Python, Rust, Go, C/C++, JS/TS, etc.), Parquet, CSV, JSON, YAML, TOML, Excel spreadsheets, ZIP archives, and Git logs — parsed natively by DuckDB extensions and rendered with ANSI block formatting.
 
 ```bash
-# Render documents & source code in terminal
+# Render documents & source code in terminal (shorthand: de)
 duckeye README.md
+dep README.md                       # Automatically paged through $DUCKEYE_PAGER
 duckeye proposal.docx
 duckeye -P 1-5 manual.pdf
 duckeye main.py
@@ -19,7 +20,8 @@ duckeye -Q ".func:async" api.js     # Extract async functions via CSS selector
 duckeye -s "authentication" spec.md  # Full-text search across sections
 
 # Data exploration, profiling & tabular AST queries
-duckeye -r data.parquet              # Box table viewer
+duckeye data.parquet                # Data files default to raw table mode!
+der app.js                          # der forces raw AST table mode
 duckeye -z data.parquet              # Fast DuckDB SUMMARIZE
 duckeye -Z data.parquet              # Smart profiler with sparklines & category frequencies
 duckeye -r -Q ".call#eval" app.js    # Query AST call sites with line numbers & peek text

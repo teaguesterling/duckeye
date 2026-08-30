@@ -25,8 +25,9 @@ dispatches to DuckDB extensions for parsing and renders via `duck_block_utils`.
 ### Reading documents & source code
 
 ```sh
-duckeye FILE                        # render to stdout, unpaged
+duckeye FILE                        # render to stdout, unpaged (alias: de FILE)
 duckeye -p FILE                     # paged (alias: dep FILE)
+der FILE                            # force raw data / tabular AST output
 duckeye -P 1-5 manual.pdf           # page range of a PDF
 duckeye main.py                     # render Python AST with syntax code blocks
 cat FILE | duckeye -                # read from stdin (sniffs format, shebangs, & PDF magic)
@@ -68,22 +69,26 @@ duckeye -o blocks FILE              # duck_blocks JSON
 
 ### Data files & Tabular AST Exploration
 
+Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode without needing `-r`!
+
 ```sh
-duckeye -r data.parquet             # tabular view (DuckDB box renderer, width-budgeted)
-duckeye -r data.csv
+duckeye data.parquet                # auto-detects data mode (DuckDB box renderer)
+duckeye data.csv
+duckeye data.json                   # JSON data table (Pandoc AST JSON is auto-detected as doc)
 duckeye -z data.parquet             # quick column summary (min, max, avg, quantiles, nulls)
 duckeye -Z data.parquet             # smart column profile (sparklines, category frequencies, null %)
 duckeye -Z -w "category = 'tools'" products.parquet  # profile filtered subset
+der app.js                          # force raw AST table mode
 duckeye -r -Q '.call#eval' app.js   # query code AST nodes as table with line numbers & peek text
-duckeye -r config.yaml              # YAML as data table
-duckeye -r Cargo.toml               # TOML configuration table
-duckeye -r spreadsheet.xlsx         # Excel spreadsheet
+duckeye config.yaml                 # YAML as data table
+duckeye Cargo.toml                  # TOML configuration table
+duckeye spreadsheet.xlsx            # Excel spreadsheet
 duckeye -r report.pdf               # inspect PDF pages as data table
-duckeye -r archive.zip              # inspect zip archive contents
-duckeye -r .git                     # inspect git commit log
+duckeye archive.zip                 # inspect zip archive contents
+duckeye .git                        # inspect git commit log
 duckeye -r -f lines script.sh       # inspect file with line numbers & offsets
 duckeye -w "score > 90" data.parquet  # -w implies data mode, full SQL WHERE syntax
-duckeye -r -n 20 huge.csv           # limit rows
+duckeye -n 20 huge.csv              # limit rows
 ```
 
 ### ZIM archives (offline Wikipedia, Gutenberg, etc.)

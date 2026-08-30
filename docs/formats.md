@@ -24,9 +24,9 @@
 
 ---
 
-## Data & Config Formats (Raw / Summary / Profile)
+## Data & Config Formats (Automatic Raw / Summary / Profile)
 
-Under data modes (`-r`, `-z`, `-Z`), `duckeye` opens files via DuckDB's fast columnar scanner:
+Data files automatically default to raw table mode without requiring `-r` (or can be forced with the `der` alias). Under data modes (`-r`, `-z`, `-Z`, `der`), `duckeye` opens files via DuckDB's fast columnar scanner:
 
 | Format | Extensions | Engine | Reader Function |
 |---|---|---|---|
@@ -43,14 +43,19 @@ Under data modes (`-r`, `-z`, `-Z`), `duckeye` opens files via DuckDB's fast col
 
 ---
 
-## Format Sniffing
+## JSON & Format Sniffing
 
-When reading standard input (`cat file | duckeye -` or bare pipes), `duckeye` automatically inspects initial bytes:
+### JSON Files: Data vs. Pandoc AST
+- **Data JSON** (`.json`, `.ndjson`, `.jsonl`): Defaults to structured tabular data via `read_json()`.
+- **Pandoc AST JSON**: If the JSON contains the root key `"pandoc-api-version"`, `duckeye` automatically detects it as a document and renders it through the rich document pipeline.
+
+### Input Sniffing
+When reading standard input (`cat file | duckeye -` or bare pipes) or extensionless files, `duckeye` inspects initial bytes:
 
 * `%PDF` &rarr; PDF
-* Zip magic bytes (`PK\x03\x04`) + internal manifest check &rarr; DOCX, EPUB, or ODT
+* Zip magic bytes (`PK\x03\x04`) + internal manifest check &rarr; DOCX, EPUB, or ODT (or raw ZIP)
 * `<!DOCTYPE html` or `<html>` &rarr; HTML
-* `pandoc-api-version` &rarr; Pandoc AST JSON
+* `"pandoc-api-version"` &rarr; Pandoc AST JSON
 * `.TH ` roff macros &rarr; Man page source
 * Shebangs (`#!...python`, `#!...sh`, `#!...ruby`, `#!...node`) &rarr; Source code AST
 * Default fallback &rarr; Markdown

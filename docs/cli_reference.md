@@ -4,6 +4,16 @@
 usage: duckeye [OPTION]... [FILE]
 ```
 
+## Command Aliases
+
+| Alias | Command | Purpose |
+|---|---|---|
+| `de` | `duckeye` | Short, fast invocation for interactive terminal work |
+| `dep` | `duckeye -p` | Automatically pages output through `$DUCKEYE_PAGER` (`less -R`) on interactive ttys |
+| `der` | `duckeye -r` | Forces raw data / tabular AST output mode |
+
+---
+
 ## Options
 
 | Flag | Long Flag | Description |
@@ -14,7 +24,7 @@ usage: duckeye [OPTION]... [FILE]
 | `-S` | `--section NAME`| Print only the section whose heading matches NAME |
 | `-s` | `--search TEXT` | Search and print only innermost sections matching TEXT |
 | `-Q` | `--select SEL` | Query code AST by CSS selector (e.g. `.func`, `.class#Name`, `.func:async`) |
-| `-r` | `--raw` | Read file as data table (parquet, csv, json, yaml, toml, xlsx, ...) |
+| `-r` | `--raw` | Read file as data table (auto-enabled for data files: parquet, csv, json, yaml, toml, xlsx, ...) |
 | `-z` | `--summary` | Quick DuckDB `SUMMARIZE` breakdown; implies data mode |
 | `-Z` | `--profile` | Smart column profile with sparklines & category frequencies |
 | `-o` | `--output FMT` | Output format: `ansi` (default), `text`, `md`, `html`, `pandoc`, `blocks` |

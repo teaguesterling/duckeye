@@ -20,8 +20,8 @@ Binary & Aliases:
   --user-bin       install to ~/.local/bin (default)
   --global         install to /usr/local/bin
   --no-bin         skip the binary
-  --aliases        create 'de' (alias for duckeye) and 'dep' (paged) symlinks (default)
-  --no-aliases     skip creating 'de' and 'dep' symlinks
+  --aliases        create 'de', 'dep', and 'der' symlinks (default)
+  --no-aliases     skip creating aliases
 
 Agent skills (auto-detected by default):
   --agy            install the Antigravity (agy) skill
@@ -32,7 +32,7 @@ Agent skills (auto-detected by default):
   --no-opencode    skip OpenCode
 
 Other:
-  --uninstall      remove all installed symlinks
+  --uninstall      remove all installed files and symlinks
   --no-init        skip running duckeye --init after install
   -h, --help       show this help
 
@@ -88,17 +88,43 @@ opencode=$(resolve "$opencode" "$HOME/.config/opencode")
 bin_src=$here/duckeye
 skill_dir=$here/skills/duckeye
 skill_md=$skill_dir/SKILL.md
+is_remote=no
+
+if [[ ! -x $bin_src || ! -f $skill_md ]]; then
+  is_remote=yes
+  repo_raw="${DUCKEYE_REPO_RAW:-https://raw.githubusercontent.com/teaguesterling/duckeye/main}"
+  dl_tmp=$(mktemp -d "${TMPDIR:-/tmp}/duckeye-install.XXXXXX")
+  trap 'rm -rf "$dl_tmp"' EXIT
+  if [[ -z $uninstall ]]; then
+    echo "downloading duckeye from $repo_raw"
+    if command -v curl >/dev/null; then
+      curl -fsSL "$repo_raw/duckeye" -o "$dl_tmp/duckeye" || die "failed to download duckeye"
+      mkdir -p "$dl_tmp/skills/duckeye"
+      curl -fsSL "$repo_raw/skills/duckeye/SKILL.md" -o "$dl_tmp/skills/duckeye/SKILL.md" || die "failed to download SKILL.md"
+    elif command -v wget >/dev/null; then
+      wget -q "$repo_raw/duckeye" -O "$dl_tmp/duckeye" || die "failed to download duckeye"
+      mkdir -p "$dl_tmp/skills/duckeye"
+      wget -q "$repo_raw/skills/duckeye/SKILL.md" -O "$dl_tmp/skills/duckeye/SKILL.md" || die "failed to download SKILL.md"
+    else
+      die "curl or wget is required to download duckeye"
+    fi
+    chmod +x "$dl_tmp/duckeye"
+    bin_src=$dl_tmp/duckeye
+    skill_dir=$dl_tmp/skills/duckeye
+    skill_md=$skill_dir/SKILL.md
+  fi
+fi
 
 bin_dst=
 alias_dsts=()
 case $bin_mode in
   user)
     bin_dst=$HOME/.local/bin/duckeye
-    alias_dsts=($HOME/.local/bin/de $HOME/.local/bin/dep)
+    alias_dsts=($HOME/.local/bin/de $HOME/.local/bin/dep $HOME/.local/bin/der)
     ;;
   global)
     bin_dst=/usr/local/bin/duckeye
-    alias_dsts=(/usr/local/bin/de /usr/local/bin/dep)
+    alias_dsts=(/usr/local/bin/de /usr/local/bin/dep /usr/local/bin/der)
     ;;
   none)   ;;
 esac
@@ -132,13 +158,24 @@ link() {
   ln -s "$src" "$dst" && installed=$((installed + 1))
 }
 
+copy_file() {
+  local src=$1 dst=$2 label=$3
+  printf '  %-10s %s\n' "$label" "$dst"
+  mkdir -p "$(dirname "$dst")"
+  cp -f "$src" "$dst" && chmod 755 "$dst" 2>/dev/null && installed=$((installed + 1))
+}
+
 unlink() {
   local dst=$1 label=$2
   if [[ -L $dst ]]; then
+    printf '  %-10s removed symlink %s\n' "$label" "$dst"
+    rm "$dst"
+  elif [[ -f $dst ]]; then
     printf '  %-10s removed %s\n' "$label" "$dst"
     rm "$dst"
-  elif [[ -e $dst ]]; then
-    printf '  %-10s %s is not a symlink, skipping\n' "$label" "$dst" >&2
+  elif [[ -d $dst ]]; then
+    printf '  %-10s removed directory %s\n' "$label" "$dst"
+    rm -rf "$dst"
   fi
 }
 
@@ -157,39 +194,65 @@ if [[ -n $uninstall ]]; then
 fi
 
 # ---------------------------------------------------------------- install
-[[ -x $bin_src ]] || die "cannot find duckeye at $bin_src"
-[[ -f $skill_md ]] || die "cannot find skill at $skill_md"
-
 echo 'installing'
 
 if [[ -n $bin_dst ]]; then
-  if [[ $bin_mode == global && ! -w $(dirname "$bin_dst") ]]; then
-    printf '  %-10s %s (needs sudo)\n' binary "$bin_dst"
-    sudo mkdir -p "$(dirname "$bin_dst")"
-    sudo ln -sf "$bin_src" "$bin_dst" && installed=$((installed + 1))
-    if [[ $aliases == yes ]]; then
-      for alias_dst in "${alias_dsts[@]}"; do
-        printf '  %-10s %s (needs sudo)\n' alias "$alias_dst"
-        sudo ln -sf "$bin_src" "$alias_dst" && installed=$((installed + 1))
-      done
+  if [[ $is_remote == yes ]]; then
+    if [[ $bin_mode == global && ! -w $(dirname "$bin_dst") ]]; then
+      printf '  %-10s %s (needs sudo)\n' binary "$bin_dst"
+      sudo mkdir -p "$(dirname "$bin_dst")"
+      sudo cp -f "$bin_src" "$bin_dst" && sudo chmod 755 "$bin_dst" && installed=$((installed + 1))
+      if [[ $aliases == yes ]]; then
+        for alias_dst in "${alias_dsts[@]}"; do
+          printf '  %-10s %s (needs sudo)\n' alias "$alias_dst"
+          sudo ln -sf "$bin_dst" "$alias_dst" && installed=$((installed + 1))
+        done
+      fi
+    else
+      copy_file "$bin_src" "$bin_dst" binary
+      if [[ $aliases == yes ]]; then
+        for alias_dst in "${alias_dsts[@]}"; do
+          link "$bin_dst" "$alias_dst" alias
+        done
+      fi
     fi
   else
-    link "$bin_src" "$bin_dst" binary
-    if [[ $aliases == yes ]]; then
-      for alias_dst in "${alias_dsts[@]}"; do
-        link "$bin_src" "$alias_dst" alias
-      done
+    if [[ $bin_mode == global && ! -w $(dirname "$bin_dst") ]]; then
+      printf '  %-10s %s (needs sudo)\n' binary "$bin_dst"
+      sudo mkdir -p "$(dirname "$bin_dst")"
+      sudo ln -sf "$bin_src" "$bin_dst" && installed=$((installed + 1))
+      if [[ $aliases == yes ]]; then
+        for alias_dst in "${alias_dsts[@]}"; do
+          printf '  %-10s %s (needs sudo)\n' alias "$alias_dst"
+          sudo ln -sf "$bin_dst" "$alias_dst" && installed=$((installed + 1))
+        done
+      fi
+    else
+      link "$bin_src" "$bin_dst" binary
+      if [[ $aliases == yes ]]; then
+        for alias_dst in "${alias_dsts[@]}"; do
+          link "$bin_dst" "$alias_dst" alias
+        done
+      fi
     fi
   fi
 fi
 
 for label in "${!skill_targets[@]}"; do
   dst=${skill_targets[$label]}
-  # agy gets the directory (it expects SKILL.md inside); others get the file
-  if [[ $label == agy ]]; then
-    link "$skill_dir" "$dst" "$label"
+  if [[ $is_remote == yes ]]; then
+    if [[ $label == agy ]]; then
+      copy_file "$skill_md" "$dst/SKILL.md" "$label"
+    else
+      copy_file "$skill_md" "$dst" "$label"
+    fi
   else
-    link "$skill_md" "$dst" "$label"
+    # agy gets the directory (it expects SKILL.md inside); others get the file
+    if [[ $label == agy ]]; then
+      link "$skill_dir" "$dst" "$label"
+    else
+      link "$skill_md" "$dst" "$label"
+    fi
   fi
 done
 

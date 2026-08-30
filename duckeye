@@ -141,9 +141,10 @@ init() {
 # SQL single-quoted literal: double the quotes.
 q() { printf '%s' "${1//\'/\'\'}"; }
 
-# dep is the paging alias: auto-page only when stdout is a tty (not when piped or under test)
+# Aliases: dep auto-pages on tty; der defaults to raw data mode
 [[ $(basename "$0") == dep && -t 1 ]] && do_page=1 || do_page=
-mode=full arg= where= limit= fmt= color=auto out_fmt=ansi pages=
+[[ $(basename "$0") == der ]] && mode=raw || mode=full
+arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 
 # Wrap an expression yielding LIST(duck_block) in whichever serializer -o asked for.
 # These are the duck_blocks pipeline's own writers, which is the whole point: they run
@@ -246,13 +247,13 @@ sniff() {
     '<!DOCTYPE HTML'*|'<html'*|'<HTML'*) echo html; return ;;
   esac
   case $h in
-    '#!'*python*)                        echo py;   return ;;
-    '#!'*bash*|'#!'*sh*|'#!'*zsh*)       echo sh;   return ;;
-    '#!'*ruby*)                          echo rb;   return ;;
-    '#!'*node*)                          echo js;   return ;;
-    *'"pandoc-api-version"'*)            echo json; return ;;   # a Pandoc AST
-    '.TH '*|'.\"'*|"'\\\""*|'.SH '*)     echo man;  return ;;   # roff
-    '<?xml'*|'<'*)                       echo html; return ;;
+    '#!'*python*)                        echo py;         return ;;
+    '#!'*bash*|'#!'*sh*|'#!'*zsh*)       echo sh;         return ;;
+    '#!'*ruby*)                          echo rb;         return ;;
+    '#!'*node*)                          echo js;         return ;;
+    *'"pandoc-api-version"'*)            echo pandoc_ast; return ;;   # a Pandoc AST
+    '.TH '*|'.\"'*|"'\\\""*|'.SH '*)     echo man;        return ;;   # roff
+    '<?xml'*|'<'*)                       echo html;       return ;;
   esac
   echo md
 }
@@ -380,11 +381,13 @@ case $norm in
   golang)         norm=go ;;
   ruby)           norm=rb ;;
   c++)            norm=cpp ;;
+  pandoc|pandoc_ast) norm=pandoc_ast ;;
   ast|code)
     if [[ -f $f ]]; then
       sniffed=$(sniff "$f")
       case $sniffed in
         py|sh|rb|js) norm=$sniffed ;;
+        pandoc_ast)  norm=pandoc_ast ;;
         *)           norm=auto ;;
       esac
     else
@@ -399,12 +402,49 @@ if [[ $f != *\** && $f != *\?* ]]; then
     sniffed=$(sniff "$f")
     case $sniffed in
       py|sh|rb|js) norm=$sniffed ;;
+      pandoc_ast)  norm=pandoc_ast ;;
     esac
   fi
 fi
 
 key=${f,,}
 [[ -n $norm ]] && key=".$norm"
+
+# Sniff json to distinguish Pandoc AST from structured data
+is_pandoc_json() {
+  local target=$1
+  [[ -f $target || -n ${from_stdin:-} ]] && grep -q '"pandoc-api-version"' <(head -c 4096 "$target" 2>/dev/null)
+}
+
+is_data_file() {
+  case "$fmt" in
+    csv|tsv|parquet|pq|ndjson|jsonl|yaml|yml|toml|excel|xlsx|xls|zip|git|lines)
+      return 0 ;;
+    json)
+      is_pandoc_json "$f" && return 1 || return 0 ;;
+    pandoc|pandoc_ast)
+      return 1 ;;
+  esac
+  case "$key" in
+    *.parquet|*.pq|*.csv|*.tsv|*.tab|*.ndjson|*.jsonl|*.yaml|*.yml|*.toml|*.xlsx|*.xls|*.git|*/.git|.git)
+      return 0 ;;
+    *.zip)
+      if [[ -f $f ]]; then
+        [[ $(sniff_zip "$f") == zip ]] && return 0
+      else
+        return 0
+      fi
+      return 1 ;;
+    *.json)
+      is_pandoc_json "$f" && return 1 || return 0 ;;
+  esac
+  return 1
+}
+
+# Data files default to raw table mode
+if [[ $mode == full ]] && is_data_file; then
+  mode=raw
+fi
 
 # Some producers check the filename, not just the bytes — read_markdown_blocks and
 # sitting_duck reject anything without the expected extension. Rename spooled stdin
@@ -473,6 +513,8 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
       elif [[ $key == *.zip ]]; then
         from="zip_contents('$src')"
         exts="zipfs"
+      elif [[ $key == *.json || $key == *.ndjson || $key == *.jsonl ]]; then
+        from="read_json('$src')"
       elif [[ $key == *.git || $key == */.git || $key == .git ]]; then
         local_repo=${src%/.git}
         local_repo=${local_repo%.git}
@@ -802,7 +844,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     else
       doc="SELECT parse_markdown_to_duck_blocks(pdf_to_markdown('$src')) AS blocks"
     fi ;;
-  *.json)                          # assumed to be a Pandoc AST
+  *.json|.pandoc_ast)              # Pandoc AST
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;
   *.py|*.pyi|*.pyw|*.rs|*.go|*.c|*.h|*.cpp|*.hpp|*.cc|*.cxx|*.c++|*.hh|*.hxx|\
   *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.java|*.kt|*.kts|*.cs|*.swift|*.rb|*.ruby|\

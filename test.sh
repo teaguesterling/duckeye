@@ -67,7 +67,8 @@ duckdb -dark-mode -noheader -c "COPY (SELECT i::INTEGER AS id, 'name_'||i AS nam
                       map(['k1'], [i]) AS attrs
                FROM range(1,8) t(i))
            TO '$TMP/d.parquet';
-           COPY (SELECT i AS id, 'name_'||i AS name FROM range(1,5) t(i)) TO '$TMP/d.csv';"
+           COPY (SELECT i AS id, 'name_'||i AS name FROM range(1,5) t(i)) TO '$TMP/d.csv';
+           COPY (SELECT i AS id, 'item_'||i AS item FROM range(1,5) t(i)) TO '$TMP/data.json';"
 
 python3 -c "
 pdf = b'''%PDF-1.4
@@ -414,10 +415,17 @@ no  'unreadable file'            $DUCKEYE /nope/nope.md
 no  'no arguments'               $DUCKEYE
 ok  'toc pipes into section'     bash -c "$DUCKEYE -t '$TMP/doc.md' | while read -r l; do
        t=\${l#\"\${l%%[![:space:]]*}\"}; $DUCKEYE -S \"\$t\" '$TMP/doc.md' >/dev/null || exit 1; done"
+ok  'parquet defaults to raw'    $DUCKEYE "$TMP/d.parquet"
+ok  'csv defaults to raw'        $DUCKEYE "$TMP/d.csv"
+ok  'json defaults to raw'       $DUCKEYE "$TMP/data.json"
+has 'json data table output'     'item_1' $DUCKEYE "$TMP/data.json"
 ln -sf "$(readlink -f "$DUCKEYE")" "$TMP/de"
 ln -sf "$(readlink -f "$DUCKEYE")" "$TMP/dep"
+ln -sf "$(readlink -f "$DUCKEYE")" "$TMP/der"
 ok  'de alias works'             "$TMP/de" -t "$TMP/doc.md"
 ok  'dep alias works'            "$TMP/dep" -t "$TMP/doc.md"
+ok  'der alias works'            "$TMP/der" "$TMP/test_code.py"
+has 'der raw output'             'function_definition' "$TMP/der" "$TMP/test_code.py"
 
 printf '\n%d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip"
 (( fail == 0 ))

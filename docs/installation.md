@@ -11,7 +11,13 @@
 
 ## Quick Install
 
-Clone the repository and run the included installer:
+### One-line Install (via `curl`)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/teaguesterling/duckeye/main/install.sh | bash
+```
+
+### Local Checkout
 
 ```bash
 git clone https://github.com/teaguesterling/duckeye.git
@@ -21,9 +27,13 @@ cd duckeye
 
 By default, `install.sh`:
 
-1. Symlinks `duckeye` into `~/.local/bin/duckeye` (and creates the `dep` alias for paged viewing).
-2. Runs `duckeye --init` to install all official and community DuckDB extensions.
-3. Automatically detects AI coding harnesses (`~/.gemini/config`, `~/.claude`, `~/.config/opencode`) and installs the `duckeye` agent skill.
+1. Installs or symlinks `duckeye` into `~/.local/bin/duckeye`.
+2. Creates convenient command aliases:
+   - `de` &rarr; short alias for `duckeye`
+   - `dep` &rarr; automatically pages output through `$DUCKEYE_PAGER` (`less -R`)
+   - `der` &rarr; forces raw data / tabular AST output mode
+3. Runs `duckeye --init` to install all official and community DuckDB extensions.
+4. Automatically detects AI coding harnesses (`~/.gemini/config`, `~/.claude`, `~/.config/opencode`) and installs the `duckeye` agent skill.
 
 ---
 
@@ -33,13 +43,16 @@ By default, `install.sh`:
 # Install globally (requires sudo)
 ./install.sh --global
 
-# Install binary only without modifying AI agent skill directories
-./install.sh --no-skills
+# Skip creating de, dep, and der aliases
+./install.sh --no-aliases
+
+# Skip installing the binary (skills only)
+./install.sh --no-bin
 
 # Install skills for specific harnesses
 ./install.sh --agy --claude --no-opencode
 
-# Skip installing DuckDB extensions during setup
+# Skip running duckeye --init after installation
 ./install.sh --no-init
 
 # Uninstall duckeye binary, aliases, and agent skills

@@ -5,16 +5,17 @@ man pages, an offline Wikipedia — parsed by [DuckDB](https://duckdb.org), rend
 [`duck_block_utils`](https://github.com/teaguesterling/duckdb_duck_block_utils).
 
 ```console
-$ duckeye README.md                         # render, unpaged
+$ duckeye README.md                         # render, unpaged (shorthand: de README.md)
+$ dep README.md                             # same, paged through $DUCKEYE_PAGER
+$ der test.py                               # force raw data/AST table mode
 $ zcat ls.1.gz | duckeye -t -               # or read a pipe, format sniffed
-$ dep README.md                             # same, paged
 $ duckeye -t spec.md                        # outline a document
 $ duckeye -t server.go                      # outline classes, functions & methods
 $ duckeye -S 'Runbook Steps' spec.md        # one section
 $ duckeye -S handle_request server.go       # extract a single function definition & body
 $ duckeye -P 1-5 manual.pdf                 # page range of a PDF
 $ duckeye -s tmux spec.md                   # every section mentioning tmux
-$ duckeye -r data.parquet                   # look at data, not prose
+$ duckeye data.parquet                      # data files default to raw table mode!
 $ duckeye -Q .fn#foo test.py                # Display the foo function (using ast_select)
 $ duckeye -s photosynthesis wikipedia.zim   # search 19M offline articles
 ```
@@ -24,21 +25,32 @@ extension, with `pandoc` filling the gaps.
 
 ## Install
 
+Quick install via `curl`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/teaguesterling/duckeye/main/install.sh | bash
+```
+
+Or from a local checkout:
+
 ```sh
 git clone https://github.com/teaguesterling/duckeye.git
 ./duckeye/install.sh
 ```
 
-The install script symlinks the `duckeye` binary into `~/.local/bin`, runs
+The install script links the `duckeye` binary into `~/.local/bin`, creates the `de`, `dep` (paged), and `der` (raw data) alias symlinks, runs
 `--init` to install the DuckDB extensions, and auto-detects any AI agent
 configs to install the [skill](#ai-agent-integration) into. Use `--global` for
-`/usr/local/bin`, `--no-bin` to skip the binary, or `--help` for the full list
+`/usr/local/bin`, `--no-bin` to skip the binary, `--no-aliases` to skip creating aliases, or `--help` for the full list
 of flags.
 
 Or install manually:
 
 ```sh
 ln -s "$PWD/duckeye/duckeye" ~/.local/bin/duckeye
+ln -s "$PWD/duckeye/duckeye" ~/.local/bin/de
+ln -s "$PWD/duckeye/duckeye" ~/.local/bin/dep
+ln -s "$PWD/duckeye/duckeye" ~/.local/bin/der
 duckeye --init
 ```
 
@@ -221,20 +233,24 @@ Errors are separated too: `64` for a usage mistake, `2` for an unsupported exten
 
 ## Data files and profiling
 
-`-r` reads a file as data rather than prose — parquet, csv, json, yaml, toml, xlsx, zip contents, git commits, and line-indexed text:
+Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode — no `-r` flag required! Use `-r` or the `der` alias to force raw mode on code ASTs or plain text:
 
 ```console
-$ duckeye -r events.parquet
-$ duckeye -r results.csv
-$ duckeye -r config.yaml
-$ duckeye -r Cargo.toml
-$ duckeye -r spreadsheet.xlsx
-$ duckeye -r archive.zip                           # inspect files within a zip
-$ duckeye -r .git                                  # query git commit history
+$ duckeye events.parquet                           # auto-detects data mode
+$ duckeye results.csv
+$ duckeye data.json                                # structured data table
+$ duckeye config.yaml
+$ duckeye Cargo.toml
+$ duckeye spreadsheet.xlsx
+$ duckeye archive.zip                              # inspect files within a zip
+$ duckeye .git                                     # query git commit history
+$ der script.py                                    # der forces raw AST table mode
 $ duckeye -r -f lines script.sh                    # table with line numbers & offsets
-$ duckeye -w "level = 'ERROR'" events.parquet     # -w implies data mode
-$ duckeye -r -n 20 huge.csv                       # first 20 rows
+$ duckeye -w "level = 'ERROR'" events.parquet      # -w implies data mode
+$ duckeye -n 20 huge.csv                           # first 20 rows
 ```
+
+JSON files (`.json`, `.ndjson`, `.jsonl`) default to structured data tables via `read_json()`. If a `.json` file contains a Pandoc AST (identifiable by root key `"pandoc-api-version"`), `duckeye` automatically detects it and renders it as a formatted document.
 
 Raw mode prints through DuckDB's modern `duckbox` renderer rather than `duck_blocks`. It streams
 a million rows in about a second and emits clean plain text, so it pipes cleanly into unix pipelines.

@@ -111,3 +111,21 @@ $ duckeye -S "Installation" -o md manual.docx
 # Convert search results to clean text for piping
 $ duckeye -s "TODO" -o text notes.md | grep -v "^#"
 ```
+
+---
+
+## 7. Multi-File Glob Patterns
+
+DuckDB natively expands glob patterns, allowing `duckeye` to operate across multiple files in a single invocation:
+
+```console
+# Outline functions across all Python files in a directory tree
+$ duckeye -t 'src/**/*.py'
+
+# Query all Rust functions via Tree-sitter AST
+$ duckeye -Q '.func' 'src/**/*.rs'
+
+# Aggregate and profile data shards in raw mode
+$ duckeye -r 'data/*.parquet'
+$ duckeye -Z 'data/*.parquet'
+```

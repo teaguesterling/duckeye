@@ -141,8 +141,17 @@ $ duckeye -s systemd spec.md
 Search reaches into code blocks and inline markup, not just paragraph prose — a term that
 only ever appears inside `**bold**` or a fenced block is still found.
 
-Both match case-insensitively as substrings, both accept SQL `LIKE` wildcards (`%`, `_`),
-and `-S` also matches a heading's slug id exactly.
+Both match case-insensitively as substrings and support standard Unix glob wildcards (`*` and `?`).
+Literal underscores and percent signs (e.g. `duck_block_utils`, `100%`) are matched literally without
+SQL wildcard confusion. `-S` also matches a heading's slug id exactly.
+
+Input file paths support glob patterns across document, AST, and raw modes:
+
+```console
+$ duckeye -t 'src/**/*.py'             # outline all Python files in a directory tree
+$ duckeye -Q '.func' 'src/**/*.rs'      # extract all Rust functions across files
+$ duckeye -r 'data/*.parquet'          # query across parquet shards
+```
 
 ## Converting, not just reading
 

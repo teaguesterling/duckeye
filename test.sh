@@ -60,14 +60,14 @@ EOF
 
 printf '<html><body><h1>Head</h1><p>html body text</p><h2>Sub</h2><p>sub text</p></body></html>\n' >"$TMP/doc.html"
 
-duckdb -dark-mode -noheader -s "COPY (SELECT i::INTEGER AS id, 'name_'||i AS name, i*1.5 AS score,
+duckdb -dark-mode -noheader -c "COPY (SELECT i::INTEGER AS id, 'name_'||i AS name, i*1.5 AS score,
                       ('2026-01-01'::DATE + i::INTEGER) AS created_date,
                       '2026-01-01 10:00:00'::TIMESTAMP + INTERVAL (i * 2) HOUR AS updated_at,
                       [i, i+1] AS tags,
                       map(['k1'], [i]) AS attrs
                FROM range(1,8) t(i))
            TO '$TMP/d.parquet';
-           COPY (SELECT i AS id, 'name_'||i AS name FROM range(1,5) t(i)) TO '$TMP/d.csv';" >/dev/null 2>&1
+           COPY (SELECT i AS id, 'name_'||i AS name FROM range(1,5) t(i)) TO '$TMP/d.csv';"
 
 python3 -c "
 pdf = b'''%PDF-1.4

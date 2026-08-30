@@ -2,23 +2,27 @@
 
 **Pretty-print documents and explore data in the terminal via DuckDB.**
 
-`duckeye` turns your terminal into a universal document reader and structured data explorer. Markdown, HTML, PDF, DOCX, EPUB, LaTeX, Jupyter notebooks, man pages, offline Wikipedia archives (ZIM), Parquet, CSV, JSON, YAML, TOML, Excel spreadsheets, ZIP archives, and Git logs — parsed natively by DuckDB extensions and rendered with ANSI block formatting.
+`duckeye` turns your terminal into a universal document reader and structured data explorer. Markdown, HTML, PDF, DOCX, EPUB, LaTeX, Jupyter notebooks, man pages, offline Wikipedia archives (ZIM), 27 programming language source ASTs (Python, Rust, Go, C/C++, JS/TS, etc.), Parquet, CSV, JSON, YAML, TOML, Excel spreadsheets, ZIP archives, and Git logs — parsed natively by DuckDB extensions and rendered with ANSI block formatting.
 
 ```bash
-# Render documents in terminal
+# Render documents & source code in terminal
 duckeye README.md
 duckeye proposal.docx
 duckeye -P 1-5 manual.pdf
+duckeye main.py
 
-# Progressive document navigation
+# Progressive document & code navigation
 duckeye -t spec.md                  # Table of contents
+duckeye -t server.go                # Outline structs, functions & methods
 duckeye -S "Architecture" spec.md    # Extract single section
+duckeye -Q ".func:async" api.js     # Extract async functions via CSS selector
 duckeye -s "authentication" spec.md  # Full-text search across sections
 
-# Data exploration and profiling
+# Data exploration, profiling & tabular AST queries
 duckeye -r data.parquet              # Box table viewer
 duckeye -z data.parquet              # Fast DuckDB SUMMARIZE
 duckeye -Z data.parquet              # Smart profiler with sparklines & category frequencies
+duckeye -r -Q ".call#eval" app.js    # Query AST call sites with line numbers & peek text
 
 # Offline ZIM archives (Wikipedia, Stack Exchange, etc.)
 duckeye -s "photosynthesis" wikipedia.zim -n 5

@@ -43,10 +43,12 @@ duckeye -Q '.func' FILE             # query code AST by CSS selector (all functi
 duckeye -Q '.class#Calculator' FILE # extract specific class & methods
 duckeye -Q '.func:async' FILE       # extract async functions
 duckeye -Q '.func[name^=test_]' FILE # extract test functions
+duckeye -t 'src/**/*.py'            # glob outline across multiple source files
+duckeye -r 'data/*.parquet'         # aggregate raw data over multiple files
 ```
 
 `-t`, `-S`, `-s`, and `-r` are **mutually exclusive**.
-
+Input files support glob patterns (e.g. `'src/**/*.rs'`, `'data/*.parquet'`).
 Matching for `-S` and `-s` is case-insensitive substring; standard Unix glob wildcards (`*`, `?`) work. Underscores (`_`) and percent signs (`%`) match literally.
 `-S` also matches heading slug IDs exactly.
 

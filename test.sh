@@ -387,6 +387,9 @@ has 'python raw -Q selector'   'function_definition' $DUCKEYE -r -Q '.func#execu
 has 'script -f ast -t'         'usage()'        $DUCKEYE -f ast -t "$PWD/duckeye"
 has 'script bare -t'           'usage()'        $DUCKEYE -t "$PWD/duckeye"
 has 'script -S section'        'die()'          $DUCKEYE -S die "$PWD/duckeye"
+has 'code glob toc'            'execute'        $DUCKEYE -t "$TMP/*.py"
+has 'code glob -Q'             'execute'        $DUCKEYE -Q '.func#execute' "$TMP/*.py"
+has 'code glob -f ast'         'execute'        $DUCKEYE -f ast -t "$TMP/test_code.*"
 
 echo 'zim'
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then

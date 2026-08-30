@@ -352,8 +352,8 @@ if [[ $f == - || ( -z $f && ! -t 0 ) ]]; then
 fi
 
 [[ -n $f ]] || { usage >&2; exit 64; }
-# Allow HTTP, HTTPS, and S3 URLs; load appropriate extensions
-if [[ $f == zim://* || -r $f || $f == http*://* || $f == https*://* || $f == s3*://* ]]; then
+# Allow HTTP, HTTPS, S3 URLs, and glob patterns (* or ?)
+if [[ $f == zim://* || -r $f || $f == http*://* || $f == https*://* || $f == s3*://* || $f == *\** || $f == *\?* ]]; then
     :
 else
     die "cannot read $f"   # zim:// resolves inside the archive
@@ -391,12 +391,14 @@ case $norm in
 esac
 
 # If no format specified and filename has no extension, sniff it (e.g. executable scripts)
-base=$(basename "$f")
-if [[ -z $norm && $base != *.* && -f $f && $f != zim://* ]]; then
-  sniffed=$(sniff "$f")
-  case $sniffed in
-    py|sh|rb|js) norm=$sniffed ;;
-  esac
+if [[ $f != *\** && $f != *\?* ]]; then
+  base=$(basename "$f")
+  if [[ -z $norm && $base != *.* && -f $f && $f != zim://* ]]; then
+    sniffed=$(sniff "$f")
+    case $sniffed in
+      py|sh|rb|js) norm=$sniffed ;;
+    esac
+  fi
 fi
 
 key=${f,,}
@@ -405,13 +407,16 @@ key=${f,,}
 # Some producers check the filename, not just the bytes — read_markdown_blocks and
 # sitting_duck reject anything without the expected extension. Rename spooled stdin
 # or create a temporary symlink so DuckDB's scanners accept the file.
-if [[ -n $norm && $norm != auto && $base != *.$norm && $f != zim://* && ( -f $f || -n ${from_stdin:-} ) ]]; then
-  if [[ -n ${from_stdin:-} ]]; then
-    mv "$f" "$f.$norm" && f=$f.$norm
-  else
-    target_path=$(readlink -f "$f" 2>/dev/null || realpath "$f" 2>/dev/null || echo "$PWD/$f")
-    link_name="$tmp/$base.$norm"
-    ln -sf "$target_path" "$link_name" && f=$link_name
+if [[ -n $norm && $norm != auto && $f != *\** && $f != *\?* && $f != zim://* && ( -f $f || -n ${from_stdin:-} ) ]]; then
+  base=$(basename "$f")
+  if [[ $base != *.$norm ]]; then
+    if [[ -n ${from_stdin:-} ]]; then
+      mv "$f" "$f.$norm" && f=$f.$norm
+    else
+      target_path=$(readlink -f "$f" 2>/dev/null || realpath "$f" 2>/dev/null || echo "$PWD/$f")
+      link_name="$tmp/$base.$norm"
+      ln -sf "$target_path" "$link_name" && f=$link_name
+    fi
   fi
 fi
 
@@ -809,7 +814,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
 CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(q "$selector")'); "
       doc="SELECT list(block) AS blocks FROM ast_to_blocks_from('__sel')"
     else
-      doc="SELECT blocks FROM ast_to_blocks_list('$src')"
+      doc="SELECT flatten(list(blocks)) AS blocks FROM ast_to_blocks_list('$src')"
     fi ;;
   *.docx|*.odt|*.epub|*.rst|*.org|*.tex|*.ipynb|*.rtf|*.textile|*.man|*.mediawiki|\
   *.[1-9])

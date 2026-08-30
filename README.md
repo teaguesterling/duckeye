@@ -221,8 +221,9 @@ $ duckeye -w "level = 'ERROR'" events.parquet     # -w implies data mode
 $ duckeye -r -n 20 huge.csv                       # first 20 rows
 ```
 
-Raw mode prints through DuckDB's own box renderer rather than `duck_blocks`. It streams
-a million rows in about a second and emits plain UTF-8, so it pipes cleanly into unix pipelines.
+Raw mode prints through DuckDB's modern `duckbox` renderer rather than `duck_blocks`. It streams
+a million rows in about a second and emits clean plain text, so it pipes cleanly into unix pipelines.
+In interactive terminals and pagers (`-p`), table rendering automatically adapts to the terminal width (`$COLUMNS`) to prevent wide lines from wrapping across rows.
 
 ### Native Summary (`-z`) and Smart Profiling (`-Z`)
 
@@ -232,21 +233,29 @@ When inspecting unfamiliar datasets, `-z` and `-Z` summarize column distribution
 # Fast DuckDB SUMMARIZE breakdown (min, max, avg, quantiles, null %)
 $ duckeye -z data.parquet
 
-# Smart column profile with sparklines, category distributions, and null %
+# Smart column profile with sparklines, category distributions, temporal spans, and null %
 $ duckeye -Z data.parquet
-┌──────────┬─────────┬──────────┬──────────┬───────────────┬──────────────────────┬────────────────────────────────────────────────────────┐
-│  column  │  type   │ non_null │ null_pct │ approx_unique │     distribution     │                        summary                         │
-├──────────┼─────────┼──────────┼──────────┼───────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
-│ id       │ BIGINT  │ 1000     │ 0.0%     │ 1000          │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │ min: 1, avg: 500.5, max: 1000                          │
-│ category │ VARCHAR │ 1000     │ 0.0%     │ 3             │                      │ electronics (40.0%), groceries (40.0%), tools (20.0%)  │
-│ price    │ DOUBLE  │ 980      │ 2.0%     │ 850           │ ██                ▄▄ │ min: 0.99, avg: 45.20, max: 1299.99                    │
-│ in_stock │ BOOLEAN │ 1000     │ 0.0%     │ 2             │                      │ true (85.0%), false (15.0%)                            │
-│ tags     │ VARCHAR │ 1000     │ 0.0%     │ 45            │                      │ [sale] (25.0%), [new] (20.0%), [clearance] (10.0%)     │
-└──────────┴─────────┴──────────┴──────────┴───────────────┴──────────────────────┴────────────────────────────────────────────────────────┘
+┌──────────────┬──────────────────────┬──────────┬──────────┬───────────────┬──────────────────────┬────────────────────────────────────────────────────────┐
+│    column    │         type         │ non_null │ null_pct │ approx_unique │     distribution     │                        summary                         │
+├──────────────┼──────────────────────┼──────────┼──────────┼───────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
+│ id           │ BIGINT               │ 1000     │ 0.0%     │ 1000          │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │ min: 1, avg: 500.5, max: 1000                          │
+│ category     │ VARCHAR              │ 1000     │ 0.0%     │ 3             │                      │ electronics (40.0%), groceries (40.0%), tools (20.0%)  │
+│ price        │ DOUBLE               │ 980      │ 2.0%     │ 850           │ ██                ▄▄ │ min: 0.99, avg: 45.20, max: 1299.99                    │
+│ created_date │ DATE                 │ 1000     │ 0.0%     │ 365           │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │ min: 2026-01-01, max: 2026-12-31 (364 days)            │
+│ in_stock     │ BOOLEAN              │ 1000     │ 0.0%     │ 2             │                      │ true (85.0%), false (15.0%)                            │
+│ tags         │ VARCHAR[]            │ 1000     │ 0.0%     │ 45            │ ██                   │ len min: 1, avg: 2.3, max: 5, e.g. ['sale', 'new']     │
+│ attrs        │ MAP(VARCHAR, BIGINT) │ 1000     │ 0.0%     │ 12            │ ██                   │ entries min: 1, max: 3, e.g. {rating=5}                │
+└──────────────┴──────────────────────┴──────────┴──────────┴───────────────┴──────────────────────┴────────────────────────────────────────────────────────┘
 
 # Profile a filtered slice
 $ duckeye -Z -w "category = 'electronics'" data.parquet
 ```
+
+`-Z` dynamically profiles:
+* **Numeric columns**: min, avg, max, and a 10-bin histogram sparkline.
+* **Temporal columns (`DATE`, `TIMESTAMP`, `TIME`)**: min, max, duration spans (e.g. `24 days`), and time-series distribution sparklines.
+* **Categorical columns**: exact category frequency breakdowns and percentages.
+* **Complex nested types (`LIST`, `MAP`, `STRUCT`, `JSON`)**: array length distributions, map entry counts, and sample representations.
 
 `-Z` inspects the terminal width (`tput cols` or `$COLUMNS`) and budget-allocates character space for the `summary` column, automatically scaling category frequencies and truncating strings so output never runs off screen.
 

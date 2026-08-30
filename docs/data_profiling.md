@@ -56,21 +56,26 @@ $ duckeye -z products.parquet
 `-Z, --profile` provides enhanced column profiling:
 
 * **Numeric Columns**: Computes `min`, `avg`, `max`, and a 10-bin histogram sparkline via `textplot` (`tp_sparkline()`).
+* **Temporal Columns (`DATE`, `TIMESTAMP`, `TIMESTAMPTZ`, `TIME`)**: Computes `min`, `max`, duration span (e.g. `24 days` or `12:00:00`), and time-series distribution sparklines across epoch bins.
 * **Categorical / Low-cardinality**: Computes single-pass exact category distributions and percentages using `histogram()`.
-* **Nested / Arrays**: Extracts array length distributions and sample elements.
+* **List & Array Columns (`LIST`, `*[]`)**: Computes length stats (`min`, `avg`, `max`), length distribution sparklines, and sample arrays.
+* **Map Columns (`MAP`)**: Computes key-value entry counts (`min`, `max`), cardinality distribution sparklines, and sample maps.
+* **Struct & JSON Columns (`STRUCT`, `JSON`)**: Shows schema structure and sample representations.
 * **All Columns**: Calculates exact `non_null` and `null_pct`.
 
 ```console
 $ duckeye -Z products.parquet
-┌──────────┬─────────┬──────────┬──────────┬───────────────┬──────────────────────┬────────────────────────────────────────────────────────┐
-│  column  │  type   │ non_null │ null_pct │ approx_unique │     distribution     │                        summary                         │
-├──────────┼─────────┼──────────┼──────────┼───────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
-│ id       │ BIGINT  │ 1000     │ 0.0%     │ 1000          │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │ min: 1, avg: 500.5, max: 1000                          │
-│ category │ VARCHAR │ 1000     │ 0.0%     │ 3             │                      │ electronics (40.0%), groceries (40.0%), tools (20.0%)  │
-│ price    │ DOUBLE  │ 980      │ 2.0%     │ 850           │ ██                ▄▄ │ min: 0.99, avg: 45.20, max: 1299.99                    │
-│ in_stock │ BOOLEAN │ 1000     │ 0.0%     │ 2             │                      │ true (85.0%), false (15.0%)                            │
-│ tags     │ VARCHAR │ 1000     │ 0.0%     │ 45            │                      │ [sale] (25.0%), [new] (20.0%), [clearance] (10.0%)     │
-└──────────┴─────────┴──────────┴──────────┴───────────────┴──────────────────────┴────────────────────────────────────────────────────────┘
+┌──────────────┬──────────────────────┬──────────┬──────────┬───────────────┬──────────────────────┬────────────────────────────────────────────────────────┐
+│    column    │         type         │ non_null │ null_pct │ approx_unique │     distribution     │                        summary                         │
+├──────────────┼──────────────────────┼──────────┼──────────┼───────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
+│ id           │ BIGINT               │ 1000     │ 0.0%     │ 1000          │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │ min: 1, avg: 500.5, max: 1000                          │
+│ category     │ VARCHAR              │ 1000     │ 0.0%     │ 3             │                      │ electronics (40.0%), groceries (40.0%), tools (20.0%)  │
+│ price        │ DOUBLE               │ 980      │ 2.0%     │ 850           │ ██                ▄▄ │ min: 0.99, avg: 45.20, max: 1299.99                    │
+│ created_date │ DATE                 │ 1000     │ 0.0%     │ 365           │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │ min: 2026-01-01, max: 2026-12-31 (364 days)            │
+│ in_stock     │ BOOLEAN              │ 1000     │ 0.0%     │ 2             │                      │ true (85.0%), false (15.0%)                            │
+│ tags         │ VARCHAR[]            │ 1000     │ 0.0%     │ 45            │ ██                   │ len min: 1, avg: 2.3, max: 5, e.g. ['sale', 'new']     │
+│ attrs        │ MAP(VARCHAR, BIGINT) │ 1000     │ 0.0%     │ 12            │ ██                   │ entries min: 1, max: 3, e.g. {rating=5}                │
+└──────────────┴──────────────────────┴──────────┴──────────┴───────────────┴──────────────────────┴────────────────────────────────────────────────────────┘
 ```
 
 ### Profiling Filtered Subsets
@@ -84,7 +89,10 @@ $ duckeye -Z -w "category = 'electronics'" products.parquet
 
 ## 4. Terminal Width Adaptation
 
-The smart profiler dynamically inspects the terminal width via `$COLUMNS` or `tput cols` and budget-allocates character space for the `summary` column so that output never runs off screen or breaks into fragmented wrapped lines:
+All tabular modes (`-r`, `-z`, `-Z`) dynamically adapt to the terminal width via `$COLUMNS` or `tput cols`:
+
+* **Raw Mode (`-r`) & Summaries (`-z`)**: When rendering to a terminal or through a pager (`-p`), DuckDB's modern `duckbox` renderer constrains table width to `$COLUMNS` (via `.maxwidth $COLUMNS`), cleanly truncating wide columns with ellipses (`…`) and showing column count summaries rather than wrapping text across rows. When piped to standard Unix tools (e.g. `duckeye -r data.parquet | grep ...`), maximum width is unconstrained (`.maxwidth 0`) to preserve full column data.
+* **Smart Profiler (`-Z`)**: Dynamically allocates character space for category distributions, sparklines, and sample values:
 
 | Terminal Width | Category Limit | Text Budget | Formatting Behavior |
 |---|---|---|---|
@@ -95,6 +103,7 @@ The smart profiler dynamically inspects the terminal width via `$COLUMNS` or `tp
 You can explicitly test or constrain rendering width by setting the `COLUMNS` environment variable:
 
 ```console
+$ COLUMNS=80 duckeye -r data.parquet
 $ COLUMNS=80 duckeye -Z data.parquet
 $ COLUMNS=140 duckeye -Z data.parquet
 ```

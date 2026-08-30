@@ -60,7 +60,12 @@ EOF
 
 printf '<html><body><h1>Head</h1><p>html body text</p><h2>Sub</h2><p>sub text</p></body></html>\n' >"$TMP/doc.html"
 
-duckdb -s "COPY (SELECT i AS id, 'name_'||i AS name, i*1.5 AS score FROM range(1,8) t(i))
+duckdb -s "COPY (SELECT i::INTEGER AS id, 'name_'||i AS name, i*1.5 AS score,
+                      ('2026-01-01'::DATE + i::INTEGER) AS created_date,
+                      '2026-01-01 10:00:00'::TIMESTAMP + INTERVAL (i * 2) HOUR AS updated_at,
+                      [i, i+1] AS tags,
+                      map(['k1'], [i]) AS attrs
+               FROM range(1,8) t(i))
            TO '$TMP/d.parquet';
            COPY (SELECT i AS id, 'name_'||i AS name FROM range(1,5) t(i)) TO '$TMP/d.csv';" >/dev/null 2>&1
 
@@ -203,8 +208,8 @@ no  '--color rejects a bad value'   $DUCKEYE --color=purple "$TMP/doc.md"
 has 'stripping preserves content'   'alpha body' $DUCKEYE --color=never -S Alpha "$TMP/doc.md"
 ok  'DUCKEYE_THEME=light runs'      env DUCKEYE_THEME=light $DUCKEYE -r -n 1 "$TMP/d.parquet"
 ok  'DUCKEYE_THEME=dark runs'       env DUCKEYE_THEME=dark $DUCKEYE -r -n 1 "$TMP/d.parquet"
-ok  'COLORFGBG dark detection'      env COLORFGBG="15;0" $DUCKEYE -Z -n 1 "$TMP/d.parquet"
-ok  'COLORFGBG light detection'     env COLORFGBG="0;15" $DUCKEYE -Z -n 1 "$TMP/d.parquet"
+ok  'COLORFGBG dark detection'      env COLORFGBG="15;0" $DUCKEYE -r -n 1 "$TMP/d.parquet"
+ok  'COLORFGBG light detection'     env COLORFGBG="0;15" $DUCKEYE -r -n 1 "$TMP/d.parquet"
 
 echo 'raw'
 has 'raw parquet'  'name_1' $DUCKEYE -r "$TMP/d.parquet"
@@ -232,6 +237,10 @@ has 'raw reads a named csv from stdin'     'name_4' \
 has 'summary with -z' 'null_percentage' $DUCKEYE -z "$TMP/d.parquet"
 has 'profile with -Z' 'distribution'    $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile with -Z and -w' 'name_5'   $DUCKEYE -Z -w 'score > 6' "$TMP/d.parquet"
+has 'profile temporal date' 'created_date' $DUCKEYE -Z "$TMP/d.parquet"
+has 'profile temporal span' 'days' $DUCKEYE -Z "$TMP/d.parquet"
+has 'profile list len' 'len min:' $DUCKEYE -Z "$TMP/d.parquet"
+has 'profile map entries' 'entries min:' $DUCKEYE -Z "$TMP/d.parquet"
 w80=$(COLUMNS=80 $DUCKEYE -Z "$TMP/d.parquet" | wc -L)
 w140=$(COLUMNS=140 $DUCKEYE -Z "$TMP/d.parquet" | wc -L)
 if [[ $w80 -le $w140 ]]; then

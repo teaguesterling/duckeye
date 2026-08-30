@@ -147,7 +147,7 @@ do_page= mode=full arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 # after -S/-s have already cut the document down, so a section can come out as markdown.
 emit() {
   case $out_fmt in
-    ansi)      printf 'db_render_blocks(%s)' "$1" ;;
+    ansi)      printf 'db_blocks_render_ansi(%s)' "$1" ;;
     text)      printf 'db_blocks_to_text(%s)' "$1" ;;
     html)      printf 'duck_blocks_to_html(%s)' "$1" ;;
     blocks)    printf 'to_json(%s)' "$1" ;;
@@ -446,16 +446,17 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   [[ -n $where ]] && target_query+=" WHERE $where"
   [[ -n $limit ]] && target_query+=" LIMIT $limit"
 
+  term_cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
+  [[ $term_cols =~ ^[0-9]+$ && $term_cols -gt 0 ]] || term_cols=120
+
   if [[ $mode == summary ]]; then
     sql="SUMMARIZE ($target_query);"
   elif [[ $mode == profile ]]; then
     exts+=" textplot"
     load=
     for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
-    cols_raw=$(duckdb $(duckdb_color_mode) -noheader -csv -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name, column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
+    cols_raw=$(duckdb $(duckdb_color_mode) -noheader -list -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name || chr(9) || column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
 
-    term_cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
-    [[ $term_cols =~ ^[0-9]+$ && $term_cols -gt 0 ]] || term_cols=120
     if [[ $term_cols -le 85 ]]; then
       summary_budget=$(( term_cols - 68 > 10 ? term_cols - 68 : 12 ))
       cat_limit=1
@@ -471,35 +472,133 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     fi
 
     queries=()
-    while IFS=, read -r col type; do
+    while IFS=$'\t' read -r col type; do
       [[ -z $col ]] && continue
-      col="${col%\"}"; col="${col#\"}"
-      type="${type%\"}"; type="${type#\"}"
       col_esc=$(printf '%s' "${col//\'/\'\'}")
       col_id="\"$col_esc\""
 
       case "${type^^}" in
-        TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|UHUGEINT|FLOAT|DOUBLE|DECIMAL*|REAL|NUMERIC)
+        TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|UHUGEINT|FLOAT|DOUBLE|DECIMAL*|REAL|NUMERIC|INTERVAL)
           q="SELECT
   '$col_esc' AS \"column\",
   '$type' AS \"type\",
   count($col_id)::BIGINT AS non_null,
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
-  COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-     SELECT b.i AS bin, COALESCE(count(d.$col_id), 0)::DOUBLE AS cnt
-     FROM range(10) b(i)
-     LEFT JOIN (
-       SELECT floor(9.999 * ($col_id - stats.min_v) / NULLIF(stats.max_v - stats.min_v, 0))::INT AS bin, $col_id
-       FROM __duckeye_src, (SELECT min($col_id) AS min_v, max($col_id) AS max_v FROM __duckeye_src) stats
-       WHERE $col_id IS NOT NULL
-     ) d ON b.i = d.bin
-     GROUP BY b.i
-  )), '')::VARCHAR AS distribution,
-  ('min: ' || COALESCE(min($col_id)::VARCHAR, 'NULL') || ', avg: ' || COALESCE(round(avg($col_id), 2)::VARCHAR, 'NULL') || ', max: ' || COALESCE(max($col_id)::VARCHAR, 'NULL'))::VARCHAR AS summary
+  CASE WHEN count($col_id) = 0 THEN '' ELSE
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+       SELECT b.i AS bin, COALESCE(count(d.$col_id), 0)::DOUBLE AS cnt
+       FROM range(10) b(i)
+       LEFT JOIN (
+         SELECT COALESCE(floor(9.999 * ($col_id::DOUBLE - stats.min_v::DOUBLE) / NULLIF(stats.max_v::DOUBLE - stats.min_v::DOUBLE, 0))::INT, 0) AS bin, $col_id
+         FROM __duckeye_src, (SELECT min($col_id) AS min_v, max($col_id) AS max_v FROM __duckeye_src) stats
+         WHERE $col_id IS NOT NULL
+       ) d ON b.i = d.bin
+       GROUP BY b.i
+    )), '')::VARCHAR
+  END AS distribution,
+  CASE WHEN count($col_id) = 0 THEN 'all null' ELSE
+    ('min: ' || COALESCE(min($col_id)::VARCHAR, 'NULL') || ', avg: ' || COALESCE(round(avg($col_id), 2)::VARCHAR, 'NULL') || ', max: ' || COALESCE(max($col_id)::VARCHAR, 'NULL'))::VARCHAR
+  END AS summary
 FROM __duckeye_src"
           ;;
-        *\[\]|LIST*|STRUCT*|MAP*|JSON)
+        DATE|TIMESTAMP*|TIMESTAMPTZ)
+          q="SELECT
+  '$col_esc' AS \"column\",
+  '$type' AS \"type\",
+  count($col_id)::BIGINT AS non_null,
+  (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
+  count(DISTINCT $col_id)::BIGINT AS approx_unique,
+  CASE WHEN count($col_id) = 0 THEN '' ELSE
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+       SELECT b.i AS bin, COALESCE(count(d.$col_id), 0)::DOUBLE AS cnt
+       FROM range(10) b(i)
+       LEFT JOIN (
+         SELECT COALESCE(floor(9.999 * (epoch($col_id::TIMESTAMP) - stats.min_e) / NULLIF(stats.max_e - stats.min_e, 0))::INT, 0) AS bin, $col_id
+         FROM __duckeye_src, (SELECT min(epoch($col_id::TIMESTAMP)) AS min_e, max(epoch($col_id::TIMESTAMP)) AS max_e FROM __duckeye_src) stats
+         WHERE $col_id IS NOT NULL
+       ) d ON b.i = d.bin
+       GROUP BY b.i
+    )), '')::VARCHAR
+  END AS distribution,
+  CASE WHEN count($col_id) = 0 THEN 'all null' ELSE
+    ('min: ' || min($col_id)::VARCHAR || ', max: ' || max($col_id)::VARCHAR || COALESCE(' (' || (max($col_id::TIMESTAMP) - min($col_id::TIMESTAMP))::VARCHAR || ')', ''))::VARCHAR
+  END AS summary
+FROM __duckeye_src"
+          ;;
+        TIME*|TIMETZ)
+          q="SELECT
+  '$col_esc' AS \"column\",
+  '$type' AS \"type\",
+  count($col_id)::BIGINT AS non_null,
+  (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
+  count(DISTINCT $col_id)::BIGINT AS approx_unique,
+  CASE WHEN count($col_id) = 0 THEN '' ELSE
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+       SELECT b.i AS bin, COALESCE(count(d.$col_id), 0)::DOUBLE AS cnt
+       FROM range(10) b(i)
+       LEFT JOIN (
+         SELECT COALESCE(floor(9.999 * (date_part('epoch', $col_id) - stats.min_e) / NULLIF(stats.max_e - stats.min_e, 0))::INT, 0) AS bin, $col_id
+         FROM __duckeye_src, (SELECT min(date_part('epoch', $col_id)) AS min_e, max(date_part('epoch', $col_id)) AS max_e FROM __duckeye_src) stats
+         WHERE $col_id IS NOT NULL
+       ) d ON b.i = d.bin
+       GROUP BY b.i
+    )), '')::VARCHAR
+  END AS distribution,
+  CASE WHEN count($col_id) = 0 THEN 'all null' ELSE
+    ('min: ' || min($col_id)::VARCHAR || ', max: ' || max($col_id)::VARCHAR)::VARCHAR
+  END AS summary
+FROM __duckeye_src"
+          ;;
+        *\[\]|LIST*)
+          q="SELECT
+  '$col_esc' AS \"column\",
+  '$type' AS \"type\",
+  count($col_id)::BIGINT AS non_null,
+  (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
+  count(DISTINCT $col_id)::BIGINT AS approx_unique,
+  CASE WHEN count($col_id) = 0 THEN '' ELSE
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+       SELECT b.i AS bin, COALESCE(count(d.sz), 0)::DOUBLE AS cnt
+       FROM range(10) b(i)
+       LEFT JOIN (
+         SELECT COALESCE(floor(9.999 * (sz::DOUBLE - stats.min_s::DOUBLE) / NULLIF(stats.max_s::DOUBLE - stats.min_s::DOUBLE, 0))::INT, 0) AS bin, sz
+         FROM (SELECT len($col_id) AS sz FROM __duckeye_src WHERE $col_id IS NOT NULL),
+              (SELECT min(len($col_id)) AS min_s, max(len($col_id)) AS max_s FROM __duckeye_src WHERE $col_id IS NOT NULL) stats
+       ) d ON b.i = d.bin
+       GROUP BY b.i
+    )), '')::VARCHAR
+  END AS distribution,
+  CASE WHEN count($col_id) = 0 THEN 'all null' ELSE
+    ('len min: ' || COALESCE(min(len($col_id))::VARCHAR, '0') || ', avg: ' || COALESCE(round(avg(len($col_id)), 1)::VARCHAR, '0') || ', max: ' || COALESCE(max(len($col_id))::VARCHAR, '0') || ', e.g. ' || COALESCE(substr(any_value($col_id)::VARCHAR, 1, $summary_budget), ''))::VARCHAR
+  END AS summary
+FROM __duckeye_src"
+          ;;
+        MAP*)
+          q="SELECT
+  '$col_esc' AS \"column\",
+  '$type' AS \"type\",
+  count($col_id)::BIGINT AS non_null,
+  (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
+  count(DISTINCT $col_id)::BIGINT AS approx_unique,
+  CASE WHEN count($col_id) = 0 THEN '' ELSE
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+       SELECT b.i AS bin, COALESCE(count(d.sz), 0)::DOUBLE AS cnt
+       FROM range(10) b(i)
+       LEFT JOIN (
+         SELECT COALESCE(floor(9.999 * (sz::DOUBLE - stats.min_s::DOUBLE) / NULLIF(stats.max_s::DOUBLE - stats.min_s::DOUBLE, 0))::INT, 0) AS bin, sz
+         FROM (SELECT cardinality($col_id) AS sz FROM __duckeye_src WHERE $col_id IS NOT NULL),
+              (SELECT min(cardinality($col_id)) AS min_s, max(cardinality($col_id)) AS max_s FROM __duckeye_src WHERE $col_id IS NOT NULL) stats
+       ) d ON b.i = d.bin
+       GROUP BY b.i
+    )), '')::VARCHAR
+  END AS distribution,
+  CASE WHEN count($col_id) = 0 THEN 'all null' ELSE
+    ('entries min: ' || COALESCE(min(cardinality($col_id))::VARCHAR, '0') || ', max: ' || COALESCE(max(cardinality($col_id))::VARCHAR, '0') || ', e.g. ' || COALESCE(substr(any_value($col_id)::VARCHAR, 1, $summary_budget), ''))::VARCHAR
+  END AS summary
+FROM __duckeye_src"
+          ;;
+        STRUCT*|JSON)
           q="SELECT
   '$col_esc' AS \"column\",
   '$type' AS \"type\",
@@ -544,7 +643,11 @@ FROM __duckeye_src"
 
   load=
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
-  duck=(duckdb $(duckdb_color_mode) -box -s "$load" -s "$sql;")
+  if want_color; then
+    duck=(duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth $term_cols" -s "$load" -s "$sql")
+  else
+    duck=(duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth 0" -s "$load" -s "$sql")
+  fi
   page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
   "${duck[@]}" | "${page[@]}"
   exit "${PIPESTATUS[0]}"
@@ -581,10 +684,16 @@ if [[ $key == *.zim ]]; then
                     FROM zim_search('$src', '$pat', max_results := ${limit:-25})
                     ORDER BY score DESC;" ;;
     esac
+    term_cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
+    [[ $term_cols =~ ^[0-9]+$ && $term_cols -gt 0 ]] || term_cols=120
     load="LOAD zim; "
     for e in $DUCKEYE_EXTS; do load+="LOAD $e; "; done
     page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
-    duckdb $(duckdb_color_mode) -box -s "$load" -s "$zsql" | "${page[@]}"
+    if want_color; then
+      duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth $term_cols" -s "$load" -s "$zsql" | "${page[@]}"
+    else
+      duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth 0" -s "$load" -s "$zsql" | "${page[@]}"
+    fi
     exit "${PIPESTATUS[0]}"
   fi
 fi
@@ -714,8 +823,7 @@ fi
 load=
 for e in $DUCKEYE_BASE $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
 
-# PRAGMA must be its own -s: the CLI binds all statements in one -s before executing.
-duck=(duckdb -list -noheader -s "$load" -s "PRAGMA duck_block_render;")
+duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")
 [[ -n $premacro ]] && duck+=(-s "$premacro")   # its own -s: macros must exist before $sql binds
 duck+=(-s "$sql")
 page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)

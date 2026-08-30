@@ -416,7 +416,12 @@ if [[ -n $norm && $norm != auto && $base != *.$norm && $f != zim://* && ( -f $f 
 fi
 
 src=$(q "$f")
-pat=$(q "$arg")
+pat_sql="${arg//\\/\\\\}"
+pat_sql="${pat_sql//%/\\%}"
+pat_sql="${pat_sql//_/\\_}"
+pat_sql="${pat_sql//\*/%}"
+pat_sql="${pat_sql//\?/_}"
+pat=$(q "$pat_sql")
 exts= doc= via_pandoc= zim_open= premacro=
 
 # A ZIM entry is whatever its mimetype says, not always HTML: a Gutenberg archive is
@@ -707,7 +712,9 @@ FROM __duckeye_src"
 
   load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; "
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
-  if want_color; then
+  if [[ $mode == profile ]]; then
+    duck=(duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth 0" -s "$load" -s "$sql")
+  elif want_color; then
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth $term_cols" -s "$load" -s "$sql")
   else
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode duckbox" -cmd ".maxwidth 0" -s "$load" -s "$sql")
@@ -717,7 +724,7 @@ FROM __duckeye_src"
   exit "${PIPESTATUS[0]}"
 fi
 
-# A .zim holds thousands of articles, so the verbs address the corpus rather than
+## A .zim holds thousands of articles, so the verbs address the corpus rather than
 # one document: -t indexes it, -s runs the archive's own Xapian full-text search,
 # -S opens an article. Reaching *into* an article is what the zim:// form below is
 # for, and there the ordinary document verbs apply unchanged.
@@ -813,8 +820,13 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
     # pandoc warns, falls back to markdown, exits 0, and renders near-nonsense.
     case "$key" in
       *.tex)         from=latex ;;
+      *.rst)         from=rst ;;
+      *.org)         from=org ;;
+      *.ipynb)       from=ipynb ;;
+      *.rtf)         from=rtf ;;
+      *.textile)     from=textile ;;
       *.mediawiki)   from=mediawiki ;;
-      *.man|*.[1-9]) from=man ;;      # ls.1, printf.3, crontab.5, …
+      *.man|*.[1-9]) from=man ;;
       *)             from=${key##*.} ;;
     esac
     via_pandoc=1
@@ -826,7 +838,7 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
     exts="webbed"                  # webbed has no read_html_blocks; scalar over read_text
     doc="SELECT html_to_duck_blocks(html) AS blocks FROM read_html_objects('$src')" ;;
   *)
-    die "unsupported extension: $f" 2 ;;
+    die "unsupported extension: ${f##*/}" 2 ;;
 esac
 
 
@@ -845,7 +857,7 @@ cte="WITH doc AS MATERIALIZED ($doc)"
 # and inline children share the block's order span, so they slice along with it.
 case $mode in
   full)
-    sql="$cte SELECT $(emit blocks) FROM doc;" ;;
+    sql="$cte SELECT $(emit 'blocks') FROM doc;" ;;
   toc)
     sql="$cte, t AS (SELECT unnest(db_blocks_toc(blocks)) AS e FROM doc)
          SELECT string_agg(repeat('  ', e.indent) || e.title, chr(10) ORDER BY e.element_order)
@@ -858,7 +870,7 @@ case $mode in
                FROM (SELECT unnest(db_blocks_headings(blocks)) AS e FROM doc)),
          sec AS (SELECT h1.ord AS s, coalesce(min(h2.ord) - 1, 2147483647) AS e
                  FROM h h1 LEFT JOIN h h2 ON h2.ord > h1.ord AND h2.lvl <= h1.lvl
-                 WHERE h1.title ILIKE '%$pat%' OR h1.id = '$pat'
+                 WHERE h1.title ILIKE '%$pat%' ESCAPE '\\' OR h1.id = '$pat'
                  GROUP BY h1.ord),
          -- A substring can match both a chapter and a section inside it. The chapter
          -- already carries the child, so keeping both printed it twice; drop any span
@@ -883,7 +895,7 @@ case $mode in
                   WHERE e >= 0),
          hit AS (SELECT s, e FROM doc, span
                  WHERE db_blocks_to_text(db_blocks_slice(doc.blocks, span.s, span.e), ' ')
-                       ILIKE '%$pat%')
+                       ILIKE '%$pat%' ESCAPE '\\')
          SELECT $(emit "db_blocks_reorder(flatten(list(db_blocks_slice(doc.blocks, hit.s, hit.e) ORDER BY hit.s)))")
          FROM doc, hit HAVING count(*) > 0;" ;;
 esac

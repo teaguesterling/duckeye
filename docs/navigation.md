@@ -31,7 +31,7 @@ $ duckeye -S "Alpha" spec.md
 
 ### Hierarchy Rules
 * **Child Inclusion**: Requesting a parent section (e.g. `## Alpha`) automatically includes all nested subsections (e.g. `### Alpha Child`), stopping when a sibling or higher-level heading begins.
-* **Exact & Fuzzy Matching**: Matches case-insensitively and supports SQL wildcards (`%` and `_`).
+* **Exact & Fuzzy Matching**: Matches case-insensitively and supports standard Unix glob wildcards (`*` for any characters, `?` for a single character). Literal characters like `_` and `%` (e.g. `duck_block_utils` or `100%`) are matched literally without being misidentified as SQL wildcards.
 * **Slug Matching**: Matches GitHub-style slugs (`#alpha-child` or `alpha-child`).
 * **Deduplication**: If a search matches both a parent and a child, the redundant nested block is cleanly deduplicated.
 

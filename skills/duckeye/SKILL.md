@@ -47,7 +47,7 @@ duckeye -Q '.func[name^=test_]' FILE # extract test functions
 
 `-t`, `-S`, `-s`, and `-r` are **mutually exclusive**.
 
-Matching for `-S` and `-s` is case-insensitive substring; SQL `LIKE` wildcards (`%`, `_`) work.
+Matching for `-S` and `-s` is case-insensitive substring; standard Unix glob wildcards (`*`, `?`) work. Underscores (`_`) and percent signs (`%`) match literally.
 `-S` also matches heading slug IDs exactly.
 
 ### Converting (after extraction or AST selection)

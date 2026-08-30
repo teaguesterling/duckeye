@@ -138,10 +138,13 @@ else pass=$((pass+1)); echo '  ok   s reports innermost section'; fi
 no  's no match exits 1'         $DUCKEYE -s zzzqqq "$TMP/doc.md"
 
 echo 'wildcards'
-has 'S % wildcard'         'alpha body'  $DUCKEYE -S 'Al%a' "$TMP/doc.md"
-has 'S _ wildcard'         'beta body'   $DUCKEYE -S 'Bet_' "$TMP/doc.md"
-has 's % wildcard'         'widget'      $DUCKEYE -s 'wid%' "$TMP/doc.md"
-no  'S wildcard no match'                $DUCKEYE -S 'Zzz%' "$TMP/doc.md"
+has 'S * glob wildcard'    'alpha body'  $DUCKEYE -S 'Al*a' "$TMP/doc.md"
+has 'S ? glob wildcard'    'beta body'   $DUCKEYE -S 'Bet?' "$TMP/doc.md"
+has 's * glob wildcard'    'widget'      $DUCKEYE -s 'wid*et' "$TMP/doc.md"
+has 's ? glob wildcard'    'widget'      $DUCKEYE -s 'widg?t' "$TMP/doc.md"
+has 's literal underscore' 'code_block_token' $DUCKEYE -s 'code_block' "$TMP/doc.md"
+no  's literal underscore no false positive' $DUCKEYE -s 'code_block_tokeX' "$TMP/doc.md"
+no  'S wildcard no match'                $DUCKEYE -S 'Zzz*' "$TMP/doc.md"
 
 echo 'quoting'
 cp "$TMP/doc.md" "$TMP/it's a doc.md"

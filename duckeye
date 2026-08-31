@@ -528,7 +528,7 @@ exts= doc= via_pandoc= zim_open= premacro=
 zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
   CASE
     WHEN zim_mimetype(archive, entry) LIKE 'text/html%'
-      THEN html_to_duck_blocks(zim_get_text(archive, entry))
+      THEN (SELECT list(b) FROM parse_html_blocks(zim_get_text(archive, entry)) b)
     WHEN zim_mimetype(archive, entry) LIKE 'text/markdown%'
       THEN parse_markdown_to_duck_blocks(zim_get_text(archive, entry))
     WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
@@ -893,8 +893,8 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     exts="markdown"
     doc="SELECT list(b) AS blocks FROM read_markdown_blocks('$src') b" ;;
   *.htm|*.html)
-    exts="webbed"                  # webbed has no read_html_blocks; scalar over read_text
-    doc="SELECT html_to_duck_blocks(html) AS blocks FROM read_html_objects('$src')" ;;
+    exts="webbed"
+    doc="SELECT list(b) AS blocks FROM read_html_blocks('$src') b" ;;
   *.pdf)
     exts="markdown pdf"
     if [[ -n $p_first || -n $p_last ]]; then
@@ -946,8 +946,8 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
     doc="SELECT pandoc_ast_to_blocks(content) AS blocks FROM read_text('/dev/stdin')" ;;
   http*://*)
     # Assume http(s):// with no extension is HTML
-    exts="webbed"                  # webbed has no read_html_blocks; scalar over read_text
-    doc="SELECT html_to_duck_blocks(html) AS blocks FROM read_html_objects('$src')" ;;
+    exts="webbed"
+    doc="SELECT list(b) AS blocks FROM read_html_blocks('$src') b" ;;
   *)
     die "unsupported extension: ${f##*/}" 2 ;;
 esac

@@ -9,7 +9,7 @@ description: >-
   YAML, TOML, XLSX, ZIP, git logs). Also activate when querying code by CSS
   selectors (-Q), or when the user mentions duckeye, dep, der, sitting_duck, or
   duck_block_utils.
-version: 0.14.2
+version: 0.14.3
 ---
 
 # duckeye — Terminal Document & Source AST Reader

@@ -640,7 +640,6 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   if [[ $mode == summary ]]; then
     sql="SUMMARIZE ($target_query);"
   elif [[ $mode == profile ]]; then
-    exts+=" textplot"
     load=
     for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
     cols_raw=$(duckdb -dark-mode -noheader -list -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name || chr(9) || column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1

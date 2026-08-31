@@ -409,6 +409,7 @@ fi
 echo 'cli'
 ok  'help'                       $DUCKEYE -h
 ok  'init'                       $DUCKEYE --init
+ok  'update'                     $DUCKEYE --update
 no  'mode exclusivity'           $DUCKEYE -r -t "$TMP/d.parquet"
 no  'limit validates'            $DUCKEYE -n abc "$TMP/d.parquet"
 no  'unknown option'             $DUCKEYE -z "$TMP/doc.md"

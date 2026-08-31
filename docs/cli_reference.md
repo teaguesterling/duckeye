@@ -33,6 +33,7 @@ usage: duckeye [OPTION]... [FILE]
 | `-n` | `--limit N` | Cap row count in data modes or ZIM search listings |
 | | `--color WHEN` | Color handling: `auto` (default), `always`, `never` |
 | | `--init` | Install DuckDB extensions and exit |
+| | `--update` | Update DuckDB extensions and duckeye script, then exit |
 | `-h` | `--help` | Show help message |
 
 ---

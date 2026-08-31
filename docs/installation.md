@@ -75,9 +75,19 @@ duckeye --init
 
 ---
 
-## Extension Initialization
+## Extension Initialization & Updates
 
+### Initializing Extensions
 Running `duckeye --init` installs:
 
 * **Official Extensions**: `http`, `aws`, `excel`
 * **Community Extensions**: `duck_block_utils`, `markdown`, `webbed`, `zim`, `pdf`, `sitting_duck`, `yaml`, `toml`, `read_lines`, `duck_tails`, `zipfs`, `textplot`
+
+### Updating Extensions & Script
+Keep DuckDB extensions, `duckeye`, and AI skills updated with:
+
+```bash
+duckeye --update
+```
+
+This runs DuckDB's `UPDATE EXTENSIONS;`, verifies that all required extensions are installed, and pulls the latest `duckeye` updates.

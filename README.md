@@ -23,7 +23,7 @@ $ duckeye -s photosynthesis wikipedia.zim   # search 19M offline articles
 One bash script. No build step and no runtime beyond `duckdb` — every format is a DuckDB
 extension, with `pandoc` filling the gaps.
 
-## Install
+## Install & Update
 
 Quick install via `curl`:
 
@@ -43,6 +43,16 @@ The install script links the `duckeye` binary into `~/.local/bin`, creates the `
 configs to install the [skill](#ai-agent-integration) into. Use `--global` for
 `/usr/local/bin`, `--no-bin` to skip the binary, `--no-aliases` to skip creating aliases, or `--help` for the full list
 of flags.
+
+### Updating duckeye and extensions
+
+Keep DuckDB extensions, the duckeye binary, and agent skills up to date with a single command:
+
+```sh
+duckeye --update
+```
+
+This executes DuckDB's `UPDATE EXTENSIONS;`, verifies required extensions, and pulls the latest `duckeye` release (via `git pull` or remote update).
 
 Or install manually:
 
@@ -387,6 +397,7 @@ it to `DUCKEYE_EXTS`.
 -q                     AST selector for code definitions
 -n, --limit N          cap rows in any listing (-r, -z, -Z, and .zim -t/-s)
     --init             install the DuckDB extensions
+    --update           update DuckDB extensions and duckeye
 -h, --help             full help
 ```
 

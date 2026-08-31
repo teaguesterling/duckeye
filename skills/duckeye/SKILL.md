@@ -9,7 +9,7 @@ description: >-
   YAML, TOML, XLSX, ZIP, git logs). Also activate when querying code by CSS
   selectors (-Q), or when the user mentions duckeye, dep, der, sitting_duck, or
   duck_block_utils.
-version: 0.14.0
+version: 0.14.2
 ---
 
 # duckeye — Terminal Document & Source AST Reader
@@ -176,11 +176,12 @@ duckeye -Q '.func#process' -o md src/worker.rs
 | `DUCKEYE_THEME` | `auto` | `dark` or `light` theme override |
 | `COLUMNS` | `auto` | Column width for table rendering & profiling |
 
-## Setup
+## Setup & Updates
 
-If duckeye is not yet initialized, run:
+If duckeye is not yet initialized or you want to update extensions and duckeye:
 ```sh
-duckeye --init    # installs DuckDB extensions
+duckeye --init      # installs DuckDB extensions
+duckeye --update    # updates DuckDB extensions and duckeye
 ```
 
 Requires `duckdb` on `PATH`. `pandoc` is optional (needed for DOCX/EPUB/RST/etc).

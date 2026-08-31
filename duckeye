@@ -60,6 +60,7 @@ Options:
                          stdout is a terminal, or when -p is paging through
                          less -R. $NO_COLOR disables it
       --init             install the DuckDB extensions duckeye needs, then exit
+      --update           update DuckDB extensions and duckeye, then exit
   -h, --help             show this help
 
 NAME and TEXT match case-insensitively as substrings; SQL LIKE wildcards
@@ -134,6 +135,52 @@ init() {
   printf '%-20s %-10s ' pandoc system
   if command -v pandoc >/dev/null; then echo found
   else echo 'missing — .docx/.odt/.epub/.rst/.org/.tex/... will not render'
+  fi
+  return $rc
+}
+
+update() {
+  local rc=0
+  printf 'updating duckdb extensions...\n'
+  duckdb -dark-mode -c "UPDATE EXTENSIONS;" 2>&1 || true
+  init || rc=1
+
+  local bin_path script_dir repo_root
+  bin_path=$(readlink -f "$0" 2>/dev/null || echo "$0")
+  script_dir=$(dirname "$bin_path")
+
+  if git -C "$script_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null)
+    if [[ -n $repo_root && -f "$repo_root/install.sh" ]]; then
+      printf 'updating duckeye repository via git...\n'
+      if git -C "$repo_root" pull --ff-only 2>&1; then
+        printf 're-running installer...\n'
+        "$repo_root/install.sh" --no-init || rc=1
+      else
+        printf 'warning: git pull failed; check git repository status\n' >&2
+      fi
+    fi
+  else
+    printf 'updating standalone duckeye from github...\n'
+    local tmp_update
+    tmp_update=$(mktemp -d)
+    if curl -fsSL "https://raw.githubusercontent.com/teaguesterling/duckeye/main/duckeye" -o "$tmp_update/duckeye" 2>/dev/null; then
+      chmod +x "$tmp_update/duckeye"
+      if cp "$tmp_update/duckeye" "$bin_path" 2>/dev/null; then
+        printf 'duckeye binary updated at %s\n' "$bin_path"
+      else
+        printf 'warning: cannot overwrite %s (permission denied)\n' "$bin_path" >&2
+        rc=1
+      fi
+      if curl -fsSL "https://raw.githubusercontent.com/teaguesterling/duckeye/main/install.sh" -o "$tmp_update/install.sh" 2>/dev/null; then
+        chmod +x "$tmp_update/install.sh"
+        "$tmp_update/install.sh" --no-init --user-bin 2>/dev/null || true
+      fi
+    else
+      printf 'warning: failed to download latest duckeye from github\n' >&2
+      rc=1
+    fi
+    rm -rf "$tmp_update"
   fi
   return $rc
 }
@@ -278,6 +325,7 @@ while (( $# )); do
     --pages=*)     pages=${1#--pages=} ;;
     -h|--help)     usage; exit 0 ;;
     --init)        init; exit $? ;;
+    --update)      update; exit $? ;;
     -t|--toc)      setmode toc ;;
     -r|--raw)      setmode raw ;;
     -z|--summary|--summarize) setmode summary ;;

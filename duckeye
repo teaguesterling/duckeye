@@ -492,6 +492,13 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
                       || ': ' || entry || ')')
   END);"
 
+# Custom Pure-SQL Unicode sparkline macro (retained as reliable fallback / reference for textplot):
+# Encodes list of counts across 10 bins into 8-level Unicode sparkline blocks (' ', '▂'..'█', U+2581-U+2588):
+# CREATE OR REPLACE TEMP MACRO sql_sparkline(bin_counts) AS (
+#   SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(list_max(bin_counts), 0))::INT)) END, '')
+#   FROM unnest(bin_counts) t(cnt)
+# );
+
 # Data modes (raw, summary, profile) operate directly on tables/scans without duck_block_utils:
 # DuckDB's own box renderer streams and emits clean tabular output.
 if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
@@ -585,6 +592,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   if [[ $mode == summary ]]; then
     sql="SUMMARIZE ($target_query);"
   elif [[ $mode == profile ]]; then
+    exts+=" textplot"
     load=
     for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
     cols_raw=$(duckdb -dark-mode -noheader -list -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name || chr(9) || column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
@@ -618,8 +626,8 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
-       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt
        FROM range(10) b(i)
        LEFT JOIN (
          SELECT CASE WHEN max_v = min_v THEN 0 ELSE least(9, floor(10.0 * (val - min_v) / NULLIF(max_v - min_v, 0))::INT) END AS bin, val
@@ -641,8 +649,8 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
-       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt
        FROM range(10) b(i)
        LEFT JOIN (
          SELECT CASE WHEN max_e = min_e THEN 0 ELSE least(9, floor(10.0 * (val - min_e) / NULLIF(max_e - min_e, 0))::INT) END AS bin, val
@@ -664,8 +672,8 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
-       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt
        FROM range(10) b(i)
        LEFT JOIN (
          SELECT CASE WHEN max_e = min_e THEN 0 ELSE least(9, floor(10.0 * (val - min_e) / NULLIF(max_e - min_e, 0))::INT) END AS bin, val
@@ -687,8 +695,8 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
-       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt
        FROM range(10) b(i)
        LEFT JOIN (
          SELECT CASE WHEN max_s = min_s THEN 0 ELSE least(9, floor(10.0 * (val - min_s) / NULLIF(max_s - min_s, 0))::INT) END AS bin, val
@@ -710,8 +718,8 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
-       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt
        FROM range(10) b(i)
        LEFT JOIN (
          SELECT CASE WHEN max_s = min_s THEN 0 ELSE least(9, floor(10.0 * (val - min_s) / NULLIF(max_s - min_s, 0))::INT) END AS bin, val

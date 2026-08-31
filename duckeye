@@ -585,7 +585,6 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   if [[ $mode == summary ]]; then
     sql="SUMMARIZE ($target_query);"
   elif [[ $mode == profile ]]; then
-    exts+=" textplot"
     load=
     for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
     cols_raw=$(duckdb -dark-mode -noheader -list -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name || chr(9) || column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
@@ -619,13 +618,12 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-       SELECT b.i AS bin, COALESCE(count(d.$col_id), 0)::DOUBLE AS cnt
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
-         SELECT COALESCE(floor(9.999 * ($col_id::DOUBLE - stats.min_v::DOUBLE) / NULLIF(stats.max_v::DOUBLE - stats.min_v::DOUBLE, 0))::INT, 0) AS bin, $col_id
-         FROM __duckeye_src, (SELECT min($col_id) AS min_v, max($col_id) AS max_v FROM __duckeye_src) stats
-         WHERE $col_id IS NOT NULL
+         SELECT CASE WHEN max_v = min_v THEN 0 ELSE least(9, floor(10.0 * (val - min_v) / NULLIF(max_v - min_v, 0))::INT) END AS bin, val
+         FROM (SELECT $col_id::DOUBLE AS val, min($col_id::DOUBLE) OVER () AS min_v, max($col_id::DOUBLE) OVER () AS max_v FROM __duckeye_src WHERE $col_id IS NOT NULL)
        ) d ON b.i = d.bin
        GROUP BY b.i
     )), '')::VARCHAR
@@ -643,13 +641,12 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-       SELECT b.i AS bin, COALESCE(count(d.$col_id), 0)::DOUBLE AS cnt
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
-         SELECT COALESCE(floor(9.999 * (epoch($col_id::TIMESTAMP) - stats.min_e) / NULLIF(stats.max_e - stats.min_e, 0))::INT, 0) AS bin, $col_id
-         FROM __duckeye_src, (SELECT min(epoch($col_id::TIMESTAMP)) AS min_e, max(epoch($col_id::TIMESTAMP)) AS max_e FROM __duckeye_src) stats
-         WHERE $col_id IS NOT NULL
+         SELECT CASE WHEN max_e = min_e THEN 0 ELSE least(9, floor(10.0 * (val - min_e) / NULLIF(max_e - min_e, 0))::INT) END AS bin, val
+         FROM (SELECT epoch($col_id::TIMESTAMP)::DOUBLE AS val, min(epoch($col_id::TIMESTAMP)) OVER () AS min_e, max(epoch($col_id::TIMESTAMP)) OVER () AS max_e FROM __duckeye_src WHERE $col_id IS NOT NULL)
        ) d ON b.i = d.bin
        GROUP BY b.i
     )), '')::VARCHAR
@@ -667,13 +664,12 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-       SELECT b.i AS bin, COALESCE(count(d.$col_id), 0)::DOUBLE AS cnt
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
-         SELECT COALESCE(floor(9.999 * (date_part('epoch', $col_id) - stats.min_e) / NULLIF(stats.max_e - stats.min_e, 0))::INT, 0) AS bin, $col_id
-         FROM __duckeye_src, (SELECT min(date_part('epoch', $col_id)) AS min_e, max(date_part('epoch', $col_id)) AS max_e FROM __duckeye_src) stats
-         WHERE $col_id IS NOT NULL
+         SELECT CASE WHEN max_e = min_e THEN 0 ELSE least(9, floor(10.0 * (val - min_e) / NULLIF(max_e - min_e, 0))::INT) END AS bin, val
+         FROM (SELECT date_part('epoch', $col_id)::DOUBLE AS val, min(date_part('epoch', $col_id)) OVER () AS min_e, max(date_part('epoch', $col_id)) OVER () AS max_e FROM __duckeye_src WHERE $col_id IS NOT NULL)
        ) d ON b.i = d.bin
        GROUP BY b.i
     )), '')::VARCHAR
@@ -691,13 +687,12 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-       SELECT b.i AS bin, COALESCE(count(d.sz), 0)::DOUBLE AS cnt
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
-         SELECT COALESCE(floor(9.999 * (sz::DOUBLE - stats.min_s::DOUBLE) / NULLIF(stats.max_s::DOUBLE - stats.min_s::DOUBLE, 0))::INT, 0) AS bin, sz
-         FROM (SELECT len($col_id) AS sz FROM __duckeye_src WHERE $col_id IS NOT NULL),
-              (SELECT min(len($col_id)) AS min_s, max(len($col_id)) AS max_s FROM __duckeye_src WHERE $col_id IS NOT NULL) stats
+         SELECT CASE WHEN max_s = min_s THEN 0 ELSE least(9, floor(10.0 * (val - min_s) / NULLIF(max_s - min_s, 0))::INT) END AS bin, val
+         FROM (SELECT len($col_id)::DOUBLE AS val, min(len($col_id)) OVER () AS min_s, max(len($col_id)) OVER () AS max_s FROM __duckeye_src WHERE $col_id IS NOT NULL)
        ) d ON b.i = d.bin
        GROUP BY b.i
     )), '')::VARCHAR
@@ -715,13 +710,12 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-       SELECT b.i AS bin, COALESCE(count(d.sz), 0)::DOUBLE AS cnt
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
-         SELECT COALESCE(floor(9.999 * (sz::DOUBLE - stats.min_s::DOUBLE) / NULLIF(stats.max_s::DOUBLE - stats.min_s::DOUBLE, 0))::INT, 0) AS bin, sz
-         FROM (SELECT cardinality($col_id) AS sz FROM __duckeye_src WHERE $col_id IS NOT NULL),
-              (SELECT min(cardinality($col_id)) AS min_s, max(cardinality($col_id)) AS max_s FROM __duckeye_src WHERE $col_id IS NOT NULL) stats
+         SELECT CASE WHEN max_s = min_s THEN 0 ELSE least(9, floor(10.0 * (val - min_s) / NULLIF(max_s - min_s, 0))::INT) END AS bin, val
+         FROM (SELECT cardinality($col_id)::DOUBLE AS val, min(cardinality($col_id)) OVER () AS min_s, max(cardinality($col_id)) OVER () AS max_s FROM __duckeye_src WHERE $col_id IS NOT NULL)
        ) d ON b.i = d.bin
        GROUP BY b.i
     )), '')::VARCHAR
@@ -777,9 +771,9 @@ FROM __duckeye_src"
   load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; "
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
   if want_color; then
-    duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -s "$load" -s "$sql")
+    duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -c "$load $sql")
   else
-    duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth 0" -s "$load" -s "$sql")
+    duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth 0" -c "$load $sql")
   fi
   page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
   "${duck[@]}" | "${page[@]}"

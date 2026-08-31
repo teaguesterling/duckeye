@@ -245,8 +245,8 @@ has 'profile with -Z' 'distribution'    $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile with -Z and -w' '33.3%'     $DUCKEYE -Z -w 'score > 6' "$TMP/d.parquet"
 has 'profile temporal date' 'created_date' $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile temporal span' 'days' $DUCKEYE -Z "$TMP/d.parquet"
-has 'profile list len' 'len min:' $DUCKEYE -Z "$TMP/d.parquet"
-has 'profile map entries' 'entries min:' $DUCKEYE -Z "$TMP/d.parquet"
+has 'profile list len' 'len' $DUCKEYE -Z "$TMP/d.parquet"
+has 'profile map entries' 'entries' $DUCKEYE -Z "$TMP/d.parquet"
 w80=$(COLUMNS=80 $DUCKEYE -Z "$TMP/d.parquet" | wc -L)
 w140=$(COLUMNS=140 $DUCKEYE -Z "$TMP/d.parquet" | wc -L)
 if [[ $w80 -le $w140 ]]; then

@@ -674,8 +674,8 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
          SELECT CASE WHEN max_v = min_v THEN 0 ELSE least(9, floor(10.0 * (val - min_v) / NULLIF(max_v - min_v, 0))::INT) END AS bin, val
@@ -697,8 +697,8 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
          SELECT CASE WHEN max_e = min_e THEN 0 ELSE least(9, floor(10.0 * (val - min_e) / NULLIF(max_e - min_e, 0))::INT) END AS bin, val
@@ -720,8 +720,8 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
          SELECT CASE WHEN max_e = min_e THEN 0 ELSE least(9, floor(10.0 * (val - min_e) / NULLIF(max_e - min_e, 0))::INT) END AS bin, val
@@ -735,7 +735,7 @@ FROM __duckeye_src"
   END AS summary
 FROM __duckeye_src"
           ;;
-        *\[\]|LIST*)
+        *\[\]|LIST*|*ARRAY*)
           q="SELECT
   '$col_esc' AS \"column\",
   '$type' AS \"type\",
@@ -743,8 +743,8 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
          SELECT CASE WHEN max_s = min_s THEN 0 ELSE least(9, floor(10.0 * (val - min_s) / NULLIF(max_s - min_s, 0))::INT) END AS bin, val
@@ -766,8 +766,8 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
-       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
          SELECT CASE WHEN max_s = min_s THEN 0 ELSE least(9, floor(10.0 * (val - min_s) / NULLIF(max_s - min_s, 0))::INT) END AS bin, val

@@ -757,6 +757,38 @@ FROM __duckeye_src"
   END AS summary
 FROM __duckeye_src"
           ;;
+        BLOB)
+          # A BLOB is bytes, so it profiles the way a list profiles: by size. The
+          # catch-all branch below would histogram it as a category, and since
+          # BLOB::VARCHAR escapes every non-printable byte, that yields a frequency
+          # table over unreadable escape soup -- accurate and useless. octet_length,
+          # not length: length() has no BLOB overload at all.
+          #
+          # The preview still goes through ::VARCHAR, which is what makes it useful
+          # here rather than in the histogram -- one escaped sample tells you whether
+          # the column holds text or binary; a hundred of them tell you nothing.
+          q="SELECT
+  '$col_esc' AS \"column\",
+  '$type' AS \"type\",
+  count($col_id)::BIGINT AS non_null,
+  (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
+  count(DISTINCT $col_id)::BIGINT AS approx_unique,
+  CASE WHEN count($col_id) = 0 THEN '' ELSE
+    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+       SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
+       FROM range(10) b(i)
+       LEFT JOIN (
+         SELECT CASE WHEN max_s = min_s THEN 0 ELSE least(9, floor(10.0 * (val - min_s) / NULLIF(max_s - min_s, 0))::INT) END AS bin, val
+         FROM (SELECT octet_length($col_id)::DOUBLE AS val, min(octet_length($col_id)) OVER () AS min_s, max(octet_length($col_id)) OVER () AS max_s FROM __duckeye_src WHERE $col_id IS NOT NULL)
+       ) d ON b.i = d.bin
+       GROUP BY b.i
+    )), '')::VARCHAR
+  END AS distribution,
+  CASE WHEN count($col_id) = 0 THEN 'all null' ELSE
+    ('bytes min: ' || COALESCE(min(octet_length($col_id))::VARCHAR, '0') || ', avg: ' || COALESCE(round(avg(octet_length($col_id)), 1)::VARCHAR, '0') || ', max: ' || COALESCE(max(octet_length($col_id))::VARCHAR, '0') || ', e.g. ' || COALESCE(substr(any_value($col_id)::VARCHAR, 1, $summary_budget), ''))::VARCHAR
+  END AS summary
+FROM __duckeye_src"
+          ;;
         MAP*)
           q="SELECT
   '$col_esc' AS \"column\",

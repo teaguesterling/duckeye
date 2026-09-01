@@ -13,7 +13,11 @@ export COLUMNS=120
 TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
-pass=0 fail=0 skip=0
+pass=0 fail=0 skip=0 known=0 fixed=0
+# Known-broken guards are grouped by WHAT UNBLOCKS THEM, not just counted. A single
+# total misleads: it reads as one body of outstanding work when the causes are
+# independent and land at different times. $cause is set before each guard group.
+declare -A known_by; cause=unattributed
 strip() { sed 's/\x1b\[[0-9;]*m//g'; }
 
 # ok NAME CMD...        — must exit 0
@@ -30,6 +34,30 @@ has() { local n=$1 pat=$2; shift 2
   if [[ $out == *"$pat"* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
   else fail=$((fail+1)); printf '  FAIL %s (no match for %q)\n' "$n" "$pat"; fi; }
 skipping() { skip=$((skip+1)); printf '  skip %s (%s)\n' "$1" "$2"; }
+
+# Guards for defects that live UPSTREAM, in duck_block_utils' renderer and
+# extractor, not in duckeye. duckeye composes function calls and delegates every
+# rendering decision, so it cannot fix these -- but it can notice when they move.
+#
+# They assert the CORRECT behaviour and are expected to fail today. A failure is
+# reported as 'known' and does NOT fail the suite: going red because someone else
+# has not fixed their bug yet is noise. When upstream does fix one it flips to
+# 'FIXED', which is loud, actionable, and still exits 0.
+#
+# broken NAME WANT CMD...   — WANT is what correct output contains; absent today.
+# emits  NAME JUNK CMD...   — JUNK is what broken output leaks; should vanish.
+broken() { local n=$1 pat=$2; shift 2
+  local out; out=$("$@" 2>/dev/null </dev/null | strip)
+  if [[ $out == *"$pat"* ]]; then fixed=$((fixed+1))
+    printf '  FIXED %s — upstream now emits "%s"; drop this guard\n' "$n" "$pat"
+  else known=$((known+1)); known_by[$cause]=$(( ${known_by[$cause]:-0} + 1 ))
+    printf '  known %s\n' "$n"; fi; }
+emits() { local n=$1 pat=$2; shift 2
+  local out; out=$("$@" 2>/dev/null </dev/null | strip)
+  if [[ $out == *"$pat"* ]]; then known=$((known+1)); known_by[$cause]=$(( ${known_by[$cause]:-0} + 1 ))
+    printf '  known %s\n' "$n"
+  else fixed=$((fixed+1))
+    printf '  FIXED %s — "%s" no longer leaks; drop this guard\n' "$n" "$pat"; fi; }
 
 command -v duckdb >/dev/null || { echo 'duckdb not on PATH'; exit 1; }
 
@@ -60,13 +88,30 @@ cat >"$TMP/flat.md" <<'EOF'
 just a paragraph, no headings at all
 EOF
 
+# Two adjacent prose blocks inside ONE section, for the cross-block search case.
+cat >"$TMP/span.md" <<'EOF'
+# Doc
+
+## Sec
+
+first para ends here
+
+second para starts
+EOF
+
 printf '<html><body><h1>Head</h1><p>html body text</p><h2>Sub</h2><p>sub text</p></body></html>\n' >"$TMP/doc.html"
+
+# A nested list, for the webbed reader's list-shape defect. Flat lists are fine;
+# nesting is what breaks.
+printf '<html><body><h1>H</h1><ul><li>L1<ul><li>L2<ul><li>L3</li></ul></li></ul></li></ul></body></html>\n' >"$TMP/nest.html"
+printf '<html><body><h1>H</h1><ul><li>alpha</li><li>beta</li></ul></body></html>\n' >"$TMP/flat.html"
 
 duckdb -dark-mode -noheader -c "COPY (SELECT i::INTEGER AS id, 'name_'||i AS name, repeat('long_description_', i) AS descr, i*1.5 AS score,
                       ('2026-01-01'::DATE + i::INTEGER) AS created_date,
                       '2026-01-01 10:00:00'::TIMESTAMP + INTERVAL (i * 2) HOUR AS updated_at,
                       [i, i+1] AS tags,
-                      map(['k1'], [i]) AS attrs
+                      map(['k1'], [i]) AS attrs,
+                      repeat('b', i)::BLOB AS payload
                FROM range(1,8) t(i))
            TO '$TMP/d.parquet';
            COPY (SELECT i AS id, 'name_'||i AS name FROM range(1,5) t(i)) TO '$TMP/d.csv';
@@ -124,7 +169,9 @@ else pass=$((pass+1)); echo '  ok   S stops at next sibling'; fi
 no  'S no match exits 1'         $DUCKEYE -S Nope "$TMP/doc.md"
 # 'Alpha' matches both "Alpha" and "Alpha Child"; the parent subsumes the child
 out=$($DUCKEYE -S Alpha "$TMP/doc.md" | strip)
-count=$(printf '%s' "$out" | grep -c 'child body')
+# Occurrences, not lines: grep -c would count a doubled section that happened to
+# wrap onto one line as 1 and pass with the dedup defect present.
+count=$(printf '%s' "$out" | grep -o 'child body' | wc -l)
 if [[ $count -le 1 ]]; then pass=$((pass+1)); printf '  ok   %s\n' "S dedup nested matches"
 else fail=$((fail+1)); printf '  FAIL %s (child body appeared %d times)\n' "S dedup nested matches" "$count"; fi
 
@@ -134,6 +181,14 @@ has 's reads inline bold' 'bold phrase'       $DUCKEYE -s 'bold phrase' "$TMP/do
 has 's reads code blocks' 'code_block_token'  $DUCKEYE -s code_block_token "$TMP/doc.md"
 has 's finds preamble'    'kumquat'           $DUCKEYE -s kumquat "$TMP/doc.md"
 has 's headingless doc'   'no headings at all' $DUCKEYE -s paragraph "$TMP/flat.md"
+# A phrase that spans a block boundary must still match. duckeye flattens the
+# section with a SPACE separator before the ILIKE, so "...ends here" followed by
+# "second para..." reads as one stream. duck_block_utils' duck_blocks_sections_like
+# uses to_text's default "\n\n" separator instead, under which this same search
+# returns nothing -- so this pins the behaviour ahead of the v1 migration onto that
+# macro. If it fails after the swap, the separator is the reason, and the symptom
+# is silently missing hits rather than an error.
+has 's phrase across blocks' 'second para' $DUCKEYE -s 'here second' "$TMP/span.md"
 # innermost section only: matching the child must not drag the parent's own prose along
 if [[ $($DUCKEYE -s widget "$TMP/doc.md" | strip) == *'alpha body'* ]]; then
   fail=$((fail+1)); echo '  FAIL s reports innermost section'
@@ -247,6 +302,10 @@ has 'profile temporal date' 'created_date' $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile temporal span' 'days' $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile list len' 'len' $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile map entries' 'entries' $DUCKEYE -Z "$TMP/d.parquet"
+# BLOB is bytes, so it profiles by size like a list profiles by length -- not as a
+# category histogram over the escaped byte string, which is what the catch-all
+# branch would otherwise do to it.
+has 'profile blob bytes' 'bytes min:' $DUCKEYE -Z "$TMP/d.parquet"
 w80=$(COLUMNS=80 $DUCKEYE -Z "$TMP/d.parquet" | wc -L)
 w140=$(COLUMNS=140 $DUCKEYE -Z "$TMP/d.parquet" | wc -L)
 if [[ $w80 -le $w140 ]]; then
@@ -265,6 +324,110 @@ if command -v pandoc >/dev/null; then
   has 'rst search'   'beta body'   $DUCKEYE -s widget "$TMP/t.rst"
   pandoc "$TMP/t.rst" -t json >"$TMP/t.json" 2>/dev/null
   has 'pandoc ast json' 'Beta'     $DUCKEYE -t "$TMP/t.json"
+
+  # ---- upstream container-decoding defects (duck_block_utils) --------------
+  cause='duck_block_utils ref bump'
+  # pandoc_ast_to_blocks stores every CONTAINER as encoding='json' holding raw
+  # Pandoc AST -- deliberate (pandoc_block_convert.cpp: BlockQuote, BulletList/
+  # OrderedList, DefinitionList, Table). Decoding is therefore the consumer's
+  # job, and the consumers do not do it. Present in the shipped v1.6.1 binary
+  # AND on upstream main: render_ansi.cpp and extraction.cpp contain no 'json'
+  # handling at all, so a release will not clear these on its own.
+  #
+  # Only the pandoc-routed formats are affected. The markdown reader builds real
+  # child blocks, so the same document via .md renders correctly -- each guard
+  # below is paired with an ordinary passing test on the .md path, which is what
+  # proves the guard is measuring the producer and not a broken fixture.
+  cat >"$TMP/rich.md" <<'RICH'
+# Doc
+
+- alpha item
+- beta item
+
+1. one item
+2. two item
+
+> quoted line here
+
+| fruit | count |
+|---|---|
+| kumquat | 7 |
+RICH
+  pandoc "$TMP/rich.md" -t rst -o "$TMP/rich.rst" 2>/dev/null
+
+  # controls: the markdown path renders all four correctly
+  has 'md path list'       '• alpha item'     $DUCKEYE "$TMP/rich.md"
+  has 'md path ordered'    '1. one item'      $DUCKEYE "$TMP/rich.md"
+  has 'md path blockquote' 'quoted line here' $DUCKEYE "$TMP/rich.md"
+  # 'kumquat │ 7', not bare 'kumquat': the raw Pandoc Table AST CONTAINS the cell
+  # text, so a bare-content pattern is satisfied by a table dumped as JSON. The
+  # column separator only appears when the table is actually rendered as a table.
+  has 'md path table'      'kumquat │ 7'      $DUCKEYE "$TMP/rich.md"
+
+  # 1. RenderListItems walks pandoc's array-of-arrays-of-blocks but cannot reach
+  #    text inside the inner block objects: right bullet COUNT, no content.
+  broken 'pandoc list keeps item text'  '• alpha item'     $DUCKEYE "$TMP/rich.rst"
+
+  # 2. render_ansi.cpp reads attributes['ordered'], but the pandoc path sets
+  #    attributes['list_type']='ordered' and never 'ordered'. Only builders.cpp
+  #    sets the latter. The export path (pandoc_block_convert.cpp:679) checks
+  #    both; the renderer checks one. So pandoc ordered lists render as bullets.
+  broken 'pandoc ordered list numbers' '1. one item'       $DUCKEYE "$TMP/rich.rst"
+
+  # 3. render_ansi.cpp requires the parsed table to be a JSON OBJECT, but pandoc
+  #    Table content is an ARRAY. The branch never fires and the table renders as
+  #    nothing whatsoever -- with exit 0. Silent, total loss.
+  broken 'pandoc table renders'        'kumquat │ 7'       $DUCKEYE "$TMP/rich.rst"
+
+  # 4. RenderBlockquote is handed the undecoded text, so the raw Pandoc AST is
+  #    printed to the terminal.
+  broken 'pandoc blockquote is prose'  'quoted line here'  $DUCKEYE "$TMP/rich.rst"
+  emits  'pandoc blockquote leaks ast' '{"t":"Para"'       $DUCKEYE "$TMP/rich.rst"
+
+  # 5. The damaging one. db_blocks_to_text does no JSON decoding, so the text a
+  #    search matches against is Pandoc AST tokens rather than document content.
+  #    This yields WRONG ANSWERS rather than visible garbage, which is worse:
+  #    nothing on screen tells a user the match set is bogus.
+  emits  'to_text leaks ast tokens'    '{"t":"Str"'        $DUCKEYE -o text "$TMP/rich.rst"
+  broken 'to_text yields prose'        'alpha item'        $DUCKEYE -o text "$TMP/rich.rst"
+
+  # ---- upstream nested-list defect (webbed's read_html_blocks) ---------------
+  # Not duck_block_utils': webbed's HTML reader emits the pre-structural `list`
+  # shape. It produces one extra top-level list PER NESTING LEVEL, with the text
+  # fused cumulatively. At depth 3:
+  #
+  #     list ["L1L2L3"]   list ["L2L3"]   list ["L3"]
+  #
+  # so the nesting collapses into each parent's text AND every level survives as
+  # its own top-level list -- "L3" renders three times.
+  #
+  # Pinned at depth 3 rather than depth 2 deliberately. Two top-level lists is
+  # also what a document containing two ordinary lists produces, so a depth-2
+  # count assertion is satisfiable by innocent input. The depth-3 signature
+  # cannot be produced by any conforming reader, so this cannot pass for the
+  # wrong reason.
+  #
+  # Fixed in webbed at 4cc8401 on branch feat/spec-6-emission -- PUSHED but held,
+  # not merged: origin/main is 9823acc and the fix is deliberately not on it. So
+  # these do not flip on a main-tracking build, and they do not flip on the
+  # duck_block_utils ref bump that clears the guards above either. They flip when
+  # a merge reaches a released artifact, because that is what a duckeye user
+  # installing from the community repo actually resolves.
+  cause='webbed merge+release'
+  has   'html flat list'          '• alpha' $DUCKEYE "$TMP/flat.html"
+  emits 'html nested list fuses'  'L1L2L3'  $DUCKEYE "$TMP/nest.html"
+  # Duplication is a count, not a substring, so it needs its own check: the fuse
+  # guard alone goes green while half the defect remains. Correct output mentions
+  # the deepest item once.
+  # grep -o | wc -l, NOT grep -c: grep -c counts LINES containing a match, so the
+  # identical defective content rendered on one line instead of three reports 1
+  # and this guard would announce FIXED with the defect fully present. Occurrences
+  # are what the assertion is about; lines are an artifact of wrapping.
+  n=$($DUCKEYE "$TMP/nest.html" 2>/dev/null | strip | grep -o 'L3' | wc -l)
+  if (( n > 1 )); then known=$((known+1)); known_by[$cause]=$(( ${known_by[$cause]:-0} + 1 ))
+    printf '  known %s (L3 x%d)\n' 'html nested list duplicates' "$n"
+  else fixed=$((fixed+1))
+    printf '  FIXED %s — deepest item no longer repeated; drop this guard\n' 'html nested list duplicates'; fi
 
   # pandoc cannot infer these two from the extension; .mediawiki in particular
   # fails quietly (warns, falls back to markdown, exits 0), so duckeye names the
@@ -433,5 +596,13 @@ ok  'git uri toc'                $DUCKEYE -t 'git://README.md@HEAD'
 has 'git uri section'            'Install' $DUCKEYE -S Install 'git://README.md@HEAD'
 ok  'git uri code ast toc'       $DUCKEYE -t 'git://test.sh@HEAD'
 
-printf '\n%d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip"
+printf '\n%d passed, %d failed, %d skipped' "$pass" "$fail" "$skip"
+if (( known )); then
+  printf ', %d known-broken upstream' "$known"
+  sep=' ('
+  for c in "${!known_by[@]}"; do printf '%s%d %s' "$sep" "${known_by[$c]}" "$c"; sep=', '; done
+  printf ')'
+fi
+(( fixed )) && printf ', %d NOW FIXED (remove guards)' "$fixed"
+printf '\n'
 (( fail == 0 ))

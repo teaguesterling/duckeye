@@ -199,8 +199,8 @@ arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 # after -S/-s have already cut the document down, so a section can come out as markdown.
 emit() {
   case $out_fmt in
-    ansi)      printf 'db_blocks_render_ansi(%s)' "$1" ;;
-    text)      printf 'db_blocks_to_text(%s)' "$1" ;;
+    ansi)      printf 'duck_blocks_render_ansi(%s)' "$1" ;;
+    text)      printf 'duck_blocks_to_text(%s)' "$1" ;;
     html)      printf 'duck_blocks_to_html(%s)' "$1" ;;
     blocks)    printf 'to_json(%s)' "$1" ;;
     pandoc|md) printf 'db_to_pandoc_json(%s)' "$1" ;;
@@ -547,8 +547,8 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
              CASE WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
                   THEN zim_get_content(archive, entry) END))
     WHEN zim_mimetype(archive, entry) LIKE 'text/%'
-      THEN db_code(zim_get_text(archive, entry))
-    ELSE db_paragraph('(no renderer for '
+      THEN duck_block_code(zim_get_text(archive, entry))
+    ELSE duck_block_paragraph('(no renderer for '
                       || coalesce(zim_mimetype(archive, entry), 'unknown type')
                       || ': ' || entry || ')')
   END);"
@@ -1032,7 +1032,7 @@ case $mode in
   full)
     sql="$cte SELECT $(emit 'blocks') FROM doc;" ;;
   toc)
-    sql="$cte, t AS (SELECT unnest(db_blocks_toc(blocks)) AS e FROM doc)
+    sql="$cte, t AS (SELECT unnest(duck_blocks_toc(blocks)) AS e FROM doc)
          SELECT string_agg(repeat('  ', e.indent) || e.title, chr(10) ORDER BY e.element_order)
          FROM t HAVING count(*) > 0;" ;;
   section)
@@ -1040,7 +1040,7 @@ case $mode in
     # so asking for a chapter yields its subsections too.
     sql="$cte,
          h AS (SELECT e.level AS lvl, e.title AS title, e.id AS id, e.element_order AS ord
-               FROM (SELECT unnest(db_blocks_headings(blocks)) AS e FROM doc)),
+               FROM (SELECT unnest(duck_blocks_headings(blocks)) AS e FROM doc)),
          sec AS (SELECT h1.ord AS s, coalesce(min(h2.ord) - 1, 2147483647) AS e
                  FROM h h1 LEFT JOIN h h2 ON h2.ord > h1.ord AND h2.lvl <= h1.lvl
                  WHERE h1.title ILIKE '%$pat%' ESCAPE '\\' OR h1.id = '$pat'
@@ -1051,14 +1051,14 @@ case $mode in
          top AS (SELECT s, e FROM sec a
                  WHERE NOT EXISTS (SELECT 1 FROM sec b
                                    WHERE b.s <= a.s AND b.e >= a.e AND (b.s, b.e) <> (a.s, a.e)))
-         SELECT $(emit "db_blocks_reorder(flatten(list(db_blocks_slice(doc.blocks, top.s, top.e) ORDER BY top.s)))")
+         SELECT $(emit "duck_blocks_reorder(flatten(list(duck_blocks_slice(doc.blocks, top.s, top.e) ORDER BY top.s)))")
          FROM doc, top HAVING count(*) > 0;" ;;
   search)
     # Spans here stop at the next heading of *any* level, so a hit reports the
     # innermost section that holds it rather than nesting parent inside child.
     sql="$cte,
          h AS (SELECT e.element_order AS ord
-               FROM (SELECT unnest(db_blocks_headings(blocks)) AS e FROM doc)),
+               FROM (SELECT unnest(duck_blocks_headings(blocks)) AS e FROM doc)),
          span AS (SELECT ord AS s, coalesce(lead(ord) OVER (ORDER BY ord) - 1, 2147483647) AS e
                   FROM h
                   UNION ALL   -- anything ahead of the first heading, and whole
@@ -1067,9 +1067,9 @@ case $mode in
                                                          2147483647)::INTEGER AS e)
                   WHERE e >= 0),
          hit AS (SELECT s, e FROM doc, span
-                 WHERE db_blocks_to_text(db_blocks_slice(doc.blocks, span.s, span.e), ' ')
+                 WHERE duck_blocks_to_text(duck_blocks_slice(doc.blocks, span.s, span.e), ' ')
                        ILIKE '%$pat%' ESCAPE '\\')
-         SELECT $(emit "db_blocks_reorder(flatten(list(db_blocks_slice(doc.blocks, hit.s, hit.e) ORDER BY hit.s)))")
+         SELECT $(emit "duck_blocks_reorder(flatten(list(duck_blocks_slice(doc.blocks, hit.s, hit.e) ORDER BY hit.s)))")
          FROM doc, hit HAVING count(*) > 0;" ;;
 esac
 

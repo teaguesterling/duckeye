@@ -35,6 +35,14 @@ has() { local n=$1 pat=$2; shift 2
   else fail=$((fail+1)); printf '  FAIL %s (no match for %q)\n' "$n" "$pat"; fi; }
 skipping() { skip=$((skip+1)); printf '  skip %s (%s)\n' "$1" "$2"; }
 
+# no_leak NAME PATTERN CMD... — output must NOT contain PATTERN. The negative half
+# of an assertion pair: "the prose is present" and "the raw AST is absent" are
+# different claims, and output can satisfy the first while failing the second.
+no_leak() { local n=$1 pat=$2; shift 2
+  local out; out=$("$@" 2>/dev/null </dev/null | strip)
+  if [[ $out == *"$pat"* ]]; then fail=$((fail+1)); printf '  FAIL %s (leaked %q)\n' "$n" "$pat"
+  else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
+
 # Guards for defects that live UPSTREAM, in duck_block_utils' renderer and
 # extractor, not in duckeye. duckeye composes function calls and delegates every
 # rendering decision, so it cannot fix these -- but it can notice when they move.
@@ -325,19 +333,8 @@ if command -v pandoc >/dev/null; then
   pandoc "$TMP/t.rst" -t json >"$TMP/t.json" 2>/dev/null
   has 'pandoc ast json' 'Beta'     $DUCKEYE -t "$TMP/t.json"
 
-  # ---- upstream container-decoding defects (duck_block_utils) --------------
-  cause='duck_block_utils ref bump'
-  # pandoc_ast_to_blocks stores every CONTAINER as encoding='json' holding raw
-  # Pandoc AST -- deliberate (pandoc_block_convert.cpp: BlockQuote, BulletList/
-  # OrderedList, DefinitionList, Table). Decoding is therefore the consumer's
-  # job, and the consumers do not do it. Present in the shipped v1.6.1 binary
-  # AND on upstream main: render_ansi.cpp and extraction.cpp contain no 'json'
-  # handling at all, so a release will not clear these on its own.
-  #
-  # Only the pandoc-routed formats are affected. The markdown reader builds real
-  # child blocks, so the same document via .md renders correctly -- each guard
-  # below is paired with an ordinary passing test on the .md path, which is what
-  # proves the guard is measuring the producer and not a broken fixture.
+  # One document carrying every construct that was silently mishandled, read twice:
+  # natively as markdown, and through pandoc as rst. Same content, two readers.
   cat >"$TMP/rich.md" <<'RICH'
 # Doc
 
@@ -361,114 +358,62 @@ Term one
 RICH
   pandoc "$TMP/rich.md" -t rst -o "$TMP/rich.rst" 2>/dev/null
 
-  # controls: the markdown path renders all four correctly
+  # ---- pandoc-path fidelity, formerly a block of known-broken guards ----------
+  # duck_block_utils shipped these fixes in the community build that replaced
+  # 078a9b3; webbed's nested-list fix arrived in the same window. Everything below
+  # was a guard reporting "known" and is now an ordinary assertion. Kept rather
+  # than deleted: they are the cases that were silently wrong, so they are the ones
+  # worth holding.
+  #
+  # Each pandoc-path assertion is paired with the same document read NATIVELY. The
+  # pairing is what made the guards trustworthy while they were failing, and it is
+  # what will localise a future regression to a reader rather than to the renderer.
   has 'md path list'       '• alpha item'     $DUCKEYE "$TMP/rich.md"
   has 'md path ordered'    '1. one item'      $DUCKEYE "$TMP/rich.md"
   has 'md path blockquote' 'quoted line here' $DUCKEYE "$TMP/rich.md"
-  # 'kumquat │ 7', not bare 'kumquat': the raw Pandoc Table AST CONTAINS the cell
-  # text, so a bare-content pattern is satisfied by a table dumped as JSON. The
-  # column separator only appears when the table is actually rendered as a table.
   has 'md path table'      'kumquat │ 7'      $DUCKEYE "$TMP/rich.md"
-  # A cell whose ONLY content is formatted. panduck found the AST converter's inline
-  # flattener never recursing into Strong/Emph/Code, so such a cell comes out as the
-  # EMPTY STRING -- text gone, not mangled, inside an otherwise valid table. The
-  # shipped converter leaves tables as raw JSON so duckeye cannot hit it yet; it
-  # becomes reachable the moment the converter starts emitting {headers,rows}. The
-  # plain-cell assertion above would flip to FIXED then and report nothing wrong.
+  # a cell whose ONLY content is formatted -- the inline flattener used to empty it
   has 'md path table formatted cell' 'plum    │ 3' $DUCKEYE "$TMP/rich.md"
 
-  # 1. RenderListItems walks pandoc's array-of-arrays-of-blocks but cannot reach
-  #    text inside the inner block objects: right bullet COUNT, no content.
-  broken 'pandoc list keeps item text'  '• alpha item'     $DUCKEYE "$TMP/rich.rst"
+  # Containers arrive as encoding='json' holding raw Pandoc AST; decoding them is
+  # the consumer's job. These four assert the consumer does it.
+  has   'pandoc list keeps item text'  '• alpha item'    $DUCKEYE "$TMP/rich.rst"
+  has   'pandoc ordered list numbers'  '1. one item'     $DUCKEYE "$TMP/rich.rst"
+  has   'pandoc table renders'         'kumquat │ 7'     $DUCKEYE "$TMP/rich.rst"
+  has   'pandoc table formatted cell'  'plum    │ 3'     $DUCKEYE "$TMP/rich.rst"
+  has   'pandoc blockquote is prose'   'quoted line here' $DUCKEYE "$TMP/rich.rst"
+  # the negative half: prose present is not the same as AST absent
+  no_leak 'pandoc blockquote leaks ast' '{"t":"Para"'    $DUCKEYE "$TMP/rich.rst"
+  no_leak 'to_text leaks ast tokens'    '{"t":"Str"'     $DUCKEYE -o text "$TMP/rich.rst"
+  has   'to_text yields prose'          'alpha item'     $DUCKEYE -o text "$TMP/rich.rst"
 
-  # 2. render_ansi.cpp reads attributes['ordered'], but the pandoc path sets
-  #    attributes['list_type']='ordered' and never 'ordered'. Only builders.cpp
-  #    sets the latter. The export path (pandoc_block_convert.cpp:679) checks
-  #    both; the renderer checks one. So pandoc ordered lists render as bullets.
-  broken 'pandoc ordered list numbers' '1. one item'       $DUCKEYE "$TMP/rich.rst"
+  # DefinitionList and Figure were dropped outright on read. They now survive --
+  # asserted on CONTENT rather than on layout, which is the property. The two paths
+  # render them differently (a deflist becomes bullets via pandoc and "Term : def"
+  # natively; a figure's caption is a separate line via pandoc), and pinning the
+  # native layout would assert something that was never true of this path.
+  has 'pandoc deflist term'       'Term one'          $DUCKEYE "$TMP/rich.rst"
+  has 'pandoc deflist definition' 'First definition'  $DUCKEYE "$TMP/rich.rst"
+  has 'pandoc figure caption'     'A caption'         $DUCKEYE "$TMP/rich.rst"
 
-  # 3. render_ansi.cpp requires the parsed table to be a JSON OBJECT, but pandoc
-  #    Table content is an ARRAY. The branch never fires and the table renders as
-  #    nothing whatsoever -- with exit 0. Silent, total loss.
-  broken 'pandoc table renders'        'kumquat │ 7'       $DUCKEYE "$TMP/rich.rst"
-  broken 'pandoc table formatted cell' 'plum    │ 3'       $DUCKEYE "$TMP/rich.rst"
+  # -o md and -o pandoc route through duck_blocks_to_pandoc_ast. A table with no
+  # preserved pandoc_ast tuple -- i.e. every table a native reader produces -- was
+  # exported as a JSON object where pandoc requires a list, and pandoc refused the
+  # whole document.
+  has 'md export survives a table' 'kumquat' $DUCKEYE -o md "$TMP/rich.md"
 
-  # DefinitionList and Figure are DROPPED OUTRIGHT on read, not mangled: pandoc's
-  # AST for the .rst carries ['Header','DefinitionList','Figure'] and the shipped
-  # pandoc_ast_to_blocks returns only the heading. Pandoc 3.x wraps every standalone
-  # captioned image in a Figure, so this loses a figure from every one of the twelve
-  # pandoc-routed formats. The native markdown path renders both, which is what makes
-  # the controls below meaningful rather than decorative.
-  has    'md path deflist'   'Term one : First definition' $DUCKEYE "$TMP/rich.md"
-  has    'md path figure'    '[image: A caption]'          $DUCKEYE "$TMP/rich.md"
-  broken 'pandoc deflist survives' 'Term one : First definition' $DUCKEYE "$TMP/rich.rst"
-  broken 'pandoc figure survives'  '[image: A caption]'          $DUCKEYE "$TMP/rich.rst"
-
-  # duck_blocks_to_pandoc_ast exported a table WITHOUT a preserved
-  # attributes['pandoc_ast'] tuple by copying its native {headers,rows} projection
-  # straight into Pandoc's `c`, which must be a LIST:
-  #
-  #     broken   {"t":"Table","c":{"headers":[...],"rows":[...]}}   pandoc REFUSES
-  #     pandoc   {"t":"Table","c":[ ... ]}
-  #
-  # Every table a native reader produces lacks that tuple, so `-o md` and
-  # `-o pandoc` failed outright on any document containing one. Fixed upstream at
-  # 1243c77 -- both the top-level and the nested arm now route through
-  # TableContentToPandocVal(), keyed on SHAPE (a preserved tuple is an array, the
-  # native projection an object) rather than on an attribute being present.
-  # Unreleased, so it waits with the ref-bump rows. It briefly carried its own
-  # cause tag while the fix was unwritten, which is what surfaced it in time.
-  broken 'md export survives a table' 'kumquat' $DUCKEYE -o md "$TMP/rich.md"
-
-  # 4. RenderBlockquote is handed the undecoded text, so the raw Pandoc AST is
-  #    printed to the terminal.
-  broken 'pandoc blockquote is prose'  'quoted line here'  $DUCKEYE "$TMP/rich.rst"
-  emits  'pandoc blockquote leaks ast' '{"t":"Para"'       $DUCKEYE "$TMP/rich.rst"
-
-  # 5. The damaging one. db_blocks_to_text does no JSON decoding, so the text a
-  #    search matches against is Pandoc AST tokens rather than document content.
-  #    This yields WRONG ANSWERS rather than visible garbage, which is worse:
-  #    nothing on screen tells a user the match set is bogus.
-  emits  'to_text leaks ast tokens'    '{"t":"Str"'        $DUCKEYE -o text "$TMP/rich.rst"
-  broken 'to_text yields prose'        'alpha item'        $DUCKEYE -o text "$TMP/rich.rst"
-
-  # ---- upstream nested-list defect (webbed's read_html_blocks) ---------------
-  # Not duck_block_utils': webbed's HTML reader emits the pre-structural `list`
-  # shape. It produces one extra top-level list PER NESTING LEVEL, with the text
-  # fused cumulatively. At depth 3:
-  #
-  #     list ["L1L2L3"]   list ["L2L3"]   list ["L3"]
-  #
-  # so the nesting collapses into each parent's text AND every level survives as
-  # its own top-level list -- "L3" renders three times.
-  #
-  # Pinned at depth 3 rather than depth 2 deliberately. Two top-level lists is
-  # also what a document containing two ordinary lists produces, so a depth-2
-  # count assertion is satisfiable by innocent input. The depth-3 signature
-  # cannot be produced by any conforming reader, so this cannot pass for the
-  # wrong reason.
-  #
-  # Fixed in webbed at 4cc8401 on branch feat/spec-6-emission -- PUSHED but held,
-  # not merged: origin/main is 9823acc and the fix is deliberately not on it. So
-  # these do not flip on a main-tracking build, and they do not flip on the
-  # duck_block_utils ref bump that clears the guards above either. They flip when
-  # a merge reaches a released artifact, because that is what a duckeye user
-  # installing from the community repo actually resolves.
-  cause='webbed merge+release'
-  has   'html flat list'          '• alpha' $DUCKEYE "$TMP/flat.html"
-  emits 'html nested list fuses'  'L1L2L3'  $DUCKEYE "$TMP/nest.html"
-  # Duplication is a count, not a substring, so it needs its own check: the fuse
-  # guard alone goes green while half the defect remains. Correct output mentions
-  # the deepest item once.
-  # grep -o | wc -l, NOT grep -c: grep -c counts LINES containing a match, so the
-  # identical defective content rendered on one line instead of three reports 1
-  # and this guard would announce FIXED with the defect fully present. Occurrences
-  # are what the assertion is about; lines are an artifact of wrapping.
+  # webbed's HTML reader emitted one extra top-level list PER NESTING LEVEL with
+  # cumulatively fused text: at depth 3, ["L1L2L3"] ["L2L3"] ["L3"], so the deepest
+  # item rendered three times. Depth 3 rather than 2 on purpose -- two top-level
+  # lists is also what a document with two ordinary lists produces, so a depth-2
+  # count is satisfiable by innocent input.
+  has     'html flat list'         '• alpha' $DUCKEYE "$TMP/flat.html"
+  no_leak 'html nested list fuses' 'L1L2L3'  $DUCKEYE "$TMP/nest.html"
+  # occurrences, not lines: grep -c would count the same defect rendered on one
+  # line as 1 and pass with it fully present
   n=$($DUCKEYE "$TMP/nest.html" 2>/dev/null | strip | grep -o 'L3' | wc -l)
-  if (( n > 1 )); then known=$((known+1)); known_by[$cause]=$(( ${known_by[$cause]:-0} + 1 ))
-    printf '  known %s (L3 x%d)\n' 'html nested list duplicates' "$n"
-  else fixed=$((fixed+1))
-    printf '  FIXED %s — deepest item no longer repeated; drop this guard\n' 'html nested list duplicates'; fi
+  if (( n == 1 )); then pass=$((pass+1)); printf '  ok   %s\n' 'html nested list keeps one L3'
+  else fail=$((fail+1)); printf '  FAIL %s (L3 x%d)\n' 'html nested list keeps one L3' "$n"; fi
 
   # pandoc cannot infer these two from the extension; .mediawiki in particular
   # fails quietly (warns, falls back to markdown, exits 0), so duckeye names the

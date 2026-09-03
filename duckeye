@@ -553,7 +553,18 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
                       || ': ' || entry || ')')
   END);"
 
-# Custom Pure-SQL Unicode sparkline macro (retained as reliable fallback / reference for textplot):
+# Sparklines come from textplot's tp_sparkline(), which returns a fixed 20 columns
+# regardless of bin count.
+#
+# KNOWN: loading textplot destabilises the profiling query. Measured against
+# textplot 5bf843f (the published tip, and one commit AFTER bb6100c "read list
+# children safely and bound output size"), duckdb SIGSEGVs on roughly 1-in-5 runs
+# of duckeye's own -Z SQL -- and that SQL calls no tp_* function at all, so LOAD
+# alone is enough. The same SQL with the LOAD removed is clean at 0/20. This is a
+# deliberate, temporary choice; the pure-SQL encoder below is the drop-in that
+# made -Z crash-free, kept for exactly that reason.
+#
+# Pure-SQL Unicode sparkline (10 bins -> 10 columns), the crash-free alternative:
 # Encodes list of counts across 10 bins into 8-level Unicode sparkline blocks (' ', '▂'..'█', U+2581-U+2588):
 # CREATE OR REPLACE TEMP MACRO sql_sparkline(bin_counts) AS (
 #   SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(list_max(bin_counts), 0))::INT)) END, '')
@@ -686,7 +697,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
        SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
@@ -709,7 +720,7 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
        SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
@@ -732,7 +743,7 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
        SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
@@ -755,7 +766,7 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
        SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
@@ -787,7 +798,7 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
        SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
@@ -810,7 +821,7 @@ FROM __duckeye_src"
   (COALESCE(round(100.0 * (count(*) - count($col_id)) / NULLIF(count(*), 0), 1), 0.0) || '%')::VARCHAR AS null_pct,
   count(DISTINCT $col_id)::BIGINT AS approx_unique,
   CASE WHEN count($col_id) = 0 THEN '' ELSE
-    COALESCE((SELECT string_agg(CASE WHEN cnt = 0 THEN ' ' ELSE chr(9601 + least(7, floor(7.999 * cnt / NULLIF(max_c, 0))::INT)) END, '' ORDER BY bin) FROM (
+    COALESCE((SELECT tp_sparkline(list(cnt ORDER BY bin)) FROM (
        SELECT b.i AS bin, count(d.val)::DOUBLE AS cnt, max(count(d.val)::DOUBLE) OVER () AS max_c
        FROM range(10) b(i)
        LEFT JOIN (
@@ -869,6 +880,10 @@ FROM __duckeye_src"
   fi
 
   load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; "
+  # Sparklines come from textplot's tp_sparkline(). Only -Z draws them, so -r and
+  # -z do not pay for the load. See the note above the profiler for the crash this
+  # is knowingly living with.
+  [[ $mode == profile ]] && exts+=" textplot"
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
   if want_color; then
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -c "$load $sql")

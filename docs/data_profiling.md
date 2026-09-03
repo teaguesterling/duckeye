@@ -55,7 +55,10 @@ $ duckeye -z products.parquet
 
 `-Z, --profile` provides enhanced column profiling:
 
-* **Numeric Columns**: Computes `min`, `avg`, `max`, and a 10-bin histogram sparkline. Sparklines are pure SQL — `textplot` is not loaded during profiling, because doing so corrupted the glibc heap.
+* **Numeric Columns**: Computes `min`, `avg`, `max`, and a histogram sparkline via `textplot` (`tp_sparkline()`), which renders a fixed 20 columns. `textplot` is loaded for `-Z` only; `-r` and `-z` draw no sparklines and do not load it.
+
+!!! warning "`-Z` can crash"
+    Loading `textplot` destabilises the profiling query: `duckdb` segfaults on roughly one run in five, taking `-Z` with it. The profiling SQL calls no `tp_*` function, so loading the extension is enough to trigger it. Re-running usually succeeds. `-r`, `-z` and every document mode are unaffected. Tracked against `textplot` 5bf843f; a reproducer is in `scripts/textplot-repro/`.
 * **Temporal Columns (`DATE`, `TIMESTAMP`, `TIMESTAMPTZ`, `TIME`)**: Computes `min`, `max`, duration span (e.g. `24 days` or `12:00:00`), and time-series distribution sparklines across epoch bins.
 * **Categorical / Low-cardinality**: Computes single-pass exact category distributions and percentages using `histogram()`.
 * **List & Array Columns (`LIST`, `*[]`)**: Computes length stats (`min`, `avg`, `max`), length distribution sparklines, and sample arrays.

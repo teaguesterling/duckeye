@@ -352,6 +352,12 @@ if command -v pandoc >/dev/null; then
 | fruit | count |
 |---|---|
 | kumquat | 7 |
+| **plum** | 3 |
+
+Term one
+:   First definition
+
+![A caption](img.png)
 RICH
   pandoc "$TMP/rich.md" -t rst -o "$TMP/rich.rst" 2>/dev/null
 
@@ -363,6 +369,13 @@ RICH
   # text, so a bare-content pattern is satisfied by a table dumped as JSON. The
   # column separator only appears when the table is actually rendered as a table.
   has 'md path table'      'kumquat │ 7'      $DUCKEYE "$TMP/rich.md"
+  # A cell whose ONLY content is formatted. panduck found the AST converter's inline
+  # flattener never recursing into Strong/Emph/Code, so such a cell comes out as the
+  # EMPTY STRING -- text gone, not mangled, inside an otherwise valid table. The
+  # shipped converter leaves tables as raw JSON so duckeye cannot hit it yet; it
+  # becomes reachable the moment the converter starts emitting {headers,rows}. The
+  # plain-cell assertion above would flip to FIXED then and report nothing wrong.
+  has 'md path table formatted cell' 'plum    │ 3' $DUCKEYE "$TMP/rich.md"
 
   # 1. RenderListItems walks pandoc's array-of-arrays-of-blocks but cannot reach
   #    text inside the inner block objects: right bullet COUNT, no content.
@@ -378,6 +391,18 @@ RICH
   #    Table content is an ARRAY. The branch never fires and the table renders as
   #    nothing whatsoever -- with exit 0. Silent, total loss.
   broken 'pandoc table renders'        'kumquat │ 7'       $DUCKEYE "$TMP/rich.rst"
+  broken 'pandoc table formatted cell' 'plum    │ 3'       $DUCKEYE "$TMP/rich.rst"
+
+  # DefinitionList and Figure are DROPPED OUTRIGHT on read, not mangled: pandoc's
+  # AST for the .rst carries ['Header','DefinitionList','Figure'] and the shipped
+  # pandoc_ast_to_blocks returns only the heading. Pandoc 3.x wraps every standalone
+  # captioned image in a Figure, so this loses a figure from every one of the twelve
+  # pandoc-routed formats. The native markdown path renders both, which is what makes
+  # the controls below meaningful rather than decorative.
+  has    'md path deflist'   'Term one : First definition' $DUCKEYE "$TMP/rich.md"
+  has    'md path figure'    '[image: A caption]'          $DUCKEYE "$TMP/rich.md"
+  broken 'pandoc deflist survives' 'Term one : First definition' $DUCKEYE "$TMP/rich.rst"
+  broken 'pandoc figure survives'  '[image: A caption]'          $DUCKEYE "$TMP/rich.rst"
 
   # 4. RenderBlockquote is handed the undecoded text, so the raw Pandoc AST is
   #    printed to the terminal.
@@ -565,6 +590,31 @@ if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   ok  'zim search'                  $DUCKEYE -s the -n 3 "$Z"
   no  'zim missing article exits 1' $DUCKEYE -S Zzzqqqxyz "$Z"
   no  'zim:// needs an entry path'  $DUCKEYE 'zim://nope'
+
+  # github#3. A zim:// entry is dispatched by zim_mimetype, but DuckDB evaluates a
+  # CASE's arms eagerly, so every arm's ARGUMENT runs whatever the mimetype says.
+  # Unguarded, an HTML article's bytes reached poppler ("May not be a PDF file",
+  # then hex errors spelling "<!DOCTYPE html"), and a binary entry handed
+  # parse_html_blocks a NULL it cannot bind. Both directions are asserted here
+  # because fixing either one alone silently breaks the other.
+  #
+  # DUCKEYE_TEST_ZIM_HTML / _PDF name entries inside $Z; each case skips without one,
+  # since not every archive holds both kinds.
+  if [[ -n ${DUCKEYE_TEST_ZIM_HTML:-} ]]; then
+    has 'zim:// html entry renders'  "$DUCKEYE_TEST_ZIM_HTML_TEXT" \
+        $DUCKEYE -o text "zim://$Z/$DUCKEYE_TEST_ZIM_HTML"
+    # the poppler leak is what regression looks like, so assert it is absent
+    if $DUCKEYE -o text "zim://$Z/$DUCKEYE_TEST_ZIM_HTML" 2>&1 | grep -q 'poppler'; then
+      fail=$((fail+1)); echo '  FAIL zim:// html entry does not reach poppler'
+    else pass=$((pass+1)); echo '  ok   zim:// html entry does not reach poppler'; fi
+  else
+    skipping 'zim:// html entry' 'set DUCKEYE_TEST_ZIM_HTML'
+  fi
+  if [[ -n ${DUCKEYE_TEST_ZIM_PDF:-} ]]; then
+    ok  'zim:// pdf entry renders'   $DUCKEYE -o text "zim://$Z/$DUCKEYE_TEST_ZIM_PDF"
+  else
+    skipping 'zim:// pdf entry' 'set DUCKEYE_TEST_ZIM_PDF'
+  fi
 else
   skipping 'zim' 'set DUCKEYE_TEST_ZIM to an archive'
 fi

@@ -1,3 +1,9 @@
 *.tmp
 site/
 .cache/
+
+# Operator tools for the duck_block_utils rename/release, kept out of the repo
+# deliberately: one is single-use, the other is run against whatever extension is
+# installed. Ignored so `git add -A` cannot sweep them into an unrelated commit.
+scripts/
+DUCK_BLOCK_RENAME.md

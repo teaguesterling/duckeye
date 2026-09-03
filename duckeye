@@ -522,17 +522,29 @@ exts= doc= via_pandoc= zim_open= premacro=
 
 # A ZIM entry is whatever its mimetype says, not always HTML: a Gutenberg archive is
 # mostly images, and even a Wikipedia carries CSS and JS. Dispatching on zim_mimetype
-# keeps a stylesheet from being parsed as a page. A macro rather than SQL inlined at
+# keeps a stylesheet from being parsed as a page.
+#
+# Each branch's ARGUMENT is guarded by the same mimetype test as its WHEN, not just
+# the branch. DuckDB evaluates the arms of a CASE eagerly, so an unguarded
+# zim_get_content() fed poppler the bytes of every HTML article -- "May not be a PDF
+# file", then hex-string errors spelling out "<!DOCTYPE html" -- and an unguarded
+# zim_get_text() handed parse_html_blocks() a NULL for every binary entry, which it
+# cannot bind. The guards make the non-matching arms cheap and well-typed instead.
+# A macro rather than SQL inlined at
 # every call site, and a macro rather than an extension function because it spans two
 # extensions that deliberately do not depend on each other.
 zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
   CASE
     WHEN zim_mimetype(archive, entry) LIKE 'text/html%'
-      THEN (SELECT list(b) FROM parse_html_blocks(zim_get_text(archive, entry)) b)
+      THEN (SELECT list(b) FROM parse_html_blocks(
+              CASE WHEN zim_mimetype(archive, entry) LIKE 'text/html%'
+                   THEN zim_get_text(archive, entry) ELSE '' END) b)
     WHEN zim_mimetype(archive, entry) LIKE 'text/markdown%'
       THEN parse_markdown_to_duck_blocks(zim_get_text(archive, entry))
     WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
-      THEN parse_markdown_to_duck_blocks(pdf_to_text(zim_get_content(archive, entry)))
+      THEN parse_markdown_to_duck_blocks(pdf_to_text(
+             CASE WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
+                  THEN zim_get_content(archive, entry) END))
     WHEN zim_mimetype(archive, entry) LIKE 'text/%'
       THEN db_code(zim_get_text(archive, entry))
     ELSE db_paragraph('(no renderer for '

@@ -55,12 +55,13 @@ $ duckeye -z products.parquet
 
 `-Z, --profile` provides enhanced column profiling:
 
-* **Numeric Columns**: Computes `min`, `avg`, `max`, and a 10-bin histogram sparkline via `textplot` (`tp_sparkline()`).
+* **Numeric Columns**: Computes `min`, `avg`, `max`, and a 10-bin histogram sparkline. Sparklines are pure SQL — `textplot` is not loaded during profiling, because doing so corrupted the glibc heap.
 * **Temporal Columns (`DATE`, `TIMESTAMP`, `TIMESTAMPTZ`, `TIME`)**: Computes `min`, `max`, duration span (e.g. `24 days` or `12:00:00`), and time-series distribution sparklines across epoch bins.
 * **Categorical / Low-cardinality**: Computes single-pass exact category distributions and percentages using `histogram()`.
 * **List & Array Columns (`LIST`, `*[]`)**: Computes length stats (`min`, `avg`, `max`), length distribution sparklines, and sample arrays.
 * **Map Columns (`MAP`)**: Computes key-value entry counts (`min`, `max`), cardinality distribution sparklines, and sample maps.
 * **Struct & JSON Columns (`STRUCT`, `JSON`)**: Shows schema structure and sample representations.
+* **Binary Columns (`BLOB`)**: Profiles by SIZE rather than by value — `octet_length` min/avg/max and a size-distribution sparkline, plus one escaped sample. A BLOB has no useful categories: a frequency table over escaped byte strings is accurate and unreadable.
 * **All Columns**: Calculates exact `non_null` and `null_pct`.
 
 ```console

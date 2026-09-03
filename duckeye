@@ -105,7 +105,8 @@ Env:
   DUCKEYE_PAGER      pager used by -p          (default: less -R)
   DUCKEYE_OFFICIAL   --init installs these from the core repo
   DUCKEYE_COMMUNITY  --init installs these from the community repo
-                     (default: duck_block_utils markdown webbed)
+                     (default: duck_block_utils markdown webbed zim pdf yaml
+                      toml read_lines duck_tails zipfs textplot sitting_duck)
 
 Examples:
   duckeye README.md                  # render to stdout, unpaged

@@ -215,6 +215,25 @@ extension hardcodes an old one (see below). `-o` doesn't apply to `-r` (that out
 data table), to `-t` (already plain text), or to an archive's corpus listings — but it
 does apply to `-S` on an archive, which opens a document.
 
+**Known limitation — `-o md` and `-o pandoc` on tables from a native reader.** Both
+route through `duck_blocks_to_pandoc_ast`, and in the currently published
+`duck_block_utils` a table is exported in a shape real pandoc refuses:
+
+```console
+$ duckeye -o md notes.md          # notes.md contains a table
+JSON parse error: ... constructor Table ... expected Array but got Object
+```
+
+The split is the opposite of what you would guess. A table read by **pandoc**
+(`.docx .odt .epub .rst .org .tex .rtf .textile .man .mediawiki`) carries a preserved
+AST tuple and converts fine. A table read **natively** (`.md`, `.html`, and a `zim://`
+article, which uses the HTML reader) has no such tuple and fails. Documents without
+tables are unaffected, as are `-o ansi`, `-o text`, `-o html` and `-o blocks`.
+
+Fixed upstream in `duck_block_utils` v1.7.0 and gone as soon as that reaches the
+community extension repository; nothing in duckeye needs to change. `test.sh` carries a
+guard that reports it as known-broken and says so loudly when it clears.
+
 ## Colour
 
 Colour is on when a terminal will actually see it: stdout is a tty, or `-p` is handing

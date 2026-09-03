@@ -404,6 +404,24 @@ RICH
   broken 'pandoc deflist survives' 'Term one : First definition' $DUCKEYE "$TMP/rich.rst"
   broken 'pandoc figure survives'  '[image: A caption]'          $DUCKEYE "$TMP/rich.rst"
 
+  # A THIRD cause, and the only row here not waiting on a release: this one is
+  # waiting on code nobody has written. duck_blocks_to_pandoc_ast exports a table
+  # WITHOUT a preserved attributes['pandoc_ast'] tuple by copying its native
+  # {headers,rows} projection straight into Pandoc's `c`, which must be a LIST:
+  #
+  #     shipped   {"t":"Table","c":{"headers":[...],"rows":[...]}}   pandoc REFUSES
+  #     pandoc    {"t":"Table","c":[ ... ]}
+  #
+  # Every table a native reader produces lacks that tuple, so `-o md` and
+  # `-o pandoc` fail outright on any document containing a table. Confirmed still
+  # present on duck_block_utils origin/main (pandoc_block_convert.cpp, the
+  # TYPE_TABLE arm with no ATTR_PANDOC_AST does no shape check), so the
+  # coordinated release does NOT clear it. panduck's copy is fixed; upstream's
+  # is not. Nothing to do here -- duckeye only calls the exporter.
+  cause='duck_block_utils fix not yet written'
+  broken 'md export survives a table' 'kumquat' $DUCKEYE -o md "$TMP/rich.md"
+  cause='duck_block_utils ref bump'
+
   # 4. RenderBlockquote is handed the undecoded text, so the raw Pandoc AST is
   #    printed to the terminal.
   broken 'pandoc blockquote is prose'  'quoted line here'  $DUCKEYE "$TMP/rich.rst"

@@ -556,13 +556,12 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
 # Sparklines come from textplot's tp_sparkline(), which returns a fixed 20 columns
 # regardless of bin count.
 #
-# KNOWN: loading textplot destabilises the profiling query. Measured against
-# textplot 5bf843f (the published tip, and one commit AFTER bb6100c "read list
-# children safely and bound output size"), duckdb SIGSEGVs on roughly 1-in-5 runs
-# of duckeye's own -Z SQL -- and that SQL calls no tp_* function at all, so LOAD
-# alone is enough. The same SQL with the LOAD removed is clean at 0/20. This is a
-# deliberate, temporary choice; the pure-SQL encoder below is the drop-in that
-# made -Z crash-free, kept for exactly that reason.
+# Loading textplot used to SIGSEGV -Z on roughly 1-in-5 runs. The cause is not
+# textplot's plotting code -- the profiling SQL calls no tp_* function at all --
+# but an autoloaded httpfs whose OpenSSL shutdown collides with it at process
+# exit (Query-farm/textplot#4). Disabling autoload for local sources, done where
+# the load string is built below, takes it to 0-in-25. The pure-SQL encoder below
+# is kept as the drop-in if that ever stops holding.
 #
 # Pure-SQL Unicode sparkline (10 bins -> 10 columns), the crash-free alternative:
 # Encodes list of counts across 10 bins into 8-level Unicode sparkline blocks (' ', '▂'..'█', U+2581-U+2588):
@@ -879,11 +878,24 @@ FROM __duckeye_src"
     sql="$target_query;"
   fi
 
-  load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; "
   # Sparklines come from textplot's tp_sparkline(). Only -Z draws them, so -r and
-  # -z do not pay for the load. See the note above the profiler for the crash this
-  # is knowingly living with.
+  # -z do not pay for the load.
   [[ $mode == profile ]] && exts+=" textplot"
+  # httpfs gets autoloaded, and its OpenSSL shutdown path segfaults at exit when
+  # textplot is also loaded -- Query-farm/textplot#4, confirmed by the author. The
+  # query completes and its output is byte-identical; only the exit status is
+  # wrong, which is worse than a visible failure because a caller checking $? sees
+  # a crash after receiving correct results.
+  #
+  # Data mode names every extension it needs, so autoload buys nothing here --
+  # except for a remote source, where httpfs itself arrives that way. So: off for
+  # local paths, left alone for remote ones, which is also the only case where
+  # httpfs is genuinely wanted.
+  case $f in
+    http://*|https://*|s3://*) ;;
+    *) no_autoload="SET autoload_known_extensions=false; " ;;
+  esac
+  load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; ${no_autoload:-}"
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
   if want_color; then
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -c "$load $sql")

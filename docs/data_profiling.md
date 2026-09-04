@@ -57,8 +57,18 @@ $ duckeye -z products.parquet
 
 * **Numeric Columns**: Computes `min`, `avg`, `max`, and a histogram sparkline via `textplot` (`tp_sparkline()`), which renders a fixed 20 columns. `textplot` is loaded for `-Z` only; `-r` and `-z` draw no sparklines and do not load it.
 
-!!! warning "`-Z` can crash"
-    Loading `textplot` destabilises the profiling query: `duckdb` segfaults on roughly one run in five, taking `-Z` with it. The profiling SQL calls no `tp_*` function, so loading the extension is enough to trigger it. Re-running usually succeeds. `-r`, `-z` and every document mode are unaffected. Tracked against `textplot` 5bf843f; a reproducer is in `scripts/textplot-repro/`.
+!!! note "Autoloading is disabled for local sources"
+    `-Z` runs with `autoload_known_extensions=false`. DuckDB otherwise autoloads
+    `httpfs`, whose OpenSSL shutdown path segfaults at process exit when `textplot`
+    is also loaded ([Query-farm/textplot#4](https://github.com/Query-farm/textplot/issues/4)).
+    The query completed and printed correct results either way — only the exit
+    status was wrong, which is the worse failure, since a caller checking `$?` sees
+    a crash after receiving good output.
+
+    Data mode names every extension it needs, so autoload buys nothing here. It
+    stays enabled for `http://`, `https://` and `s3://` sources, where `httpfs` is
+    what autoload is fetching and is genuinely wanted.
+
 * **Temporal Columns (`DATE`, `TIMESTAMP`, `TIMESTAMPTZ`, `TIME`)**: Computes `min`, `max`, duration span (e.g. `24 days` or `12:00:00`), and time-series distribution sparklines across epoch bins.
 * **Categorical / Low-cardinality**: Computes single-pass exact category distributions and percentages using `histogram()`.
 * **List & Array Columns (`LIST`, `*[]`)**: Computes length stats (`min`, `avg`, `max`), length distribution sparklines, and sample arrays.

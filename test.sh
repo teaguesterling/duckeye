@@ -156,7 +156,31 @@ startxref
 %%EOF'''
 with open('$TMP/doc.pdf', 'wb') as f:
     f.write(pdf)
-" 2>/dev/null
+"
+
+# A MANY-page PDF. The 2-page fixture above nearly always passed while multi-page
+# rendering was aborting 3 runs in 5: each page is parsed separately, so the
+# concurrency that races cmark scales with page count. Page count IS the variable
+# under test, and no small fixture stands in for it.
+python3 - "$TMP/many.pdf" <<'MANYPDF'
+import sys
+N = 40
+kids, body = [], []
+oid = 3
+for i in range(1, N + 1):
+    pid, cid = oid, oid + 1; oid += 2
+    kids.append(f"{pid} 0 R")
+    stream = f"BT /F1 14 Tf 72 720 Td (Page {i} body text kumquat{i}) Tj ET"
+    body.append(f"{pid} 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R"
+                f"/Contents {cid} 0 R/Resources<</Font<</F1 {2*N+3} 0 R>>>>>>endobj")
+    body.append(f"{cid} 0 obj<</Length {len(stream)}>>stream\n{stream}\nendstream\nendobj")
+objs = ["1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+        f"2 0 obj<</Type/Pages/Kids[{' '.join(kids)}]/Count {N}>>endobj", *body,
+        f"{2*N+3} 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj"]
+open(sys.argv[1], "w").write("%PDF-1.4\n" + "\n".join(objs) +
+                             f"\ntrailer<</Size {2*N+4}/Root 1 0 R>>\n%%EOF")
+MANYPDF
+ 2>/dev/null
 
 echo 'documents'
 ok  'md renders'                 $DUCKEYE "$TMP/doc.md"
@@ -515,6 +539,16 @@ has 'pdf raw'               'First PDF Page'   $DUCKEYE -r "$TMP/doc.pdf"
 has 'pdf -o text'           'alpha body'       $DUCKEYE -o text "$TMP/doc.pdf"
 no  'pdf invalid page range'                   $DUCKEYE -P abc "$TMP/doc.pdf"
 
+# Many pages, run repeatedly: the failure this guards was a RATE, not a verdict.
+# Rendering 40 pages aborted 3 times in 5 at v0.17.0 because each page is parsed
+# separately and cmark's global registration is not thread-safe. One pass would
+# have passed more often than not.
+ok  'pdf many pages renders'   $DUCKEYE -o text "$TMP/many.pdf"
+has 'pdf many pages last page' 'kumquat40' $DUCKEYE -o text "$TMP/many.pdf"
+f=0; for _ in 1 2 3 4 5; do $DUCKEYE -o text "$TMP/many.pdf" >/dev/null 2>&1 || f=$((f+1)); done
+if (( f == 0 )); then pass=$((pass+1)); echo '  ok   pdf many pages is stable over 5 runs'
+else fail=$((fail+1)); printf '  FAIL %s (%d/5 failed)\n' 'pdf many pages is stable over 5 runs' "$f"; fi
+
 echo 'code AST (sitting_duck)'
 cat >"$TMP/test_code.py" <<'PY'
 class Service:
@@ -563,6 +597,22 @@ if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   ok  'zim index'                   $DUCKEYE -t -n 3 "$Z"
   ok  'zim search'                  $DUCKEYE -s the -n 3 "$Z"
   no  'zim missing article exits 1' $DUCKEYE -S Zzzqqqxyz "$Z"
+  # A `no` assertion passes on ANY non-zero exit, so it cannot tell "no such
+  # article" from "the SQL does not compile". Opening an article by title was
+  # broken outright from be3ef5d to 05c570d -- zim_to_blocks used the TABLE
+  # function parse_html_blocks, which rejects the COLUMN that -S passes it -- and
+  # this suite stayed green throughout, because a Binder Error exits non-zero too.
+  # The positive case is what discriminates.
+  if [[ -n ${DUCKEYE_TEST_ZIM_TITLE:-} ]]; then
+    has 'zim -S opens an article' "$DUCKEYE_TEST_ZIM_TITLE" \
+        $DUCKEYE -S "$DUCKEYE_TEST_ZIM_TITLE" -o text "$Z"
+    # and returns the BODY, not just the matched title
+    n=$($DUCKEYE -S "$DUCKEYE_TEST_ZIM_TITLE" -o text "$Z" 2>/dev/null | wc -c)
+    if (( n > 500 )); then pass=$((pass+1)); printf '  ok   %s (%d chars)\n' 'zim -S returns the body' "$n"
+    else fail=$((fail+1)); printf '  FAIL %s (only %d chars)\n' 'zim -S returns the body' "$n"; fi
+  else
+    skipping 'zim -S opens an article' 'set DUCKEYE_TEST_ZIM_TITLE'
+  fi
   no  'zim:// needs an entry path'  $DUCKEYE 'zim://nope'
 
   # github#3. A zim:// entry is dispatched by zim_mimetype, but DuckDB evaluates a

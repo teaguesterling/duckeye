@@ -537,9 +537,13 @@ exts= doc= via_pandoc= zim_open= premacro=
 zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
   CASE
     WHEN zim_mimetype(archive, entry) LIKE 'text/html%'
-      THEN (SELECT list(b) FROM parse_html_blocks(
-              CASE WHEN zim_mimetype(archive, entry) LIKE 'text/html%'
-                   THEN zim_get_text(archive, entry) ELSE '' END) b)
+      -- html_to_duck_blocks is the SCALAR reader, deliberately. parse_html_blocks
+      -- is a TABLE function and accepts only literal arguments, so it cannot be
+      -- used here: -S on an archive calls this macro with a COLUMN (the path from
+      -- zim_suggest) and DuckDB rejects it outright --
+      --   does not support lateral join column parameters
+      -- which broke opening an article by title entirely from be3ef5d until now.
+      THEN html_to_duck_blocks(zim_get_text(archive, entry))
     WHEN zim_mimetype(archive, entry) LIKE 'text/markdown%'
       THEN parse_markdown_to_duck_blocks(zim_get_text(archive, entry))
     WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
@@ -995,6 +999,22 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     # range is knowable from the path, so reading 2 pages of 400 beats reading 400
     # and discarding 398. duck_blocks_get_pages is the surface for a document
     # already in hand, which is a different job.
+    # SERIAL, and this is a correctness fix rather than a tuning knob. Each page is
+    # parsed separately -- that is what makes pages addressable -- so read_pdf's
+    # parallel scan calls cmark once per page concurrently, and cmark's global flag
+    # registration is not thread-safe: duckdb aborts with "flag initialization error
+    # in cmark_register_node_flag". The rate scales with page count, which is why a
+    # 2-page fixture almost never showed it:
+    #
+    #     2-page PDF    1-2 aborts per 150-300 runs
+    #     60-page PDF   3 aborts per 5 runs
+    #
+    # A single warmup parse does not fix it (1/300, no better than baseline), so the
+    # race is not only in first-use registration.
+    #
+    # Serial is also FASTER here, by 4-5x on 60 pages: sixty small parses cost more
+    # to coordinate than to run. Non-PDF paths are untouched and unaffected.
+    prethreads="SET threads=1; "
     p_args=
     [[ -n $p_first ]] && p_args+="first_page := $p_first"
     [[ -n $p_last ]] && p_args+="${p_args:+, }last_page := $p_last"
@@ -1130,7 +1150,7 @@ if [[ $out_fmt == pandoc || $out_fmt == md ]]; then
                 'blocks', duck_blocks_to_pandoc_ast(b).blocks::JSON)); "
 fi
 
-load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; "
+load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; ${prethreads:-}"
 for e in $DUCKEYE_BASE $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
 
 duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")

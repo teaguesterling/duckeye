@@ -8,7 +8,7 @@
 |---|---|---|---|
 | **Markdown** | `.md`, `.markdown` | `markdown` DuckDB extension | Full block model, nested headings, code blocks, lists, blockquotes |
 | **HTML / XML** | `.htm`, `.html`, `.xhtml`, `.xml` | `webbed` DuckDB extension | High-speed DOM parsing, tag sanitization, structured layout |
-| **PDF** | `.pdf` | `pdf` DuckDB extension | Text layer extraction, OCR, heading hierarchy, page range slicing (`-P`) |
+| **PDF** | `.pdf` | `pdf` DuckDB extension | Text layer extraction, OCR, heading hierarchy, page markers, page range slicing (`-P`) |
 | **Pandoc AST** | `.json` | `duck_block_utils` | Native conversion of Pandoc JSON AST into terminal blocks |
 | **Word Documents** | `.docx` | `pandoc` | Headings, styled text, tables, embedded lists |
 | **OpenDocument** | `.odt` | `pandoc` | Headings, document hierarchy, formatting |
@@ -21,6 +21,24 @@
 | **Man Pages** | `.man`, `.1`–`.9` | `pandoc` | Unix roff manual pages with direct section jumping |
 | **Source Code ASTs**| `.py`, `.rs`, `.go`, `.c`, `.cpp`, `.js`, `.ts`, `.java`, `.kt`, `.cs`, `.swift`, `.rb`, `.php`, `.lua`, `.r`, `.sh`, `.zig`, `.dart`, `.sql`, `.gql`, `.tf`, `.css` (27 languages) | `sitting_duck` DuckDB extension | Tree-sitter AST parsing, class/function hierarchies, definition outlines, doc conversion |
 | **openZIM Archives**| `.zim`, `zim://...` | `zim` DuckDB extension | Multi-gigabyte offline archives, Xapian search, embedded PDFs |
+
+### PDF pages
+
+Each page begins with a **page break marker**, rendered as a dimmed labelled rule:
+
+```console
+$ duckeye report.pdf
+── page 1 ──────────────────────────────────────────
+
+Executive summary ...
+```
+
+Pages are a **separate axis from the heading outline**. A page break is a marker —
+an `hr` that knows its number — not a section, so `-t` shows only headings the
+document actually contains. Markers appear whether or not `-P` is given.
+
+`-P` pushes the range down into the reader, so pages outside it are never parsed;
+asking for two pages of four hundred reads two.
 
 ---
 

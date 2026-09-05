@@ -969,17 +969,39 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     doc="SELECT list(b) AS blocks FROM read_html_blocks('$src') b" ;;
   *.pdf)
     exts="markdown pdf"
-    if [[ -n $p_first || -n $p_last ]]; then
-      p_args=
-      [[ -n $p_first ]] && p_args+="first_page := $p_first"
-      [[ -n $p_last ]] && p_args+="${p_args:+, }last_page := $p_last"
-      doc="SELECT parse_markdown_to_duck_blocks(
-             string_agg('## Page ' || page || chr(10) || chr(10) || coalesce(text, ''),
-                        chr(10) || chr(10) ORDER BY page)
-           ) AS blocks FROM read_pdf('$src'${p_args:+, $p_args})"
-    else
-      doc="SELECT parse_markdown_to_duck_blocks(pdf_to_markdown('$src')) AS blocks"
-    fi ;;
+    # Both paths go through read_pdf, which is the only reader that knows where the
+    # pages are. Each page contributes a page_break marker carrying its number,
+    # then that page's prose.
+    #
+    # This used to synthesise '## Page N' as a MARKDOWN HEADING, which put physical
+    # pagination into the semantic outline: -t listed "Page 1, Page 2" as though an
+    # author had written them, and -S would happily slice on one. page_break is a
+    # marker, the way hr is a rule -- pages are now their own axis, reachable with
+    # duck_blocks_page_rows / duck_blocks_get_pages, and absent from the heading
+    # outline where they never belonged. It also answers a question a heading
+    # cannot: which page a boundary ENDS, since the next marker bounds the previous
+    # page.
+    #
+    # -P still pushes down into read_pdf rather than slicing afterwards: a page
+    # range is knowable from the path, so reading 2 pages of 400 beats reading 400
+    # and discarding 398. duck_blocks_get_pages is the surface for a document
+    # already in hand, which is a different job.
+    p_args=
+    [[ -n $p_first ]] && p_args+="first_page := $p_first"
+    [[ -n $p_last ]] && p_args+="${p_args:+, }last_page := $p_last"
+    # element_order is assigned by POSITION here rather than with
+    # duck_blocks_reorder, which regroups a mixed list -- it sorts page_break
+    # ahead of prose and yields every marker first, then every paragraph.
+    doc="WITH __pg AS (
+           SELECT page, list_prepend(
+                    {'kind':'block','element_type':'page_break','content':NULL,'level':NULL,
+                     'encoding':'text','attributes':MAP{'page_number': page::VARCHAR},
+                     'element_order':0}::duck_block,
+                    parse_markdown_to_duck_blocks(coalesce(text, ''))) AS pb
+           FROM read_pdf('$src'${p_args:+, $p_args}))
+         SELECT list_transform(flatten(list(pb ORDER BY page)),
+                               (x, i) -> duck_block_set_order(x, (i - 1)::INTEGER)) AS blocks
+         FROM __pg" ;;
   *.json|.pandoc_ast)              # Pandoc AST
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;
   *.py|*.pyi|*.pyw|*.rs|*.go|*.c|*.h|*.cpp|*.hpp|*.cc|*.cxx|*.c++|*.hh|*.hxx|\

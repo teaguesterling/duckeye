@@ -497,7 +497,20 @@ has 'pdf renders'           'First PDF Page'   $DUCKEYE "$TMP/doc.pdf"
 has 'pdf search'            'beta body'        $DUCKEYE -s 'beta body' "$TMP/doc.pdf"
 has 'pdf page range'        'Second PDF Page'  $DUCKEYE -P 2 "$TMP/doc.pdf"
 has 'pdf page range 1-2'    'First PDF Page'   $DUCKEYE -P 1-2 "$TMP/doc.pdf"
-has 'pdf page range toc'    'Page 1'           $DUCKEYE -P 1-2 -t "$TMP/doc.pdf"
+# Pages are a separate axis from the heading outline. A page_break is a marker --
+# an hr with a number, not a section -- so -t must NOT list pages. duckeye used to
+# synthesise "## Page N" as a real markdown heading, which put physical pagination
+# into the semantic outline: -t reported "Page 1, Page 2" as though an author had
+# written them, and -S would slice on one. Asserted as an absence, because that is
+# what regressing back to headings would look like.
+no_leak 'pdf pages stay out of the toc'  'Page 1' $DUCKEYE -P 1-2 -t "$TMP/doc.pdf"
+has     'pdf page marker renders'        'page 1' $DUCKEYE -P 1-2 "$TMP/doc.pdf"
+# markers appear without -P too: the page axis is not conditional on a flag about
+# ranges, which is what it used to be
+has     'pdf page marker without -P'     'page 2' $DUCKEYE "$TMP/doc.pdf"
+# -P pushes down into read_pdf rather than slicing after the fact, so the pages
+# outside the range are never read at all
+no_leak 'pdf page range excludes others' 'First PDF Page' $DUCKEYE -P 2 "$TMP/doc.pdf"
 has 'pdf raw'               'First PDF Page'   $DUCKEYE -r "$TMP/doc.pdf"
 has 'pdf -o text'           'alpha body'       $DUCKEYE -o text "$TMP/doc.pdf"
 no  'pdf invalid page range'                   $DUCKEYE -P abc "$TMP/doc.pdf"

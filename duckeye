@@ -1101,8 +1101,17 @@ case $mode in
   full)
     sql="$cte SELECT $(emit 'blocks') FROM doc;" ;;
   toc)
-    sql="$cte, t AS (SELECT unnest(duck_blocks_toc(blocks)) AS e FROM doc)
-         SELECT string_agg(repeat('  ', e.indent) || e.title, chr(10) ORDER BY e.element_order)
+    # duck_blocks_toc_rows, not duck_blocks_toc. Both return the same five columns
+    # today, but toc_rows is the row-shaped accessor BY RULING -- a table of contents
+    # is an index, not an extract, so it stays metadata-only -- while duck_blocks_toc
+    # is slated to return blocks. When that lands, `e.indent` and `e.title` stop
+    # existing and this fails to BIND, which is the loud failure and still a failure.
+    #
+    # It is a table MACRO, so it takes a column. That distinction is the whole reason
+    # this migration is possible: a table FUNCTION rejects `doc.blocks` outright, which
+    # is how parse_html_blocks silently broke -S on ZIM archives for weeks.
+    sql="$cte, t AS (SELECT r.* FROM doc, duck_blocks_toc_rows(doc.blocks) r)
+         SELECT string_agg(repeat('  ', t.indent) || t.title, chr(10) ORDER BY t.element_order)
          FROM t HAVING count(*) > 0;" ;;
   section)
     # Nearest following heading of the same or higher level bounds the section,

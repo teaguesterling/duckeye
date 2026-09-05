@@ -590,6 +590,21 @@ if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   # a success exit -- indistinguishable, to anything piping duckeye, from a real
   # document that simply had no renderer.
   no 'zim:// missing entry exits nonzero' $DUCKEYE -o text "zim://$Z/no_such_entry_xyzzy"
+
+  # zim:// and git:// are consumed as an ADDRESSING INTERFACE by at least one other
+  # system (a citation-locator grammar that parses both, splitting a #fragment on
+  # the LAST '#'). duckeye must therefore treat everything after "<archive>.zim/"
+  # as opaque, hashes included -- it does no fragment parsing of its own, and a
+  # caller has already resolved the fragment before handing over the locator.
+  #
+  # Asserted via the not-found message, which echoes the entry back, so it needs no
+  # archive that actually contains a '#' in a name. Without this, only something
+  # like a "C#" article would ever catch a regression here.
+  # 2>&1 because the entry name is echoed in the ERROR, which has() does not see.
+  has 'zim:// entry keeps a #'   'not found: C#Sharp' \
+      bash -c "$DUCKEYE -o text 'zim://$Z/C#Sharp' 2>&1"
+  has 'zim:// entry keeps two #' 'not found: C#Sharp#overview' \
+      bash -c "$DUCKEYE -o text 'zim://$Z/C#Sharp#overview' 2>&1"
   if $DUCKEYE -o text "zim://$Z/no_such_entry_xyzzy" 2>/dev/null | grep -q 'no renderer'; then
     fail=$((fail+1)); echo '  FAIL zim:// missing entry prints nothing to stdout'
   else pass=$((pass+1)); echo '  ok   zim:// missing entry prints nothing to stdout'; fi

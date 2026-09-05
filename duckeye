@@ -989,9 +989,12 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     p_args=
     [[ -n $p_first ]] && p_args+="first_page := $p_first"
     [[ -n $p_last ]] && p_args+="${p_args:+, }last_page := $p_last"
-    # element_order is assigned by POSITION here rather than with
-    # duck_blocks_reorder, which regroups a mixed list -- it sorts page_break
-    # ahead of prose and yields every marker first, then every paragraph.
+    # element_order is assigned by POSITION, not with duck_blocks_reorder.
+    # reorder SORTS by element_order and renumbers, which is right for a list whose
+    # orders are already meaningful -- and wrong here, because each page's parse
+    # restarts numbering at 0. Flattened, the orders collide ([0,1,0,1] for two
+    # pages), so sorting groups every marker ahead of every paragraph. Position IS
+    # the document order once the pages are concatenated in page order, so use it.
     doc="WITH __pg AS (
            SELECT page, list_prepend(
                     {'kind':'block','element_type':'page_break','content':NULL,'level':NULL,

@@ -548,9 +548,18 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
                   THEN zim_get_content(archive, entry) END))
     WHEN zim_mimetype(archive, entry) LIKE 'text/%'
       THEN duck_block_code(zim_get_text(archive, entry))
-    ELSE duck_block_paragraph('(no renderer for '
-                      || coalesce(zim_mimetype(archive, entry), 'unknown type')
-                      || ': ' || entry || ')')
+    -- A missing entry and an unrenderable one are different answers. zim_mimetype
+    -- returns NULL for an entry the archive does not hold, which used to coalesce
+    -- to 'unknown type' and print '(no renderer for unknown type: NAME)' on stdout
+    -- with exit 0 -- plausible text and success for a document that is not there.
+    -- Worst shape for anything piping duckeye. error() raises, so the exit code
+    -- says so; it stays lazy in a non-taken CASE arm, unlike the readers above.
+    ELSE CASE WHEN zim_mimetype(archive, entry) IS NULL
+           THEN error('zim entry not found: ' || entry)
+           ELSE duck_block_paragraph('(no renderer for '
+                                     || zim_mimetype(archive, entry)
+                                     || ': ' || entry || ')')
+         END
   END);"
 
 # Sparklines come from textplot's tp_sparkline(), which returns a fixed 20 columns

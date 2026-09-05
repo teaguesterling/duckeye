@@ -584,6 +584,16 @@ if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   else
     skipping 'zim:// html entry' 'set DUCKEYE_TEST_ZIM_HTML'
   fi
+  # A missing entry must FAIL, not print plausible text and exit 0. zim_mimetype
+  # returns NULL for an entry the archive does not hold; that used to coalesce to
+  # 'unknown type' and render "(no renderer for unknown type: NAME)" on stdout with
+  # a success exit -- indistinguishable, to anything piping duckeye, from a real
+  # document that simply had no renderer.
+  no 'zim:// missing entry exits nonzero' $DUCKEYE -o text "zim://$Z/no_such_entry_xyzzy"
+  if $DUCKEYE -o text "zim://$Z/no_such_entry_xyzzy" 2>/dev/null | grep -q 'no renderer'; then
+    fail=$((fail+1)); echo '  FAIL zim:// missing entry prints nothing to stdout'
+  else pass=$((pass+1)); echo '  ok   zim:// missing entry prints nothing to stdout'; fi
+
   if [[ -n ${DUCKEYE_TEST_ZIM_PDF:-} ]]; then
     ok  'zim:// pdf entry renders'   $DUCKEYE -o text "zim://$Z/$DUCKEYE_TEST_ZIM_PDF"
   else

@@ -1027,6 +1027,10 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     # contract applies -- reorder would sort on the colliding keys and group every
     # page marker ahead of every paragraph. duck_blocks_concat is the raw append
     # and does not touch order at all.
+    # The page_break attributes map must never be empty: an untyped MAP{} infers
+    # MAP("NULL","NULL") rather than MAP(VARCHAR,VARCHAR), and the ::duck_block cast
+    # would then fail on every page. Non-emptiness is what makes the inference right
+    # -- there is no cast on the map itself, only on the struct around it.
     doc="WITH __pg AS (
            SELECT page, list_prepend(
                     {'kind':'block','element_type':'page_break','content':NULL,'level':NULL,

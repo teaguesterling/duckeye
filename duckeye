@@ -1035,7 +1035,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
                     parse_markdown_to_duck_blocks(coalesce(text, ''))) AS pb
            FROM read_pdf('$src'${p_args:+, $p_args}))
          SELECT reduce(list(pb ORDER BY page),
-                       (acc, x) -> duck_blocks_merge(acc, x)) AS blocks
+                       lambda acc, x: duck_blocks_merge(acc, x)) AS blocks
          FROM __pg" ;;
   *.json|.pandoc_ast)              # Pandoc AST
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;

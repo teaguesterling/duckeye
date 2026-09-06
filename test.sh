@@ -670,8 +670,18 @@ fi
 
 echo 'cli'
 ok  'help'                       $DUCKEYE -h
-ok  'init'                       $DUCKEYE --init
-ok  'update'                     $DUCKEYE --update
+# --init and --update both end in `install.sh --user-bin`, which writes to
+# $HOME/.local/bin/duckeye and $HOME/.claude/... . On a dev machine
+# ~/.local/bin/duckeye is typically a SYMLINK to the repo checkout, so that
+# write lands ON THE WORKING TREE: running the suite silently reverted
+# uncommitted duckeye changes, and every test after this point measured main.
+# Copying to $TMP is NOT enough -- the vector is the install symlink, not $0 or
+# $PWD -- so give both a scratch HOME. That also stops the suite rewriting the
+# user's real ~/.claude skill files on every run.
+mkdir -p "$TMP/home"
+ok  'init'                       env HOME="$TMP/home" $DUCKEYE --init
+cp "$(readlink -f "$DUCKEYE")" "$TMP/upd" && chmod +x "$TMP/upd"
+ok  'update'                     env HOME="$TMP/home" "$TMP/upd" --update
 no  'mode exclusivity'           $DUCKEYE -r -t "$TMP/d.parquet"
 no  'limit validates'            $DUCKEYE -n abc "$TMP/d.parquet"
 no  'unknown option'             $DUCKEYE -z "$TMP/doc.md"

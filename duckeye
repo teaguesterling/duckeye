@@ -908,7 +908,7 @@ FROM __duckeye_src"
     http://*|https://*|s3://*) ;;
     *) no_autoload="SET autoload_known_extensions=false; " ;;
   esac
-  load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; ${no_autoload:-}"
+  load="${no_autoload:-}"
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
   if want_color; then
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -c "$load $sql")
@@ -1163,7 +1163,7 @@ if [[ $out_fmt == pandoc || $out_fmt == md ]]; then
                 'blocks', duck_blocks_to_pandoc_ast(b).blocks::JSON)); "
 fi
 
-load="SET lambda_syntax='ENABLE_SINGLE_ARROW'; ${prethreads:-}"
+load="${prethreads:-}"
 for e in $DUCKEYE_BASE $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
 
 duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")

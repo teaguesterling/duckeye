@@ -136,6 +136,27 @@ higher level bounds the section" rule was arrived at independently and matches.
 **What duckeye keeps regardless:** content sniffing (panduck has none), terminal
 and theme detection, arg parsing, paging, stdin spooling.
 
+### Delegation decision, measured 2026-09-09: do NOT delegate `-T`/`-S`/`-s`
+
+Attempted and backed out. panduck's `doc_*` take a **file path**, and five of duckeye's
+sources are not one:
+
+    zim://      blocks come from zim_get_text
+    git://      a blob at a revision
+    -P pages    doc_section has no pages parameter
+    .py/.sh     routed through sitting_duck; panduck has no AST reader
+    stdin       spooled to a temp file, format sniffed by duckeye
+
+So the 36 lines of span SQL must stay as the fallback for all five. Delegation then
+**adds** ~39 lines (capability probe, mtime-keyed cache, allowlist) and **removes
+nothing**, for behaviour measured at 14/14 identical on a 696-block document. The probe
+alone costs 38ms against a 71ms baseline, which is what forced the cache.
+
+**The delegation worth doing is the PDF reader, not the verbs.** On `two_pages.pdf`
+panduck finds 2 headings where duckeye finds 0 — real capability duckeye lacks, in the
+format where its own pipeline (`read_pdf` → per-page text → `parse_markdown_to_duck_blocks`)
+is weakest. Delegate `read_pdf_blocks` when panduck serves; leave `-T`/`-S`/`-s` alone.
+
 ## Testing
 
 Every assertion must be verified in **both** directions — pass on new, fail on

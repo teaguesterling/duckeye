@@ -278,9 +278,21 @@ if command -v pandoc >/dev/null; then
 else
   skipping '-t md' 'pandoc not installed'
 fi
-no  '-o rejects -r'                         $DUCKEYE -t md -r "$TMP/d.parquet"
-no  '-o rejects -t'                         $DUCKEYE -t md -t "$TMP/doc.md"
+# These assert the MESSAGE, not just a nonzero exit. The exit codes stayed correct
+# through the v1 rename while every message still named -o and -r, and a `no` test
+# reads neither -- so the suite was green on advice that pointed at flags which no
+# longer meant that.
+no  '-t rejects -d'                         $DUCKEYE -t md -d "$TMP/d.parquet"
+has '-t/-d conflict names -t'   '-t does not apply to data modes' \
+    bash -c "$DUCKEYE -t md -d '$TMP/d.parquet' 2>&1 >/dev/null"
+no  '-t rejects -T'                         $DUCKEYE -t md -T "$TMP/doc.md"
+has '-t/-T conflict names -T'   '-t does not apply to -T' \
+    bash -c "$DUCKEYE -t md -T '$TMP/doc.md' 2>&1 >/dev/null"
 no  '-t rejects an unknown format'          $DUCKEYE -t bogus "$TMP/doc.md"
+has 'unknown -t format lists the valid ones' 'ansi, text, md, html, pandoc, blocks' \
+    bash -c "$DUCKEYE -t bogus '$TMP/doc.md' 2>&1 >/dev/null"
+has 'unknown -f format names -d'  'unknown format for -d' \
+    bash -c "$DUCKEYE -d -f nonsense '$TMP/d.parquet' 2>&1 >/dev/null"
 # -o composes with -s just as it does with -S
 has '-t text with -s'    'widget'            $DUCKEYE -t text -s widget "$TMP/doc.md"
 has '-t html with -s'    '<h'                $DUCKEYE -t html -s widget "$TMP/doc.md"

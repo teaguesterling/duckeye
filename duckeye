@@ -201,7 +201,7 @@ q() { printf '%s' "${1//\'/\'\'}"; }
 arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 in_file= out_file=
 
-# Wrap an expression yielding LIST(duck_block) in whichever serializer -o asked for.
+# Wrap an expression yielding LIST(duck_block) in whichever serializer -t asked for.
 # These are the duck_blocks pipeline's own writers, which is the whole point: they run
 # after -S/-s have already cut the document down, so a section can come out as markdown.
 emit() {
@@ -399,10 +399,10 @@ fi
 
 if [[ $out_fmt != ansi ]]; then
   emit x >/dev/null                       # reject an unknown format before doing work
-  [[ $mode == raw || $mode == summary || $mode == profile ]] && die '-o does not apply to data modes: output is a data table' 64
-  [[ $mode == toc ]] && die '-o does not apply to -t: the outline is already plain text' 64
+  [[ $mode == raw || $mode == summary || $mode == profile ]] && die '-t does not apply to data modes: output is a data table' 64
+  [[ $mode == toc ]] && die '-t does not apply to -T: the outline is already plain text' 64
   [[ $out_fmt == md ]] && ! command -v pandoc >/dev/null &&
-    die '-o md converts through pandoc, which is not installed' 3
+    die '-t md converts through pandoc, which is not installed' 3
 fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/duckeye.XXXXXX") || die 'cannot create temp directory'
@@ -427,7 +427,7 @@ if [[ $f == - || ( -z $f && ! -t 0 ) ]]; then
   cat >"$f" || die 'cannot read standard input'
   [[ -s $f ]] || die 'standard input was empty'
   if [[ -z $fmt ]]; then
-    # Sniffing recognises document formats. Under -r the input is data, where the
+    # Sniffing recognises document formats. Under -d the input is data, where the
     # candidates are indistinguishable often enough that guessing would be a liability.
     [[ $mode == raw ]] &&
       die 'reading data from standard input needs -f (csv, parquet, json, ...)' 64
@@ -694,7 +694,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
                          from="read_ast('$src', peek := 'full')"
                        fi
                        exts="sitting_duck" ;;
-    *)                 die "unknown format for -r: $fmt" ;;
+    *)                 die "unknown format for -d: $fmt" ;;
   esac
 
   if [[ $f == git://* ]]; then
@@ -939,7 +939,7 @@ FROM __duckeye_src"
     sql="$target_query;"
   fi
 
-  # Sparklines come from textplot's tp_sparkline(). Only -Z draws them, so -r and
+  # Sparklines come from textplot's tp_sparkline(). Only -Z draws them, so -d and
   # -z do not pay for the load.
   [[ $mode == profile ]] && exts+=" textplot"
   # httpfs gets autoloaded, and its OpenSSL shutdown path segfaults at exit when
@@ -980,7 +980,7 @@ FROM __duckeye_src"
 fi
 
 ## A .zim holds thousands of articles, so the verbs address the corpus rather than
-# one document: -t indexes it, -s runs the archive's own Xapian full-text search,
+# one document: -T indexes it, -s runs the archive's own Xapian full-text search,
 # -S opens an article. Reaching *into* an article is what the zim:// form below is
 # for, and there the ordinary document verbs apply unchanged.
 if [[ $key == *.zim ]]; then
@@ -995,9 +995,9 @@ if [[ $key == *.zim ]]; then
   else
     # The corpus verbs print tables of archive metadata, not documents, so there are no
     # blocks for a serializer to act on. -S drops through to the branch above, where it
-    # opens an article and -o applies normally.
+    # opens an article and -t applies normally.
     [[ $out_fmt == ansi ]] ||
-      die "-o applies to documents; for an archive it only makes sense with -S" 64
+      die "-t applies to documents; for an archive it only makes sense with -S" 64
     case $mode in
       full)   zsql="SELECT UNNEST(zim_info('$src'));" ;;
       # OFFSET 0 blocks filter pushdown: read_zim silently ignores a pushed-down

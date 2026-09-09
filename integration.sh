@@ -175,6 +175,90 @@ if [[ -n $pandoc_works ]]; then
   done
 fi
 
+echo 'pre-parsed fixture drift (panduck)'
+# panduck maintains pre-parsed documents as parquet plus a manifest recording, per
+# fixture, the source sha256 and the READER EXTENSION VERSION that produced the blocks.
+# duckeye parses the same sources through the same extensions, so the fixtures are a
+# drift detector: if duckeye's live blocks stop matching, either a reader changed
+# under us or duckeye's pipeline did.
+#
+# Three outcomes, not two -- taken from panduck's own comparator semantics:
+#   versions match + blocks differ   REGRESSION. something broke.
+#   versions differ + blocks differ  EXPECTED DRIFT. regenerate deliberately.
+#   versions differ + blocks same    POSITIVE EVIDENCE. the upgrade was benign, and
+#                                    saying so out loud is cheap.
+PF=${DUCKEYE_PANDUCK_FIXTURES:-}
+if [[ -z $PF ]]; then
+  skipping 'panduck fixtures' 'set DUCKEYE_PANDUCK_FIXTURES to a checkout of test/fixtures'
+elif [[ ! -f $PF/parsed/manifest.csv ]]; then
+  skipping 'panduck fixtures' "no parsed/manifest.csv under $PF"
+else
+  # installed reader versions, for the version-match arm
+  inst=$(duckdb -noheader -list -c "SELECT extension_name||'='||extension_version FROM duckdb_extensions() WHERE extension_name IN ('markdown','webbed','pdf') AND installed;" 2>/dev/null | paste -sd' ')
+  rows=$(duckdb -noheader -list -c "SELECT fixture||'|'||source||'|'||source_sha256||'|'||reader_extension||'|'||reader_version FROM read_csv('$PF/parsed/manifest.csv');" 2>/dev/null)
+  [[ -z $rows ]] && { fail=$((fail+1)); printf '  FAIL manifest.csv read produced no rows\n'; }
+  while IFS='|' read -r fx src sha ext ver; do
+    [[ -n $fx ]] || continue
+    srcpath="$PF/${src#test/fixtures/}"; [[ -f $srcpath ]] || srcpath="$PF/$src"
+    pq="$PF/parsed/$fx.blocks.parquet"
+    if [[ ! -f $srcpath || ! -f $pq ]]; then
+      fail=$((fail+1)); printf '  FAIL %s: source or parquet missing\n' "$fx"; continue
+    fi
+    # The manifest names the sha of the document the blocks were made FROM. If the
+    # source has moved on, the fixture is not of this input and any comparison is
+    # meaningless -- check before spending one.
+    got_sha=$(sha256sum "$srcpath" | cut -d' ' -f1)
+    if [[ $got_sha != "$sha" ]]; then
+      fail=$((fail+1)); printf '  FAIL %s: source sha differs from manifest (fixture is of a different document)\n' "$fx"; continue
+    fi
+    live="$TMP/$fx.live.json"
+    $DUCKEYE -o blocks "$srcpath" > "$live" 2>/dev/null
+    # Block-for-block comparison is only meaningful where duckeye and panduck use the
+    # SAME reader. They do for markdown and webbed. They do NOT for pdf: duckeye goes
+    # read_pdf -> per-page text -> parse_markdown_to_duck_blocks, which emits inline
+    # children, while panduck's read_pdf_blocks emits block-level paragraphs. Measured
+    # on two_pages.pdf: panduck 45 (heading x2, paragraph x37, list_item x4,
+    # page_break x2) vs duckeye 93 (paragraph x9, text x79, list x1, list_item x2,
+    # page_break x2). Neither is wrong and comparing them reports a regression that is
+    # not one -- so for pdf assert the contract the two pipelines DO share, which is
+    # the page_break markers and their page numbers.
+    if [[ $ext == pdf ]]; then
+      want=$(duckdb -noheader -list -c "SELECT count(*)||':'||coalesce(string_agg(attributes['page_number'],',' ORDER BY element_order),'') FROM read_parquet('$pq') WHERE element_type='page_break';" 2>/dev/null | tail -1)
+      got=$(python3 -c "
+import json,sys
+b=[x for x in json.load(open('$live')) if x['element_type']=='page_break']
+b.sort(key=lambda x: x['element_order'])
+print(str(len(b))+':'+','.join(str(x['attributes'].get('page_number','')) for x in b))" 2>/dev/null)
+      if [[ -n $want && $want == "$got" ]]; then
+        pass=$((pass+1)); printf '  ok   %s page_break contract agrees (%s)\n' "$fx" "$got"
+      else
+        fail=$((fail+1)); printf '  FAIL %s page_break contract: panduck=%s duckeye=%s\n' "$fx" "${want:-none}" "${got:-none}"
+      fi
+      continue
+    fi
+    diffs=$(duckdb -noheader -list -c "
+      WITH live AS (SELECT j->>'kind' AS kind, j->>'element_type' AS element_type, j->>'content' AS content,
+                           (j->>'level')::INTEGER AS level, j->>'encoding' AS encoding,
+                           (j->>'element_order')::INTEGER AS element_order, (j->'attributes')::VARCHAR AS attrs
+                    FROM (SELECT unnest(from_json(content, '\"JSON[]\"')) AS j FROM read_text('$live'))),
+           stored AS (SELECT kind, element_type, content, level, encoding, element_order,
+                             to_json(attributes)::VARCHAR AS attrs FROM read_parquet('$pq'))
+      SELECT (SELECT count(*) FROM (SELECT * FROM live EXCEPT SELECT * FROM stored))
+           + (SELECT count(*) FROM (SELECT * FROM stored EXCEPT SELECT * FROM live));" 2>/dev/null | tail -1)
+    diffs=${diffs:-999}
+    if [[ $inst == *"$ext=$ver"* ]]; then vmatch=1; else vmatch=; fi
+    if (( diffs == 0 )); then
+      pass=$((pass+1))
+      if [[ -n $vmatch ]]; then printf '  ok   %s matches stored blocks\n' "$fx"
+      else printf '  ok   %s matches despite %s moving off %s (upgrade was benign)\n' "$fx" "$ext" "$ver"; fi
+    elif [[ -n $vmatch ]]; then
+      fail=$((fail+1)); printf '  FAIL %s: %s blocks differ with %s still at %s -- REGRESSION\n' "$fx" "$diffs" "$ext" "$ver"
+    else
+      skip=$((skip+1)); printf '  skip %s: %s blocks differ, %s moved off %s -- expected drift, regenerate\n' "$fx" "$diffs" "$ext" "$ver"
+    fi
+  done <<< "$rows"
+fi
+
 echo 'stream hygiene'
 # Extension deprecation notices belong on stderr. If one reaches stdout it lands
 # inside a table of contents or a converted document, and every downstream consumer

@@ -25,7 +25,7 @@ usage: duckeye [OPTION]... [FILE]
 | `-s` | `--search TEXT` | Search and print only innermost sections matching TEXT |
 | `-Q` | `--select SEL` | Query code AST by CSS selector (e.g. `.func`, `.class#Name`, `.func:async`) |
 | `-d` | `--data` | Read file as a data table (auto for parquet, csv, json, yaml, toml, xlsx, ...). Piped, emits JSONL |
-| `-D` | `--document` | Read as prose; undoes an earlier `-d` |
+| `-D` | `--document` | Undo an earlier `-d`. Data files still route to data — use `-f` to name a document reader |
 | `-r` | `--raw` | Deprecated alias for `-d`; warns on stderr |
 | `-z` | `--summary` | Quick DuckDB `SUMMARIZE` breakdown; implies data mode |
 | `-Z` | `--profile` | Smart column profile with sparklines & category frequencies |

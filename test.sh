@@ -767,6 +767,11 @@ has '-d is data mode'             'name_1'        $DUCKEYE -d "$TMP/d.parquet"
 has '-D undoes an earlier -d'     '▍ Title'   bash -c "$DUCKEYE -d -D '$TMP/doc.md' | head -1"
 has '-D undoes -d (content)'      'Alpha'         bash -c "$DUCKEYE -d -D '$TMP/doc.md'"
 no  '-d alone on md is not prose' bash -c "$DUCKEYE -d '$TMP/doc.md' 2>/dev/null | grep -q Alpha"
+# -D undoes -d; it does NOT override the data-file auto-route. A .parquet stays data
+# even under -D, because there is no document reader for one. The help says so; this
+# pins the behaviour the help describes, since an overstated flag is how -D got
+# documented as something it never did.
+has '-D does not un-data a parquet' 'name_1' $DUCKEYE -D "$TMP/d.parquet"
 has '-i reads an input file'      'Alpha'         $DUCKEYE -i "$TMP/doc.md" -T
 no  '-i plus positional errors'   $DUCKEYE -i "$TMP/doc.md" "$TMP/doc.md"
 # -r stays as a deprecated alias: its old spelling is unambiguous, so failing it

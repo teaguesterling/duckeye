@@ -407,7 +407,7 @@ it to `DUCKEYE_EXTS`.
 -s, --search TEXT      matching sections or AST definitions
 -Q, --select SEL       AST selector for code definitions (.func, .class#Name, ...)
 -d, --data             read as data: SELECT * FROM FILE (reads AST on code files)
--D, --document         read as prose; undoes an earlier -d
+-D, --document         undo an earlier -d (data files still route to data)
 -z, --summary          native column summary (DuckDB SUMMARIZE)
 -Z, --profile          smart column profile with sparklines & category frequencies
 -i, --input FILE       input file; same as giving FILE positionally

@@ -45,7 +45,9 @@ Options:
   -Q, --select SEL       query code AST by CSS selector (.func, .class#Name, .func:async, ...)
   -d, --data             read FILE as data, not prose: SELECT * FROM FILE
                          (parquet, csv, json, xlsx, ...). Piped, it emits JSONL
-  -D, --document         read FILE as prose even if it could be read as data
+  -D, --document         undo an earlier -d and read FILE as prose. Data files
+                         (parquet, csv, ...) still route to data: use -f to name
+                         a document reader if sniffing picks the wrong one
   -z, --summary          summarize data columns via DuckDB SUMMARIZE; implies -d
   -Z, --profile          smart column profile with sparklines & category frequencies
   -i, --input FILE       the input file; the same as giving FILE positionally.

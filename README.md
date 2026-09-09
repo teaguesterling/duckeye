@@ -8,9 +8,9 @@ man pages, an offline Wikipedia — parsed by [DuckDB](https://duckdb.org), rend
 $ duckeye README.md                         # render, unpaged (shorthand: de README.md)
 $ dep README.md                             # same, paged through $DUCKEYE_PAGER
 $ der test.py                               # force raw data/AST table mode
-$ zcat ls.1.gz | duckeye -t -               # or read a pipe, format sniffed
-$ duckeye -t spec.md                        # outline a document
-$ duckeye -t server.go                      # outline classes, functions & methods
+$ zcat ls.1.gz | duckeye -T -               # or read a pipe, format sniffed
+$ duckeye -T spec.md                        # outline a document
+$ duckeye -T server.go                      # outline classes, functions & methods
 $ duckeye -S 'Runbook Steps' spec.md        # one section
 $ duckeye -S handle_request server.go       # extract a single function definition & body
 $ duckeye -P 1-5 manual.pdf                 # page range of a PDF
@@ -72,7 +72,7 @@ The point of duckeye is that a DOCX, an EPUB and a Jupyter notebook stop being o
 
 ```console
 $ duckeye proposal.docx                     # a Word document, in the terminal
-$ duckeye -t book.epub                      # what's in this book?
+$ duckeye -T book.epub                      # what's in this book?
 $ duckeye -S 'Results' paper.tex            # one section of a LaTeX paper
 $ duckeye analysis.ipynb                    # notebook prose and code, no Jupyter
 $ duckeye notes.org                         # org-mode without Emacs
@@ -82,7 +82,7 @@ Man page source works too — `.man` and the numbered sections `.1` … `.9` —
 jump straight to the part you wanted:
 
 ```console
-$ zcat /usr/share/man/man1/ls.1.gz | duckeye -t -
+$ zcat /usr/share/man/man1/ls.1.gz | duckeye -T -
 NAME
 SYNOPSIS
 DESCRIPTION
@@ -106,12 +106,12 @@ No temporary file and no `-f`: piped input is sniffed, and roff is recognisable.
 
 ```console
 $ curl -s https://example.com | duckeye -             # sniffed as HTML
-$ pandoc notes.txt -t json | duckeye -t -             # sniffed as a Pandoc AST
+$ pandoc notes.txt -t json | duckeye -T -             # sniffed as a Pandoc AST
 $ duckeye 'git://README.md@v0.12.0'                   # read a doc at a git tag
-$ duckeye -t 'git://spec.md@HEAD~2'                   # outline a doc at a past commit
+$ duckeye -T 'git://spec.md@HEAD~2'                   # outline a doc at a past commit
 $ duckeye -S Install 'git://README.md@HEAD~1'         # extract section from past revision
 $ duckeye -Q '.func' 'git://src/main.rs@main'         # AST query code at git branch
-$ unzip -p archive.zip doc.docx | duckeye -t -        # sniffed as DOCX
+$ unzip -p archive.zip doc.docx | duckeye -T -        # sniffed as DOCX
 ```
 
 Sniffing reads magic bytes first (`%PDF`, and the zip container that `.docx`, `.epub`
@@ -122,13 +122,13 @@ else is treated as markdown, which degrades into legible plain text.
 When the guess is wrong, or a filename lies, `-f` settles it:
 
 ```console
-$ duckeye -t -f man ls.1                    # a format name is just its extension
-$ duckeye -t -f html page.txt               # extension says otherwise
-$ cat data.parquet | duckeye -r -f parquet -    # under -r it names a DuckDB reader
+$ duckeye -T -f man ls.1                    # a format name is just its extension
+$ duckeye -T -f html page.txt               # extension says otherwise
+$ cat data.parquet | duckeye -d -f parquet -    # under -d it names a DuckDB reader
 $ cat log.csv | duckeye -f csv -w "level = 'ERROR'" -
 ```
 
-Under `-r` the input is data rather than prose, and the candidates are too easily
+Under `-d` the input is data rather than prose, and the candidates are too easily
 confused for guessing to be safe, so stdin there requires `-f` rather than picking for
 you.
 
@@ -142,7 +142,7 @@ and sniffing has to look at the first bytes without consuming them.
 escape sequences, so it pipes straight back into `-S`:
 
 ```console
-$ duckeye -t spec.md | fzf | xargs -I{} duckeye -S {} spec.md
+$ duckeye -T spec.md | fzf | xargs -I{} duckeye -S {} spec.md
 ```
 
 `-S` takes a section through to the next heading of the **same or higher** level, so
@@ -174,9 +174,9 @@ SQL wildcard confusion. `-S` also matches a heading's slug id exactly.
 Input file paths support glob patterns across document, AST, and raw modes:
 
 ```console
-$ duckeye -t 'src/**/*.py'             # outline all Python files in a directory tree
+$ duckeye -T 'src/**/*.py'             # outline all Python files in a directory tree
 $ duckeye -Q '.func' 'src/**/*.rs'      # extract all Rust functions across files
-$ duckeye -r 'data/*.parquet'          # query across parquet shards
+$ duckeye -d 'data/*.parquet'          # query across parquet shards
 ```
 
 For the AST selectors, consult the [sitting_duck](https://sitting-duck.readthedocs.io/en/latest/reference/css-selectors/) 
@@ -200,27 +200,27 @@ The point is that it runs **after** `-S` and `-s`, so it converts what you selec
 rather than the whole file — which is the thing pandoc alone cannot do:
 
 ```console
-$ duckeye -S Usage -o md proposal.docx
+$ duckeye -S Usage -t md proposal.docx
 ## Usage
 
 usage body
 
-$ duckeye -s 'rate limit' -o md api-spec.epub > excerpt.md
-$ duckeye -S Install -o html README.md
-$ duckeye -o pandoc spec.rst | pandoc -f json -t docx -o spec.docx
+$ duckeye -s 'rate limit' -t md api-spec.epub > excerpt.md
+$ duckeye -S Install -t html README.md
+$ duckeye -t pandoc spec.rst | pandoc -f json -t docx -o spec.docx
 ```
 
-`-o pandoc` stamps the `pandoc-api-version` your local pandoc actually speaks, since the
-extension hardcodes an old one (see below). `-o` doesn't apply to `-r` (that output is a
+`-t pandoc` stamps the `pandoc-api-version` your local pandoc actually speaks, since the
+extension hardcodes an old one (see below). `-o` doesn't apply to `-d` (that output is a
 data table), to `-t` (already plain text), or to an archive's corpus listings — but it
 does apply to `-S` on an archive, which opens a document.
 
-**Known limitation — `-o md` and `-o pandoc` on tables from a native reader.** Both
+**Known limitation — `-t md` and `-t pandoc` on tables from a native reader.** Both
 route through `duck_blocks_to_pandoc_ast`, and in the currently published
 `duck_block_utils` a table is exported in a shape real pandoc refuses:
 
 ```console
-$ duckeye -o md notes.md          # notes.md contains a table
+$ duckeye -t md notes.md          # notes.md contains a table
 JSON parse error: ... constructor Table ... expected Array but got Object
 ```
 
@@ -228,7 +228,7 @@ The split is the opposite of what you would guess. A table read by **pandoc**
 (`.docx .odt .epub .rst .org .tex .rtf .textile .man .mediawiki`) carries a preserved
 AST tuple and converts fine. A table read **natively** (`.md`, `.html`, and a `zim://`
 article, which uses the HTML reader) has no such tuple and fails. Documents without
-tables are unaffected, as are `-o ansi`, `-o text`, `-o html` and `-o blocks`.
+tables are unaffected, as are `-t ansi`, `-t text`, `-t html` and `-t blocks`.
 
 Fixed upstream in `duck_block_utils` v1.7.0 and gone as soon as that reaches the
 community extension repository; nothing in duckeye needs to change. `test.sh` carries a
@@ -255,7 +255,7 @@ give you clean text rather than escape sequences. `--color=always` forces them b
 duckeye -s 'BREAKING CHANGE' CHANGELOG.md || echo 'safe to upgrade'
 
 # does every heading in the TOC actually resolve?
-duckeye -t spec.md | while read -r line; do
+duckeye -T spec.md | while read -r line; do
   duckeye -S "${line#"${line%%[![:space:]]*}"}" spec.md >/dev/null || echo "unreachable: $line"
 done
 ```
@@ -265,7 +265,7 @@ Errors are separated too: `64` for a usage mistake, `2` for an unsupported exten
 
 ## Data files and profiling
 
-Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode — no `-r` flag required! Use `-r` or the `der` alias to force raw mode on code ASTs or plain text:
+Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode — no `-d` flag required! Use `-d` or the `der` alias to force raw mode on code ASTs or plain text:
 
 ```console
 $ duckeye events.parquet                           # auto-detects data mode
@@ -277,7 +277,7 @@ $ duckeye spreadsheet.xlsx
 $ duckeye archive.zip                              # inspect files within a zip
 $ duckeye .git                                     # query git commit history
 $ der script.py                                    # der forces raw AST table mode
-$ duckeye -r -f lines script.sh                    # table with line numbers & offsets
+$ duckeye -d -f lines script.sh                    # table with line numbers & offsets
 $ duckeye -w "level = 'ERROR'" events.parquet      # -w implies data mode
 $ duckeye -n 20 huge.csv                           # first 20 rows
 ```
@@ -348,7 +348,7 @@ $ duckeye -s "chlorophyll absorption spectrum" -n 5 wikipedia.zim        # 0.14s
 │  91.0 │ Chlorophyll               │ ...spectrum as well as the red portion…
 
 $ duckeye -S Chlorophyll wikipedia.zim                     # renders the article
-$ duckeye -t wikipedia.zim                                 # index every article
+$ duckeye -T wikipedia.zim                                 # index every article
 ```
 
 `-s` here runs the archive's own Xapian full-text index and returns ranked hits with
@@ -359,7 +359,7 @@ A `zim://archive.zim/entry` URL names a single entry, and there the ordinary doc
 verbs come back:
 
 ```console
-$ duckeye -t 'zim://wikipedia.zim/Chlorophyll'
+$ duckeye -T 'zim://wikipedia.zim/Chlorophyll'
   History
   Photosynthesis
   Chemical structure
@@ -387,7 +387,7 @@ hundreds of thousands of entries with no mimetype at all.
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | [`sitting_duck`](https://github.com/teaguesterling/duckdb_sitting_duck) (Tree-sitter AST to duck_blocks) |
 | `.docx` `.odt` `.epub` `.rst` `.org` `.tex` `.ipynb` `.rtf` `.textile` `.mediawiki` | `pandoc(1)` |
 | `.man`, `.1`–`.9` | `pandoc(1)` — man page source |
-| anything DuckDB reads, under `-r` | parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, … |
+| anything DuckDB reads, under `-d` | parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, … |
 | standard input | sniffed (magic bytes, doctypes, shebangs), or named with `-f` |
 
 duckeye names the pandoc reader explicitly rather than letting pandoc infer it from the
@@ -410,7 +410,8 @@ it to `DUCKEYE_EXTS`.
 -Z, --profile          smart column profile with sparklines & category frequencies
 -f, --format FMT       treat input as FMT instead of guessing; under data modes,
                        names a DuckDB reader (csv, parquet, json, yaml, toml, xlsx, pdf, lines, zip, git, ast)
--o, --output FMT       ansi (default), text, md, html, pandoc, blocks
+-t, --to FMT           ansi (default), text, md, html, pandoc, blocks
+-o, --output FILE      write to FILE instead of stdout
     --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies data mode
 -q                     AST selector for code definitions
@@ -420,7 +421,7 @@ it to `DUCKEYE_EXTS`.
 -h, --help             full help
 ```
 
-`-t`, `-S`, `-s`, `-r`, `-z` and `-Z` are mutually exclusive.
+`-t`, `-S`, `-s`, `-d`, `-z` and `-Z` are mutually exclusive.
 
 ## Environment
 
@@ -476,15 +477,15 @@ against the libraries, not duckeye:
 - **`-t` on a ZIM archive works around a `read_zim` pushdown bug** that silently ignores
   a `mimetype` filter and returns every row
   ([duckdb_zim#29](https://github.com/teaguesterling/duckdb_zim/issues/29)).
-- **`-o pandoc` needs its version stamp rewritten**, which duckeye does for you:
+- **`-t pandoc` needs its version stamp rewritten**, which duckeye does for you:
   `duck_blocks_to_pandoc_ast` hardcodes `pandoc-api-version [1,20]`, which pandoc 3.x
   rejects outright
   ([duck_block_utils#22](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/22)).
-- **`-o md` and `-o pandoc` fail on documents containing tables**, because the AST
+- **`-t md` and `-t pandoc` fail on documents containing tables**, because the AST
   encodes `Table` with duck_blocks' `{headers, rows}` object where pandoc expects an
   array
   ([duck_block_utils#23](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/23)).
-  `-o html` and `-o text` are unaffected.
+  `-t html` and `-t text` are unaffected.
 - **`-o text` runs words together** around inline markup, since `db_blocks_to_text`
   concatenates a block's inline children rather than walking them
   ([duck_block_utils#20](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/20)).

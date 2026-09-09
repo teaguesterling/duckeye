@@ -35,7 +35,7 @@ input. Piped input is sniffed for its format; -f overrides the guess.
 Options:
   -p, --page             page the output through $DUCKEYE_PAGER (default: less -R)
   -P, --pages RANGE      page or page range for PDFs (e.g. 3, 1-5, 1..5, -10, 5-)
-  -t, --toc              print the table of contents, one heading per line,
+  -T, --toc              print the table of contents, one heading per line,
                          indented by level (feeds straight into -S)
   -S, --section NAME     print only the section whose heading matches NAME,
                          through to the next heading of the same or higher
@@ -43,19 +43,24 @@ Options:
   -s, --search TEXT      print only the innermost sections whose text contains
                          TEXT, headings and code blocks included
   -Q, --select SEL       query code AST by CSS selector (.func, .class#Name, .func:async, ...)
-  -r, --raw              read FILE as data, not prose: SELECT * FROM FILE
-                         rendered as a table (parquet, csv, json, xlsx, ...)
-  -z, --summary          summarize data columns via DuckDB SUMMARIZE; implies -r
+  -d, --data             read FILE as data, not prose: SELECT * FROM FILE
+                         (parquet, csv, json, xlsx, ...). Piped, it emits JSONL
+  -D, --document         read FILE as prose even if it could be read as data
+  -z, --summary          summarize data columns via DuckDB SUMMARIZE; implies -d
   -Z, --profile          smart column profile with sparklines & category frequencies
-  -o, --output FMT       write the document as ansi (default), text, md, html,
+  -i, --input FILE       the input file; the same as giving FILE positionally.
+                         Giving both is an error
+  -o, --output FILE      write to FILE instead of stdout (escapes are stripped).
+                         NOTE: -o names a FILE, not a format -- use -t for that
+  -t, --to FMT           write the document as ansi (default), text, md, html,
                          pandoc (a Pandoc AST) or blocks (duck_blocks JSON).
                          Applies after -S/-s, so a section converts on its own.
-                         Not for -r, -z, -Z, -t, or an archive's corpus listings
-  -f, --format FMT       treat the input as FMT rather than guessing from the
-                         filename: md, html, pdf, rst, docx, man, 1, tex, zim, ...
-                         Under -r, FMT names a DuckDB reader: csv, parquet, json, pdf, yaml, ...
-  -w, --where EXPR       SQL WHERE clause for data modes (-r, -z, -Z); implies -r
-  -n, --limit N          cap the rows any listing prints (-r, -z, -Z, and .zim -t/-s)
+                         Not for -d, -z, -Z, -T, or an archive's corpus listings
+  -f, --from FMT         treat the input as FMT rather than guessing from the
+                         filename: md, html, pdf, rst, docx, tex, zim, ...
+                         Under -d, FMT names a DuckDB reader: csv, parquet, json, pdf, yaml, ...
+  -w, --where EXPR       SQL WHERE clause for data modes (-d, -z, -Z); implies -d
+  -n, --limit N          cap the rows any listing prints (-d, -z, -Z, and .zim -T/-s)
       --color WHEN       auto (default), always, never. auto means colour when
                          stdout is a terminal, or when -p is paging through
                          less -R. $NO_COLOR disables it
@@ -76,9 +81,10 @@ Formats:
                        via pandoc(1)
   .man .1 ... .9       man page source, via pandoc(1)
   .zim  zim://...      zim extension (see ZIM archives below)
-  -r bypasses this table entirely and hands FILE to DuckDB, so the format is
-  whatever DuckDB's replacement scan makes of the extension. Under -r a .json
+  -d bypasses this table entirely and hands FILE to DuckDB, so the format is
+  whatever DuckDB's replacement scan makes of the extension. Under -d a .json
   file is data rather than a Pandoc AST. LOAD anything extra via DUCKEYE_EXTS.
+  -r is a deprecated alias for -d and warns.
 
 Raw mode prints through DuckDB's own box renderer rather than duck_blocks: it
 streams (a million rows in about a second, where the ANSI block renderer stalls
@@ -193,6 +199,7 @@ q() { printf '%s' "${1//\'/\'\'}"; }
 [[ $(basename "$0") == dep && -t 1 ]] && do_page=1 || do_page=
 [[ $(basename "$0") == der ]] && mode=raw || mode=full
 arg= where= limit= fmt= color=auto out_fmt=ansi pages=
+in_file= out_file=
 
 # Wrap an expression yielding LIST(duck_block) in whichever serializer -o asked for.
 # These are the duck_blocks pipeline's own writers, which is the whole point: they run
@@ -265,7 +272,7 @@ duckdb_color_mode() {
   echo "-dark-mode"
 }
 
-setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -t, -S, -s, -r, -z, -Z' 64; mode=$1; }
+setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -T, -S, -s, -d, -z, -Z' 64; mode=$1; }
 
 # duck_blocks_to_pandoc_ast stamps pandoc-api-version [1,20], which pandoc 3.x refuses
 # outright (teaguesterling/duckdb_duck_block_utils#22). The encoding itself is fine, so
@@ -327,16 +334,37 @@ while (( $# )); do
     -h|--help)     usage; exit 0 ;;
     --init)        init; exit $? ;;
     --update)      update; exit $? ;;
-    -t|--toc)      setmode toc ;;
-    -r|--raw)      setmode raw ;;
+    -T|--toc)      setmode toc ;;
+    # -r is a deprecated alias for -d. Its old spelling is unambiguous, so failing it
+    # would cost users for no safety gain -- unlike -o, whose old spelling stays valid
+    # under the new meaning and silently writes a file.
+    -r|--raw)      printf 'duckeye: -r is deprecated; use -d (interpret as data)\n' >&2
+                   setmode raw ;;
+    -d|--data)     setmode raw ;;
+    # -D resets to document interpretation, so `-d -D` is a document. Without this
+    # it would parse and do nothing, since document is already the default -- a flag
+    # that is accepted and inert is worse than an unknown-option error.
+    -D|--document) mode=full ;;
     -z|--summary|--summarize) setmode summary ;;
     -Z|--profile|--smart-summary) setmode profile ;;
     -S|--section)  [[ $# -ge 2 ]] || die '-S needs a section name' 64; setmode section; arg=$2; shift ;;
     -s|--search)   [[ $# -ge 2 ]] || die '-s needs search text' 64; setmode search; arg=$2; shift ;;
     -Q|--select)   [[ $# -ge 2 ]] || die '-Q/--select needs a CSS selector' 64; selector=$2; shift ;;
     --select=*)    selector=${1#--select=} ;;
-    -f|--format)   [[ $# -ge 2 ]] || die '-f needs a format' 64; fmt=${2,,}; shift ;;
-    -o|--output)   [[ $# -ge 2 ]] || die '-o needs an output format' 64; out_fmt=${2,,}; shift ;;
+    -f|--from|--format) [[ $# -ge 2 ]] || die '-f needs an input format' 64; fmt=${2,,}; shift ;;
+    -t|--to)       [[ $# -ge 2 ]] || die '-t needs an output format' 64; out_fmt=${2,,}; shift ;;
+    -i|--input)    [[ $# -ge 2 ]] || die '-i needs a FILE' 64; in_file=$2; shift ;;
+    # -o is the output FILE, per pandoc, gcc, curl and ld. Under duckeye's previous
+    # meaning it named a FORMAT, and that spelling stays syntactically valid here --
+    # `-o html doc.md` would quietly create a file called "html". Refusing a
+    # format-shaped value converts the worst migration break into a teaching error;
+    # ./html escapes the guard for anyone who genuinely means it.
+    -o|--output)   [[ $# -ge 2 ]] || die '-o needs an output FILE' 64
+                   case ${2,,} in
+                     ansi|text|md|markdown|html|pandoc|blocks|box|csv|tsv|tabs|json|jsonl|jsonlines|latex|line|list|ascii|column|insert|quote|duckbox)
+                       die "-o now names an output FILE, not a format; did you mean -t $2 ?" 64 ;;
+                   esac
+                   out_file=$2; shift ;;
     --color)       [[ $# -ge 2 ]] || die '--color needs auto, always or never' 64
                    color=${2,,}; shift ;;
     --color=*)     color=${1#--color=}; color=${color,,} ;;
@@ -380,6 +408,13 @@ fi
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/duckeye.XXXXXX") || die 'cannot create temp directory'
 trap 'rm -rf "$tmp"' EXIT
 
+# Three ways in -- positional, -i, and stdin -- so the precedence is stated rather
+# than left to whichever branch runs first. Giving both is an error, not a silent
+# preference for one of them.
+if [[ -n $in_file ]]; then
+  (( $# )) && die 'give either -i FILE or a positional FILE, not both' 64
+  set -- "$in_file"
+fi
 f=${1:-}
 [[ $# -le 1 ]] || die 'only one FILE at a time' 64
 
@@ -1225,7 +1260,11 @@ fi
 
 # The block renderer always emits SGR, so stripping here is what makes the escapes
 # conditional. Only SGR (m) sequences go, leaving the layout the renderer computed.
-if want_color; then
+# -o FILE bypasses the pager and the colour decision entirely: a file is not a
+# terminal, so escapes are stripped regardless of what want_color says about stdout.
+if [[ -n $out_file ]]; then
+  sed 's/\x1b\[[0-9;]*m//g' "$out" > "$out_file" || die "cannot write $out_file" 1
+elif want_color; then
   "${page[@]}" <"$out"
 else
   sed 's/\x1b\[[0-9;]*m//g' "$out" | "${page[@]}"

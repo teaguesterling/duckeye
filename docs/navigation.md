@@ -9,7 +9,7 @@
 The `-t, --toc` flag parses the document structure and prints its heading hierarchy, indented by level:
 
 ```console
-$ duckeye -t spec.md
+$ duckeye -T spec.md
 Title
   Alpha
     Alpha Child
@@ -88,14 +88,14 @@ $ duckeye -P -5 manual.pdf      # first 5 pages (1-5)
 $ duckeye -P 20- manual.pdf     # page 20 to the end
 
 # Combine with table of contents
-$ duckeye -P 1-5 -t manual.pdf
+$ duckeye -P 1-5 -T manual.pdf
 ```
 
 ---
 
-## 6. Output Format Conversion (`-o`)
+## 6. Output Format Conversion (`-t`)
 
-The `-o, --output FMT` flag serializes the extracted document or section into different formats:
+The `-t, --to FMT` flag serializes the extracted document or section into different formats (`-o` names an output FILE):
 
 * `ansi` (default): Styled terminal rendering with 24-bit color.
 * `text`: Plain text with ANSI escape codes stripped.
@@ -106,10 +106,10 @@ The `-o, --output FMT` flag serializes the extracted document or section into di
 
 ```console
 # Extract section of a Word document as Markdown
-$ duckeye -S "Installation" -o md manual.docx
+$ duckeye -S "Installation" -t md manual.docx
 
 # Convert search results to clean text for piping
-$ duckeye -s "TODO" -o text notes.md | grep -v "^#"
+$ duckeye -s "TODO" -t text notes.md | grep -v "^#"
 ```
 
 ---
@@ -120,12 +120,12 @@ DuckDB natively expands glob patterns, allowing `duckeye` to operate across mult
 
 ```console
 # Outline functions across all Python files in a directory tree
-$ duckeye -t 'src/**/*.py'
+$ duckeye -T 'src/**/*.py'
 
 # Query all Rust functions via Tree-sitter AST
 $ duckeye -Q '.func' 'src/**/*.rs'
 
 # Aggregate and profile data shards in raw mode
-$ duckeye -r 'data/*.parquet'
+$ duckeye -d 'data/*.parquet'
 $ duckeye -Z 'data/*.parquet'
 ```

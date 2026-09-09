@@ -185,10 +185,10 @@ MANYPDF
 echo 'documents'
 ok  'md renders'                 $DUCKEYE "$TMP/doc.md"
 has 'md content'      'alpha body' $DUCKEYE "$TMP/doc.md"
-has 'md toc nests'    '  Alpha'   $DUCKEYE -t "$TMP/doc.md"
-has 'md toc depth'    '    Alpha Child' $DUCKEYE -t "$TMP/doc.md"
+has 'md toc nests'    '  Alpha'   $DUCKEYE -T "$TMP/doc.md"
+has 'md toc depth'    '    Alpha Child' $DUCKEYE -T "$TMP/doc.md"
 has 'html renders'    'html body text' $DUCKEYE "$TMP/doc.html"
-ok  'html toc'                   $DUCKEYE -t "$TMP/doc.html"
+ok  'html toc'                   $DUCKEYE -T "$TMP/doc.html"
 
 echo 'sections'
 # a parent section carries its children, and stops before the next same-level heading
@@ -244,46 +244,46 @@ no  'sql injection is inert'              $DUCKEYE -S "x'; DROP TABLE t; --" "$T
 echo 'stdin and -f'
 has 'explicit - reads stdin'   'alpha body' bash -c "$DUCKEYE -S Alpha - <'$TMP/doc.md'"
 has 'bare pipe reads stdin'    'alpha body' bash -c "$DUCKEYE -S Alpha <'$TMP/doc.md'"
-has 'sniffs markdown'          '  Alpha'    bash -c "$DUCKEYE -t - <'$TMP/doc.md'"
-has 'sniffs html'              'Head'       bash -c "$DUCKEYE -t - <'$TMP/doc.html'"
+has 'sniffs markdown'          '  Alpha'    bash -c "$DUCKEYE -T - <'$TMP/doc.md'"
+has 'sniffs html'              'Head'       bash -c "$DUCKEYE -T - <'$TMP/doc.html'"
 has 'sniffs pdf by magic'      'alpha body' bash -c "$DUCKEYE - <'$TMP/doc.pdf'"
 # -f must beat the filename, or it isn't an override
 cp "$TMP/doc.html" "$TMP/liar.md"
-has '-f overrides extension'   'Head'       $DUCKEYE -t -f html "$TMP/liar.md"
+has '-f overrides extension'   'Head'       $DUCKEYE -T -f html "$TMP/liar.md"
 no  '-f needs an argument'                  $DUCKEYE -f
 # stdin has no extension, so a producer that checks the name must still be satisfied
-has 'spooled stdin gets named' '  Alpha'    bash -c "cat '$TMP/doc.md' | $DUCKEYE -t -f md -"
-no  'empty stdin is an error'               bash -c "printf '' | $DUCKEYE -t -"
+has 'spooled stdin gets named' '  Alpha'    bash -c "cat '$TMP/doc.md' | $DUCKEYE -T -f md -"
+no  'empty stdin is an error'               bash -c "printf '' | $DUCKEYE -T -"
 if command -v pandoc >/dev/null && command -v unzip >/dev/null; then
   pandoc "$TMP/doc.md" -o "$TMP/z.docx" 2>/dev/null
-  has 'sniffs docx in a zip'   'Alpha'      bash -c "$DUCKEYE -t - <'$TMP/z.docx'"
+  has 'sniffs docx in a zip'   'Alpha'      bash -c "$DUCKEYE -T - <'$TMP/z.docx'"
 else
   skipping 'zip container sniffing' 'needs pandoc and unzip'
 fi
 
 echo 'output formats'
-has '-o text drops escapes'  'alpha body'   $DUCKEYE -o text -S Alpha "$TMP/doc.md"
-has '-o html is real html'   '<h2'          $DUCKEYE -o html -S Alpha "$TMP/doc.md"
-has '-o blocks is duck_blocks json' '"element_type":"heading"' \
-                                            $DUCKEYE -o blocks -S Alpha "$TMP/doc.md"
+has '-t text drops escapes'  'alpha body'   $DUCKEYE -t text -S Alpha "$TMP/doc.md"
+has '-t html is real html'   '<h2'          $DUCKEYE -t html -S Alpha "$TMP/doc.md"
+has '-t blocks is duck_blocks json' '"element_type":"heading"' \
+                                            $DUCKEYE -t blocks -S Alpha "$TMP/doc.md"
 # the AST must carry the local pandoc's api version, not the extension's hardcoded one
-has '-o pandoc stamps local api version' '"pandoc-api-version"' \
-                                            $DUCKEYE -o pandoc -S Alpha "$TMP/doc.md"
+has '-t pandoc stamps local api version' '"pandoc-api-version"' \
+                                            $DUCKEYE -t pandoc -S Alpha "$TMP/doc.md"
 if command -v pandoc >/dev/null; then
-  has '-o pandoc is readable by pandoc' 'Alpha' \
-      bash -c "$DUCKEYE -o pandoc -S Alpha '$TMP/doc.md' | pandoc -f json -t markdown"
-  has '-o md converts a section'  '## Alpha' $DUCKEYE -o md -S Alpha "$TMP/doc.md"
+  has '-t pandoc is readable by pandoc' 'Alpha' \
+      bash -c "$DUCKEYE -t pandoc -S Alpha '$TMP/doc.md' | pandoc -f json -t markdown"
+  has '-t md converts a section'  '## Alpha' $DUCKEYE -t md -S Alpha "$TMP/doc.md"
   # -o composes with -S, which is the point: extract, then convert
-  has '-o md keeps inline code'   '`'        bash -c "printf '# T\n\n## S\n\nrun \`x\` now\n' | $DUCKEYE -o md -S S -"
+  has '-t md keeps inline code'   '`'        bash -c "printf '# T\n\n## S\n\nrun \`x\` now\n' | $DUCKEYE -t md -S S -"
 else
-  skipping '-o md' 'pandoc not installed'
+  skipping '-t md' 'pandoc not installed'
 fi
-no  '-o rejects -r'                         $DUCKEYE -o md -r "$TMP/d.parquet"
-no  '-o rejects -t'                         $DUCKEYE -o md -t "$TMP/doc.md"
-no  '-o rejects an unknown format'          $DUCKEYE -o bogus "$TMP/doc.md"
+no  '-o rejects -r'                         $DUCKEYE -t md -r "$TMP/d.parquet"
+no  '-o rejects -t'                         $DUCKEYE -t md -t "$TMP/doc.md"
+no  '-t rejects an unknown format'          $DUCKEYE -t bogus "$TMP/doc.md"
 # -o composes with -s just as it does with -S
-has '-o text with -s'    'widget'            $DUCKEYE -o text -s widget "$TMP/doc.md"
-has '-o html with -s'    '<h'                $DUCKEYE -o html -s widget "$TMP/doc.md"
+has '-t text with -s'    'widget'            $DUCKEYE -t text -s widget "$TMP/doc.md"
+has '-t html with -s'    '<h'                $DUCKEYE -t html -s widget "$TMP/doc.md"
 
 echo 'colour'
 esc=$(printf '\033')
@@ -379,11 +379,11 @@ echo 'pandoc formats'
 if command -v pandoc >/dev/null; then
   printf 'Alpha\n=====\n\nintro text\n\nBeta\n----\n\nbeta body with widget\n' >"$TMP/t.rst"
   has 'rst renders'  'intro text'  $DUCKEYE "$TMP/t.rst"
-  has 'rst toc'      'Beta'        $DUCKEYE -t "$TMP/t.rst"
+  has 'rst toc'      'Beta'        $DUCKEYE -T "$TMP/t.rst"
   has 'rst section'  'beta body'   $DUCKEYE -S Beta "$TMP/t.rst"
   has 'rst search'   'beta body'   $DUCKEYE -s widget "$TMP/t.rst"
   pandoc "$TMP/t.rst" -t json >"$TMP/t.json" 2>/dev/null
-  has 'pandoc ast json' 'Beta'     $DUCKEYE -t "$TMP/t.json"
+  has 'pandoc ast json' 'Beta'     $DUCKEYE -T "$TMP/t.json"
 
   # One document carrying every construct that was silently mishandled, read twice:
   # natively as markdown, and through pandoc as rst. Same content, two readers.
@@ -436,8 +436,8 @@ RICH
   has   'pandoc blockquote is prose'   'quoted line here' $DUCKEYE "$TMP/rich.rst"
   # the negative half: prose present is not the same as AST absent
   no_leak 'pandoc blockquote leaks ast' '{"t":"Para"'    $DUCKEYE "$TMP/rich.rst"
-  no_leak 'to_text leaks ast tokens'    '{"t":"Str"'     $DUCKEYE -o text "$TMP/rich.rst"
-  has   'to_text yields prose'          'alpha item'     $DUCKEYE -o text "$TMP/rich.rst"
+  no_leak 'to_text leaks ast tokens'    '{"t":"Str"'     $DUCKEYE -t text "$TMP/rich.rst"
+  has   'to_text yields prose'          'alpha item'     $DUCKEYE -t text "$TMP/rich.rst"
 
   # DefinitionList and Figure were dropped outright on read. They now survive --
   # asserted on CONTENT rather than on layout, which is the property. The two paths
@@ -448,11 +448,11 @@ RICH
   has 'pandoc deflist definition' 'First definition'  $DUCKEYE "$TMP/rich.rst"
   has 'pandoc figure caption'     'A caption'         $DUCKEYE "$TMP/rich.rst"
 
-  # -o md and -o pandoc route through duck_blocks_to_pandoc_ast. A table with no
+  # -t md and -t pandoc route through duck_blocks_to_pandoc_ast. A table with no
   # preserved pandoc_ast tuple -- i.e. every table a native reader produces -- was
   # exported as a JSON object where pandoc requires a list, and pandoc refused the
   # whole document.
-  has 'md export survives a table' 'kumquat' $DUCKEYE -o md "$TMP/rich.md"
+  has 'md export survives a table' 'kumquat' $DUCKEYE -t md "$TMP/rich.md"
 
   # webbed's HTML reader emitted one extra top-level list PER NESTING LEVEL with
   # cumulatively fused text: at depth 3, ["L1L2L3"] ["L2L3"] ["L3"], so the deepest
@@ -471,7 +471,7 @@ RICH
   # fails quietly (warns, falls back to markdown, exits 0), so duckeye names the
   # reader explicitly. Regression guard for that.
   printf '= Guide =\n\nintro\n\n== Usage ==\n\nusage body\n' >"$TMP/w.mediawiki"
-  has 'mediawiki reader named' 'Usage'      $DUCKEYE -t "$TMP/w.mediawiki"
+  has 'mediawiki reader named' 'Usage'      $DUCKEYE -T "$TMP/w.mediawiki"
   has 'mediawiki section'      'usage body' $DUCKEYE -S Usage "$TMP/w.mediawiki"
 
   # docx/epub/odt — generated from the markdown fixture
@@ -480,16 +480,16 @@ RICH
   pandoc "$TMP/doc.md" -o "$TMP/doc.odt"  2>/dev/null
 
   has 'docx renders'    'alpha body'    $DUCKEYE "$TMP/doc.docx"
-  has 'docx toc'        'Alpha'         $DUCKEYE -t "$TMP/doc.docx"
+  has 'docx toc'        'Alpha'         $DUCKEYE -T "$TMP/doc.docx"
   has 'docx section'    'child body'    $DUCKEYE -S Alpha "$TMP/doc.docx"
   has 'docx search'     'widget'        $DUCKEYE -s widget "$TMP/doc.docx"
 
   has 'epub renders'    'alpha body'    $DUCKEYE "$TMP/doc.epub"
-  has 'epub toc'        'Alpha'         $DUCKEYE -t "$TMP/doc.epub"
+  has 'epub toc'        'Alpha'         $DUCKEYE -T "$TMP/doc.epub"
   has 'epub section'    'beta body'     $DUCKEYE -S Beta "$TMP/doc.epub"
 
   has 'odt renders'     'alpha body'    $DUCKEYE "$TMP/doc.odt"
-  has 'odt toc'         'Alpha'         $DUCKEYE -t "$TMP/doc.odt"
+  has 'odt toc'         'Alpha'         $DUCKEYE -T "$TMP/doc.odt"
 
   # LaTeX
   cat >"$TMP/doc.tex" <<'LATEX'
@@ -504,7 +504,7 @@ beta body
 \end{document}
 LATEX
   has 'tex renders'     'alpha body'    $DUCKEYE "$TMP/doc.tex"
-  has 'tex toc'         'Alpha'         $DUCKEYE -t "$TMP/doc.tex"
+  has 'tex toc'         'Alpha'         $DUCKEYE -T "$TMP/doc.tex"
   has 'tex section'     'child body'    $DUCKEYE -S Alpha "$TMP/doc.tex"
 
   # Org-mode
@@ -522,21 +522,21 @@ child body with widget
 beta body
 ORG
   has 'org renders'     'alpha body'    $DUCKEYE "$TMP/doc.org"
-  has 'org toc'         'Alpha'         $DUCKEYE -t "$TMP/doc.org"
+  has 'org toc'         'Alpha'         $DUCKEYE -T "$TMP/doc.org"
   has 'org section'     'beta body'     $DUCKEYE -S Beta "$TMP/doc.org"
 
   # Jupyter notebook
   pandoc "$TMP/doc.md" -o "$TMP/doc.ipynb" 2>/dev/null
   has 'ipynb renders'   'alpha body'    $DUCKEYE "$TMP/doc.ipynb"
-  has 'ipynb toc'       'Alpha'         $DUCKEYE -t "$TMP/doc.ipynb"
+  has 'ipynb toc'       'Alpha'         $DUCKEYE -T "$TMP/doc.ipynb"
 
   # man page source, both as .man and as a numbered section
   if [[ -r /usr/share/man/man1/ls.1.gz ]]; then
     zcat /usr/share/man/man1/ls.1.gz >"$TMP/ls.1" 2>/dev/null
     cp "$TMP/ls.1" "$TMP/ls.man"
-    has 'man .1 outline'  'SYNOPSIS'   $DUCKEYE -t "$TMP/ls.1"
+    has 'man .1 outline'  'SYNOPSIS'   $DUCKEYE -T "$TMP/ls.1"
     has 'man .1 section'  'ls [OPTION' $DUCKEYE -S SYNOPSIS "$TMP/ls.1"
-    has 'man .man outline' 'SYNOPSIS'  $DUCKEYE -t "$TMP/ls.man"
+    has 'man .man outline' 'SYNOPSIS'  $DUCKEYE -T "$TMP/ls.man"
   else
     skipping 'man pages' 'no /usr/share/man/man1/ls.1.gz'
   fi
@@ -564,16 +564,16 @@ has     'pdf page marker without -P'     'page 2' $DUCKEYE "$TMP/doc.pdf"
 # outside the range are never read at all
 no_leak 'pdf page range excludes others' 'First PDF Page' $DUCKEYE -P 2 "$TMP/doc.pdf"
 has 'pdf raw'               'First PDF Page'   $DUCKEYE -r "$TMP/doc.pdf"
-has 'pdf -o text'           'alpha body'       $DUCKEYE -o text "$TMP/doc.pdf"
+has 'pdf -t text'           'alpha body'       $DUCKEYE -t text "$TMP/doc.pdf"
 no  'pdf invalid page range'                   $DUCKEYE -P abc "$TMP/doc.pdf"
 
 # Many pages, run repeatedly: the failure this guards was a RATE, not a verdict.
 # Rendering 40 pages aborted 3 times in 5 at v0.17.0 because each page is parsed
 # separately and cmark's global registration is not thread-safe. One pass would
 # have passed more often than not.
-ok  'pdf many pages renders'   $DUCKEYE -o text "$TMP/many.pdf"
-has 'pdf many pages last page' 'kumquat40' $DUCKEYE -o text "$TMP/many.pdf"
-f=0; for _ in 1 2 3 4 5; do $DUCKEYE -o text "$TMP/many.pdf" >/dev/null 2>&1 || f=$((f+1)); done
+ok  'pdf many pages renders'   $DUCKEYE -t text "$TMP/many.pdf"
+has 'pdf many pages last page' 'kumquat40' $DUCKEYE -t text "$TMP/many.pdf"
+f=0; for _ in 1 2 3 4 5; do $DUCKEYE -t text "$TMP/many.pdf" >/dev/null 2>&1 || f=$((f+1)); done
 if (( f == 0 )); then pass=$((pass+1)); echo '  ok   pdf many pages is stable over 5 runs'
 else fail=$((fail+1)); printf '  FAIL %s (%d/5 failed)\n' 'pdf many pages is stable over 5 runs' "$f"; fi
 
@@ -587,7 +587,7 @@ class Service:
         pass
 PY
 has 'python renders'   'Service'        $DUCKEYE "$TMP/test_code.py"
-has 'python toc'       'execute'        $DUCKEYE -t "$TMP/test_code.py"
+has 'python toc'       'execute'        $DUCKEYE -T "$TMP/test_code.py"
 
 # DuckDB's .mode jsonlines prints an EXTENSION-DEFINED type's label UNQUOTED at the top
 # level, so sitting_duck's SEMANTIC_TYPE made every AST row invalid JSON -- 6425 of 6425
@@ -619,7 +619,7 @@ no_leak 'data modes keep stderr clean' 'line ' \
     bash -c "$DUCKEYE -r '$TMP/d.parquet' 2>&1 >/dev/null"
 has 'python section'   'return True'    $DUCKEYE -S execute "$TMP/test_code.py"
 has 'python search'    'execute'        $DUCKEYE -s task "$TMP/test_code.py"
-has 'python -o md'     'Service'        $DUCKEYE -o md "$TMP/test_code.py"
+has 'python -t md'     'Service'        $DUCKEYE -t md "$TMP/test_code.py"
 
 cat >"$TMP/test_code.rs" <<'RS'
 pub struct Worker {
@@ -633,25 +633,25 @@ impl Worker {
 }
 RS
 has 'rust renders'     'Worker'         $DUCKEYE "$TMP/test_code.rs"
-has 'rust toc'         'process'        $DUCKEYE -t "$TMP/test_code.rs"
+has 'rust toc'         'process'        $DUCKEYE -T "$TMP/test_code.rs"
 has 'rust section'     'true'           $DUCKEYE -S process "$TMP/test_code.rs"
-has 'shebang sniffing' 'Worker'         bash -c "printf '#!/usr/bin/env python3\nclass Worker:\n    pass\n' | $DUCKEYE -t -"
+has 'shebang sniffing' 'Worker'         bash -c "printf '#!/usr/bin/env python3\nclass Worker:\n    pass\n' | $DUCKEYE -T -"
 has 'python raw AST with peek' 'def execute' $DUCKEYE -r -w "name = 'execute'" "$TMP/test_code.py"
 has 'python -Q selector'       'execute'        $DUCKEYE -Q '.func#execute' "$TMP/test_code.py"
-has 'python -Q -o md'          'execute'        $DUCKEYE -Q '.func#execute' -o md "$TMP/test_code.py"
+has 'python -Q -t md'          'execute'        $DUCKEYE -Q '.func#execute' -t md "$TMP/test_code.py"
 has 'python raw -Q selector'   'function_definition' $DUCKEYE -r -Q '.func#execute' "$TMP/test_code.py"
-has 'script -f ast -t'         'usage()'        $DUCKEYE -f ast -t "$PWD/duckeye"
-has 'script bare -t'           'usage()'        $DUCKEYE -t "$PWD/duckeye"
+has 'script -f ast -T'         'usage()'        $DUCKEYE -f ast -T "$PWD/duckeye"
+has 'script bare -t'           'usage()'        $DUCKEYE -T "$PWD/duckeye"
 has 'script -S section'        'die()'          $DUCKEYE -S die "$PWD/duckeye"
-has 'code glob toc'            'execute'        $DUCKEYE -t "$TMP/*.py"
+has 'code glob toc'            'execute'        $DUCKEYE -T "$TMP/*.py"
 has 'code glob -Q'             'execute'        $DUCKEYE -Q '.func#execute' "$TMP/*.py"
-has 'code glob -f ast'         'execute'        $DUCKEYE -f ast -t "$TMP/test_code.*"
+has 'code glob -f ast'         'execute'        $DUCKEYE -f ast -T "$TMP/test_code.*"
 
 echo 'zim'
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   Z=$DUCKEYE_TEST_ZIM
   ok  'zim info'                    $DUCKEYE "$Z"
-  ok  'zim index'                   $DUCKEYE -t -n 3 "$Z"
+  ok  'zim index'                   $DUCKEYE -T -n 3 "$Z"
   ok  'zim search'                  $DUCKEYE -s the -n 3 "$Z"
   no  'zim missing article exits 1' $DUCKEYE -S Zzzqqqxyz "$Z"
   # A `no` assertion passes on ANY non-zero exit, so it cannot tell "no such
@@ -662,9 +662,9 @@ if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   # The positive case is what discriminates.
   if [[ -n ${DUCKEYE_TEST_ZIM_TITLE:-} ]]; then
     has 'zim -S opens an article' "$DUCKEYE_TEST_ZIM_TITLE" \
-        $DUCKEYE -S "$DUCKEYE_TEST_ZIM_TITLE" -o text "$Z"
+        $DUCKEYE -S "$DUCKEYE_TEST_ZIM_TITLE" -t text "$Z"
     # and returns the BODY, not just the matched title
-    n=$($DUCKEYE -S "$DUCKEYE_TEST_ZIM_TITLE" -o text "$Z" 2>/dev/null | wc -c)
+    n=$($DUCKEYE -S "$DUCKEYE_TEST_ZIM_TITLE" -t text "$Z" 2>/dev/null | wc -c)
     if (( n > 500 )); then pass=$((pass+1)); printf '  ok   %s (%d chars)\n' 'zim -S returns the body' "$n"
     else fail=$((fail+1)); printf '  FAIL %s (only %d chars)\n' 'zim -S returns the body' "$n"; fi
   else
@@ -683,9 +683,9 @@ if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   # since not every archive holds both kinds.
   if [[ -n ${DUCKEYE_TEST_ZIM_HTML:-} ]]; then
     has 'zim:// html entry renders'  "$DUCKEYE_TEST_ZIM_HTML_TEXT" \
-        $DUCKEYE -o text "zim://$Z/$DUCKEYE_TEST_ZIM_HTML"
+        $DUCKEYE -t text "zim://$Z/$DUCKEYE_TEST_ZIM_HTML"
     # the poppler leak is what regression looks like, so assert it is absent
-    if $DUCKEYE -o text "zim://$Z/$DUCKEYE_TEST_ZIM_HTML" 2>&1 | grep -q 'poppler'; then
+    if $DUCKEYE -t text "zim://$Z/$DUCKEYE_TEST_ZIM_HTML" 2>&1 | grep -q 'poppler'; then
       fail=$((fail+1)); echo '  FAIL zim:// html entry does not reach poppler'
     else pass=$((pass+1)); echo '  ok   zim:// html entry does not reach poppler'; fi
   else
@@ -696,7 +696,7 @@ if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   # 'unknown type' and render "(no renderer for unknown type: NAME)" on stdout with
   # a success exit -- indistinguishable, to anything piping duckeye, from a real
   # document that simply had no renderer.
-  no 'zim:// missing entry exits nonzero' $DUCKEYE -o text "zim://$Z/no_such_entry_xyzzy"
+  no 'zim:// missing entry exits nonzero' $DUCKEYE -t text "zim://$Z/no_such_entry_xyzzy"
 
   # zim:// and git:// are consumed as an ADDRESSING INTERFACE by at least one other
   # system (a citation-locator grammar that parses both, splitting a #fragment on
@@ -709,21 +709,51 @@ if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   # like a "C#" article would ever catch a regression here.
   # 2>&1 because the entry name is echoed in the ERROR, which has() does not see.
   has 'zim:// entry keeps a #'   'not found: C#Sharp' \
-      bash -c "$DUCKEYE -o text 'zim://$Z/C#Sharp' 2>&1"
+      bash -c "$DUCKEYE -t text 'zim://$Z/C#Sharp' 2>&1"
   has 'zim:// entry keeps two #' 'not found: C#Sharp#overview' \
-      bash -c "$DUCKEYE -o text 'zim://$Z/C#Sharp#overview' 2>&1"
-  if $DUCKEYE -o text "zim://$Z/no_such_entry_xyzzy" 2>/dev/null | grep -q 'no renderer'; then
+      bash -c "$DUCKEYE -t text 'zim://$Z/C#Sharp#overview' 2>&1"
+  if $DUCKEYE -t text "zim://$Z/no_such_entry_xyzzy" 2>/dev/null | grep -q 'no renderer'; then
     fail=$((fail+1)); echo '  FAIL zim:// missing entry prints nothing to stdout'
   else pass=$((pass+1)); echo '  ok   zim:// missing entry prints nothing to stdout'; fi
 
   if [[ -n ${DUCKEYE_TEST_ZIM_PDF:-} ]]; then
-    ok  'zim:// pdf entry renders'   $DUCKEYE -o text "zim://$Z/$DUCKEYE_TEST_ZIM_PDF"
+    ok  'zim:// pdf entry renders'   $DUCKEYE -t text "zim://$Z/$DUCKEYE_TEST_ZIM_PDF"
   else
     skipping 'zim:// pdf entry' 'set DUCKEYE_TEST_ZIM_PDF'
   fi
 else
   skipping 'zim' 'set DUCKEYE_TEST_ZIM to an archive'
 fi
+
+
+# ---- v1 flag surface (spec: docs/superpowers/specs/2026-09-08-cli-flag-redesign-design.md)
+# -f from-format / -t to-format / -o output FILE, per pandoc and every other tool.
+# -T is the table of contents, -d/-D choose data vs document, -i is an input file.
+echo 'v1 flags'
+ok  '-o writes a FILE'            bash -c "$DUCKEYE -o '$TMP/out.md' -t md '$TMP/doc.md' && [[ -s '$TMP/out.md' ]]"
+# The dangerous migration: -o html used to mean "render HTML"; under v1 it would
+# silently create a file named 'html'. The guard turns that into a teaching error.
+no  '-o refuses a format name'    $DUCKEYE -o html "$TMP/doc.md"
+has '-o names -t in the error'    '-t html' \
+    bash -c "$DUCKEYE -o html '$TMP/doc.md' 2>&1 >/dev/null"
+no  '-o html leaves no stray file' bash -c "$DUCKEYE -o html '$TMP/doc.md' >/dev/null 2>&1; [[ -e html ]]"
+has '-t md converts'              '## Alpha'      $DUCKEYE -t md -S Alpha "$TMP/doc.md"
+has '-t html converts'            '<h2'           $DUCKEYE -t html -S Alpha "$TMP/doc.md"
+has '-T is the toc'               'Alpha'         $DUCKEYE -T "$TMP/doc.md"
+has '-d is data mode'             'name_1'        $DUCKEYE -d "$TMP/d.parquet"
+# -D must UNDO a prior -d, not merely restate the default. The first version of this
+# asserted `-D -T doc.md`, which passes whether or not -D does anything at all.
+has '-D undoes an earlier -d'     '▍ Title'   bash -c "$DUCKEYE -d -D '$TMP/doc.md' | head -1"
+has '-D undoes -d (content)'      'Alpha'         bash -c "$DUCKEYE -d -D '$TMP/doc.md'"
+no  '-d alone on md is not prose' bash -c "$DUCKEYE -d '$TMP/doc.md' 2>/dev/null | grep -q Alpha"
+has '-i reads an input file'      'Alpha'         $DUCKEYE -i "$TMP/doc.md" -T
+no  '-i plus positional errors'   $DUCKEYE -i "$TMP/doc.md" "$TMP/doc.md"
+# -r stays as a deprecated alias: its old spelling is unambiguous, so failing it
+# would cost users for no safety gain.
+has '-r still works'              'name_1'        $DUCKEYE -r "$TMP/d.parquet"
+has '-r warns on stderr'          'deprecated' \
+    bash -c "$DUCKEYE -r '$TMP/d.parquet' 2>&1 >/dev/null"
+no_leak '-r warning stays off stdout' 'deprecated' $DUCKEYE -r "$TMP/d.parquet"
 
 echo 'cli'
 ok  'help'                       $DUCKEYE -h
@@ -745,7 +775,7 @@ no  'unknown option'             $DUCKEYE -z "$TMP/doc.md"
 no  'unsupported extension'      $DUCKEYE "$TMP/nope.xyz"
 no  'unreadable file'            $DUCKEYE /nope/nope.md
 no  'no arguments'               $DUCKEYE
-ok  'toc pipes into section'     bash -c "$DUCKEYE -t '$TMP/doc.md' | while read -r l; do
+ok  'toc pipes into section'     bash -c "$DUCKEYE -T '$TMP/doc.md' | while read -r l; do
        t=\${l#\"\${l%%[![:space:]]*}\"}; $DUCKEYE -S \"\$t\" '$TMP/doc.md' >/dev/null || exit 1; done"
 ok  'parquet defaults to raw'    $DUCKEYE "$TMP/d.parquet"
 ok  'csv defaults to raw'        $DUCKEYE "$TMP/d.csv"
@@ -754,13 +784,13 @@ has 'json data table output'     'item_1' $DUCKEYE "$TMP/data.json"
 ln -sf "$(readlink -f "$DUCKEYE")" "$TMP/de"
 ln -sf "$(readlink -f "$DUCKEYE")" "$TMP/dep"
 ln -sf "$(readlink -f "$DUCKEYE")" "$TMP/der"
-ok  'de alias works'             "$TMP/de" -t "$TMP/doc.md"
-ok  'dep alias works'            "$TMP/dep" -t "$TMP/doc.md"
+ok  'de alias works'             "$TMP/de" -T "$TMP/doc.md"
+ok  'dep alias works'            "$TMP/dep" -T "$TMP/doc.md"
 ok  'der alias works'            "$TMP/der" "$TMP/test_code.py"
 has 'der raw output'             'function_definition' "$TMP/der" "$TMP/test_code.py"
-ok  'git uri toc'                $DUCKEYE -t 'git://README.md@HEAD'
+ok  'git uri toc'                $DUCKEYE -T 'git://README.md@HEAD'
 has 'git uri section'            'Install' $DUCKEYE -S Install 'git://README.md@HEAD'
-ok  'git uri code ast toc'       $DUCKEYE -t 'git://test.sh@HEAD'
+ok  'git uri code ast toc'       $DUCKEYE -T 'git://test.sh@HEAD'
 
 printf '\n%d passed, %d failed, %d skipped' "$pass" "$fail" "$skip"
 if (( known )); then

@@ -1,21 +1,21 @@
 # Data Exploration & Profiling
 
-`duckeye` turns DuckDB's engine into a CLI data explorer with three dedicated modes: **Raw Tables (`-r`)**, **Native Summaries (`-z`)**, and **Smart Profiling (`-Z`)**.
+`duckeye` turns DuckDB's engine into a CLI data explorer with three dedicated modes: **Data Tables (`-d`)**, **Native Summaries (`-z`)**, and **Smart Profiling (`-Z`)**.
 
 ---
 
-## 1. Raw Tabular Mode (`-r`)
+## 1. Data Table Mode (`-d`)
 
 `-r, --raw` bypasses prose block rendering and displays data files using DuckDB's box renderer:
 
 ```console
-$ duckeye -r data.parquet
-$ duckeye -r customers.csv
-$ duckeye -r config.yaml
-$ duckeye -r pyproject.toml
-$ duckeye -r accounts.xlsx
-$ duckeye -r archive.zip
-$ duckeye -r .git
+$ duckeye -d data.parquet
+$ duckeye -d customers.csv
+$ duckeye -d config.yaml
+$ duckeye -d pyproject.toml
+$ duckeye -d accounts.xlsx
+$ duckeye -d archive.zip
+$ duckeye -d .git
 ```
 
 ### Filtering with `-w` (SQL WHERE)
@@ -29,7 +29,7 @@ $ duckeye -w "category IN ('tools', 'hardware')" catalog.csv
 
 ### Limiting Output (`-n`)
 ```console
-$ duckeye -r -n 10 huge_dataset.parquet
+$ duckeye -d -n 10 huge_dataset.parquet
 ```
 
 ---
@@ -55,7 +55,7 @@ $ duckeye -z products.parquet
 
 `-Z, --profile` provides enhanced column profiling:
 
-* **Numeric Columns**: Computes `min`, `avg`, `max`, and a histogram sparkline via `textplot` (`tp_sparkline()`), which renders a fixed 20 columns. `textplot` is loaded for `-Z` only; `-r` and `-z` draw no sparklines and do not load it.
+* **Numeric Columns**: Computes `min`, `avg`, `max`, and a histogram sparkline via `textplot` (`tp_sparkline()`), which renders a fixed 20 columns. `textplot` is loaded for `-Z` only; `-d` and `-z` draw no sparklines and do not load it.
 
 !!! note "Autoloading is disabled for local sources"
     `-Z` runs with `autoload_known_extensions=false`. DuckDB otherwise autoloads
@@ -103,9 +103,9 @@ $ duckeye -Z -w "category = 'electronics'" products.parquet
 
 ## 4. Terminal Width Adaptation
 
-All tabular modes (`-r`, `-z`, `-Z`) dynamically adapt to the terminal width via `$COLUMNS` or `tput cols`:
+All tabular modes (`-d`, `-z`, `-Z`) dynamically adapt to the terminal width via `$COLUMNS` or `tput cols`:
 
-* **Raw Mode (`-r`) & Summaries (`-z`)**: When rendering to a terminal or through a pager (`-p`), DuckDB's modern `duckbox` renderer constrains table width to `$COLUMNS` (via `.maxwidth $COLUMNS`), cleanly truncating wide columns with ellipses (`…`) and showing column count summaries rather than wrapping text across rows. When piped to standard Unix tools (e.g. `duckeye -r data.parquet | grep ...`), maximum width is unconstrained (`.maxwidth 0`) to preserve full column data.
+* **Data Mode (`-d`) & Summaries (`-z`)**: When rendering to a terminal or through a pager (`-p`), DuckDB's modern `duckbox` renderer constrains table width to `$COLUMNS` (via `.maxwidth $COLUMNS`), cleanly truncating wide columns with ellipses (`…`) and showing column count summaries rather than wrapping text across rows. When piped to standard Unix tools (e.g. `duckeye -d data.parquet | jq ...`), the box is dropped entirely and rows are emitted as JSONL, one record per line, so downstream tools parse rather than scrape. `-Z` is the exception: its output is textplot histograms, so it keeps the box on every path.
 * **Smart Profiler (`-Z`)**: Dynamically allocates character space for category distributions, sparklines, and sample values:
 
 | Terminal Width | Category Limit | Text Budget | Formatting Behavior |
@@ -117,7 +117,7 @@ All tabular modes (`-r`, `-z`, `-Z`) dynamically adapt to the terminal width via
 You can explicitly test or constrain rendering width by setting the `COLUMNS` environment variable:
 
 ```console
-$ COLUMNS=80 duckeye -r data.parquet
+$ COLUMNS=80 duckeye -d data.parquet
 $ COLUMNS=80 duckeye -Z data.parquet
 $ COLUMNS=140 duckeye -Z data.parquet
 ```

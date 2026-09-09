@@ -742,6 +742,15 @@ fi
 # -f from-format / -t to-format / -o output FILE, per pandoc and every other tool.
 # -T is the table of contents, -d/-D choose data vs document, -i is an input file.
 echo 'v1 flags'
+# The README embeds its own copy of the option list, and copies drift: it documented
+# `-q` for the AST selector (the flag is -Q) and, through the v1 rename, listed -t
+# twice with two different meanings. Neither was caught, because nothing compared the
+# two. This asserts the flag SETS are identical -- not the wording, which is allowed
+# to differ.
+ok  'README options match --help' bash -c '
+  a=$(sed -n "/^-p, --page/,/^-h, --help/p" README.md | grep -oE "^-[a-zA-Z], --[a-z]+" | tr -d " " | sort -u)
+  b=$('"$DUCKEYE"' -h 2>&1 | grep -oE "^ +-[a-zA-Z], --[a-z]+" | tr -d " " | sort -u)
+  [[ -n $a && $a == "$b" ]]'
 ok  '-o writes a FILE'            bash -c "$DUCKEYE -o '$TMP/out.md' -t md '$TMP/doc.md' && [[ -s '$TMP/out.md' ]]"
 # The dangerous migration: -o html used to mean "render HTML"; under v1 it would
 # silently create a file named 'html'. The guard turns that into a teaching error.

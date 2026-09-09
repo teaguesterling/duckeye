@@ -402,26 +402,28 @@ it to `DUCKEYE_EXTS`.
 ```
 -p, --page             page through $DUCKEYE_PAGER (default: less -R)
 -P, --pages RANGE      page or page range for PDFs (e.g. 3, 1-5, 1..5, -10, 5-)
--t, --toc              table of contents / code definition outline
+-T, --toc              table of contents / code definition outline
 -S, --section NAME     one section or function/method/class definition
 -s, --search TEXT      matching sections or AST definitions
--r, --raw              read as data: SELECT * FROM FILE (reads AST on code files)
+-Q, --select SEL       AST selector for code definitions (.func, .class#Name, ...)
+-d, --data             read as data: SELECT * FROM FILE (reads AST on code files)
+-D, --document         read as prose; undoes an earlier -d
 -z, --summary          native column summary (DuckDB SUMMARIZE)
 -Z, --profile          smart column profile with sparklines & category frequencies
--f, --format FMT       treat input as FMT instead of guessing; under data modes,
+-i, --input FILE       input file; same as giving FILE positionally
+-f, --from FMT         treat input as FMT instead of guessing; under data modes,
                        names a DuckDB reader (csv, parquet, json, yaml, toml, xlsx, pdf, lines, zip, git, ast)
 -t, --to FMT           ansi (default), text, md, html, pandoc, blocks
--o, --output FILE      write to FILE instead of stdout
+-o, --output FILE      write to FILE instead of stdout (names a FILE, not a format)
     --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies data mode
--q                     AST selector for code definitions
--n, --limit N          cap rows in any listing (-r, -z, -Z, and .zim -t/-s)
+-n, --limit N          cap rows in any listing (-d, -z, -Z, and .zim -T/-s)
     --init             install the DuckDB extensions
     --update           update DuckDB extensions and duckeye
 -h, --help             full help
 ```
 
-`-t`, `-S`, `-s`, `-d`, `-z` and `-Z` are mutually exclusive.
+`-T`, `-S`, `-s`, `-d`, `-z` and `-Z` are mutually exclusive. `-r` is a deprecated alias for `-d`.
 
 ## Environment
 

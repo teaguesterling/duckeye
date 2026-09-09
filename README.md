@@ -385,7 +385,8 @@ hundreds of thousands of entries with no mimetype at all.
 | `.json` | Pandoc AST |
 | `.zim`, `zim://…` | [`zim`](https://github.com/teaguesterling/duckdb_zim) (handles HTML, markdown, and embedded PDFs) |
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | [`sitting_duck`](https://github.com/teaguesterling/duckdb_sitting_duck) (Tree-sitter AST to duck_blocks) |
-| `.docx` `.odt` `.epub` `.rst` `.org` `.tex` `.ipynb` `.rtf` `.textile` `.mediawiki` | `pandoc(1)` |
+| `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` | `panduck` extension — read natively, no `pandoc(1)` |
+| `.rst` `.ipynb` | `pandoc(1)` — panduck reads both, but drops table-cell markup (`.rst`) and notebook cell structure (`.ipynb`) |
 | `.man`, `.1`–`.9` | `pandoc(1)` — man page source |
 | anything DuckDB reads, under `-d` | parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, … |
 | standard input | sniffed (magic bytes, doctypes, shebangs), or named with `-f` |

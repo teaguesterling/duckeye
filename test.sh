@@ -741,6 +741,28 @@ fi
 # ---- v1 flag surface (spec: docs/superpowers/specs/2026-09-08-cli-flag-redesign-design.md)
 # -f from-format / -t to-format / -o output FILE, per pandoc and every other tool.
 # -T is the table of contents, -d/-D choose data vs document, -i is an input file.
+# panduck reads docx/odt/epub/rst/org/tex/ipynb/rtf/textile/mediawiki natively, so
+# duckeye no longer shells out to pandoc(1) for them. The discriminator is a pandoc
+# STUB that exits 1: `command -v pandoc` still succeeds, so duckeye's guard passes,
+# but any actual invocation fails. If the document still renders, panduck read it.
+mkdir -p "$TMP/nopandoc"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/nopandoc/pandoc"; chmod +x "$TMP/nopandoc/pandoc"
+ok  'docx renders without pandoc(1)' \
+    bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -T '$TMP/z.docx'"
+has 'docx content without pandoc(1)' 'Alpha' \
+    bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE '$TMP/z.docx'"
+# man is the exception: roff has no native reader anywhere in the stack, so it still
+# needs pandoc(1) and must still say so. Guarded on the fixture EXISTING -- the first
+# version of this pointed at $TMP/doc.1, which is never created, so it passed because
+# the file was missing rather than because pandoc was.
+if [[ -r $TMP/ls.1 ]]; then
+  no  'man still needs pandoc(1)' \
+      bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -T '$TMP/ls.1'"
+  has 'man works when pandoc IS present' 'SYNOPSIS' $DUCKEYE -T "$TMP/ls.1"
+else
+  skipping 'man without pandoc' 'no man fixture'
+fi
+
 echo 'v1 flags'
 # The README embeds its own copy of the option list, and copies drift: it documented
 # `-q` for the AST selector (the flag is -Q) and, through the v1 rename, listed -t

@@ -79,9 +79,11 @@ Formats:
   .htm .html           webbed extension
   .pdf                 pdf extension (via pdf_to_markdown or read_pdf)
   .json                Pandoc AST
-  .docx .odt .epub .rst .org .tex .ipynb .rtf .textile .mediawiki
-                       via pandoc(1)
-  .man .1 ... .9       man page source, via pandoc(1)
+  .docx .odt .epub .org .tex .rtf .textile .mediawiki
+                       panduck extension, natively (no pandoc(1) needed)
+  .rst .ipynb          via pandoc(1) — panduck reads both, but loses table-cell
+                       markup (.rst) and notebook cell structure (.ipynb)
+  .man .1 ... .9       man page source, via pandoc(1) — roff has no native reader
   .zim  zim://...      zim extension (see ZIM archives below)
   -d bypasses this table entirely and hands FILE to DuckDB, so the format is
   whatever DuckDB's replacement scan makes of the extension. Under -d a .json
@@ -143,7 +145,7 @@ init() {
   done
   printf '%-20s %-10s ' pandoc system
   if command -v pandoc >/dev/null; then echo found
-  else echo 'missing — .docx/.odt/.epub/.rst/.org/.tex/... will not render'
+  else echo 'missing — .rst/.ipynb/.man will not render; the rest use panduck'
   fi
   return $rc
 }
@@ -1117,23 +1119,41 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
     else
       doc="SELECT flatten(list(blocks)) AS blocks FROM ast_to_blocks_list('$src')"
     fi ;;
-  *.docx|*.odt|*.epub|*.rst|*.org|*.tex|*.ipynb|*.rtf|*.textile|*.man|*.mediawiki|\
-  *.[1-9])
+  *.docx|*.odt|*.epub|*.org|*.tex|*.rtf|*.textile|*.mediawiki)
+    # panduck reads all ten natively: no pandoc(1) process, no AST round-trip through
+    # a pipe, and no dependency on duck_block_utils' deprecated pandoc_ast_to_blocks.
+    # The readers return duck_block rows directly, so they compose with the same
+    # pipeline every other format uses.
+    exts="panduck"
+    case "$key" in
+      *.docx)      doc="SELECT list(b) AS blocks FROM read_docx_blocks('$src') b" ;;
+      *.odt)       doc="SELECT list(b) AS blocks FROM read_odt_blocks('$src') b" ;;
+      *.epub)      doc="SELECT list(b) AS blocks FROM read_epub_blocks('$src') b" ;;
+      *.org)       doc="SELECT list(b) AS blocks FROM read_org_blocks('$src') b" ;;
+      *.tex)       doc="SELECT list(b) AS blocks FROM read_latex_blocks('$src') b" ;;
+      *.rtf)       doc="SELECT list(b) AS blocks FROM read_rtf_blocks('$src') b" ;;
+      *.textile)   doc="SELECT list(b) AS blocks FROM read_textile_blocks('$src') b" ;;
+      *.mediawiki) doc="SELECT list(b) AS blocks FROM read_mediawiki_blocks('$src') b" ;;
+    esac ;;
+  *.rst|*.ipynb|*.man|*.[1-9])
+    # Three formats stay on pandoc(1), each for a measured reason:
+    #
+    #   .ipynb  panduck's reader emits a markdown cell as ONE raw block holding the
+    #           cell source verbatim, so no headings are extracted: -T finds nothing
+    #           and -S finds no sections. pandoc parses cell markdown into blocks.
+    #   .rst    panduck's reader keeps literal inline markup inside table cells --
+    #           a **plum** cell renders as **plum** rather than emphasised text.
+    #   .man    roff has no native reader anywhere in the stack. panduck
+    # panduck dropped roff deliberately: it is a macro language, and a reader that
+    # half implements it produces documents that look right and are wrong.
     command -v pandoc >/dev/null ||
       die "${key##*.} needs pandoc, which is not installed" 3
-    # Name the reader rather than letting pandoc infer it: .man, .mediawiki and the
-    # numbered man sections all defeat inference, and .mediawiki fails *quietly* —
-    # pandoc warns, falls back to markdown, exits 0, and renders near-nonsense.
+    # Name the reader rather than letting pandoc infer it: .man, and the numbered
+    # sections, defeat inference.
     case "$key" in
-      *.tex)         from=latex ;;
       *.rst)         from=rst ;;
-      *.org)         from=org ;;
       *.ipynb)       from=ipynb ;;
-      *.rtf)         from=rtf ;;
-      *.textile)     from=textile ;;
-      *.mediawiki)   from=mediawiki ;;
       *.man|*.[1-9]) from=man ;;
-      *)             from=${key##*.} ;;
     esac
     via_pandoc=1
     # read_pandoc_ast() silently returns [] on a pipe (constant-folded double-read,

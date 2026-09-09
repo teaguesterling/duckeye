@@ -161,7 +161,8 @@ duckeye -Q '.func#process' -t md src/worker.rs
 | `.json` | Pandoc AST |
 | `.zim`, `zim://…` | `zim` DuckDB extension (handles HTML, markdown, and embedded PDFs) |
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | `sitting_duck` DuckDB extension (Tree-sitter AST to duck_blocks & CSS selector engine) |
-| `.docx` `.odt` `.epub` `.rst` `.org` `.tex` `.ipynb` `.rtf` `.textile` `.mediawiki` `.man` `.1`–`.9` | `pandoc(1)` |
+| `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` | `panduck` — native |
+| `.rst` `.ipynb` `.man` `.1`–`.9` | `pandoc(1)` |
 | anything under `-d` | DuckDB reader (parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, …) |
 
 ---

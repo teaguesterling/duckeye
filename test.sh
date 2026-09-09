@@ -588,6 +588,35 @@ class Service:
 PY
 has 'python renders'   'Service'        $DUCKEYE "$TMP/test_code.py"
 has 'python toc'       'execute'        $DUCKEYE -t "$TMP/test_code.py"
+
+# DuckDB's .mode jsonlines prints an EXTENSION-DEFINED type's label UNQUOTED at the top
+# level, so sitting_duck's SEMANTIC_TYPE made every AST row invalid JSON -- 6425 of 6425
+# lines. Parquet/CSV/git rows were unaffected, which is why nothing else caught it.
+#
+# These live HERE, after test_code.py exists. Placed earlier they ran against a missing
+# file, and the validity check PASSED ON EMPTY INPUT -- zero lines parsed is zero
+# failures. It must therefore assert it actually saw rows; a check that cannot fail is
+# worse than no check, because it occupies the place where a real one belongs.
+ok  'piped -r on code emits valid JSON' \
+    bash -c "$DUCKEYE -r '$TMP/test_code.py' 2>/dev/null | python3 -c \
+      'import sys,json
+n=0
+for l in sys.stdin:
+    l=l.strip()
+    if l:
+        json.loads(l); n+=1
+assert n > 0, \"no rows -- vacuous pass\"'"
+# The cast must keep the LABEL. to_json() would also be valid JSON but renders this as
+# 252, which is worse than the box output it replaced. Assert parseability AND label
+# separately: a bare \'DEFINITION_MODULE\' match passes on the broken output too, since
+# the label is present either way -- just unquoted.
+has 'piped -r on code keeps the enum label' '"semantic_type":"DEFINITION_MODULE"' \
+    $DUCKEYE -r "$TMP/test_code.py"
+# stderr must stay clean: the first cut of this fix used `local` outside a function and
+# tripped `set -u` on every non-AST source, invisible because the check that "passed"
+# had 2>/dev/null on it.
+no_leak 'data modes keep stderr clean' 'line ' \
+    bash -c "$DUCKEYE -r '$TMP/d.parquet' 2>&1 >/dev/null"
 has 'python section'   'return True'    $DUCKEYE -S execute "$TMP/test_code.py"
 has 'python search'    'execute'        $DUCKEYE -s task "$TMP/test_code.py"
 has 'python -o md'     'Service'        $DUCKEYE -o md "$TMP/test_code.py"

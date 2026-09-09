@@ -666,7 +666,20 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     exts="$exts duck_tails"
   fi
 
-  target_query="SELECT * FROM $from"
+  # DuckDB's .mode jsonlines prints an EXTENSION-DEFINED type's label UNQUOTED at the
+  # top level -- {"semantic_type":DEFINITION_MODULE} -- which is not valid JSON. The same
+  # type nested inside a STRUCT/LIST is emitted numerically and is fine, and a plain
+  # inline ENUM is quoted correctly, so this is narrow: it bites only sitting_duck's
+  # SEMANTIC_TYPE, and only as a bare column. Casting it to VARCHAR keeps the LABEL
+  # (to_json() would give 252 instead) and costs nothing. Measured: without this,
+  # `duckeye -d <source file>` piped emitted 6425 of 6425 invalid lines.
+  #
+  # This is DuckDB's bug, not sitting_duck's and not ours; the cast is a workaround and
+  # should be deleted once .mode jsonlines quotes custom-type labels.
+  ast_safe=
+  [[ $from == read_ast\(* || $from == ast_select\(* ]] &&
+    ast_safe=" REPLACE (semantic_type::VARCHAR AS semantic_type)"
+  target_query="SELECT *${ast_safe} FROM $from"
   [[ -n $where ]] && target_query+=" WHERE $where"
   [[ -n $limit ]] && target_query+=" LIMIT $limit"
 

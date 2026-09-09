@@ -13,7 +13,7 @@ Because a `.zim` file holds thousands or millions of articles in a single file, 
 $ duckeye wikipedia.zim
 
 # Index all articles in the archive (path, title)
-$ duckeye -t wikipedia.zim
+$ duckeye -T wikipedia.zim
 
 # Full-text ranked search with snippets (uses Xapian index)
 $ duckeye -s "photosynthesis" wikipedia.zim -n 5
@@ -30,7 +30,7 @@ Use `zim://<archive>/<article>` syntax to treat a single article as a document:
 
 ```console
 # Outline a single article's headings
-$ duckeye -t 'zim://wikipedia.zim/Photosynthesis'
+$ duckeye -T 'zim://wikipedia.zim/Photosynthesis'
 
 # Extract a specific section within an article
 $ duckeye -S "Light reactions" 'zim://wikipedia.zim/Photosynthesis'

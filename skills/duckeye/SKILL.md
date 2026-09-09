@@ -39,18 +39,18 @@ duckeye -f html page.txt            # override format detection
 ### Navigating & AST CSS Selectors
 
 ```sh
-duckeye -t FILE                     # table of contents / code definition outline
+duckeye -T FILE                     # table of contents / code definition outline
 duckeye -S 'Section Name' FILE      # extract one section or function (+ its children)
 duckeye -s 'search term' FILE       # find innermost sections/functions containing term
 duckeye -Q '.func' FILE             # query code AST by CSS selector (all functions)
 duckeye -Q '.class#Calculator' FILE # extract specific class & methods
 duckeye -Q '.func:async' FILE       # extract async functions
 duckeye -Q '.func[name^=test_]' FILE # extract test functions
-duckeye -t 'src/**/*.py'            # glob outline across multiple source files
-duckeye -r 'data/*.parquet'         # aggregate raw data over multiple files
+duckeye -T 'src/**/*.py'            # glob outline across multiple source files
+duckeye -d 'data/*.parquet'         # aggregate raw data over multiple files
 ```
 
-`-t`, `-S`, `-s`, and `-r` are **mutually exclusive**.
+`-t`, `-S`, `-s`, and `-d` are **mutually exclusive**.
 Input files support glob patterns (e.g. `'src/**/*.rs'`, `'data/*.parquet'`).
 Matching for `-S` and `-s` is case-insensitive substring; standard Unix glob wildcards (`*`, `?`) work. Underscores (`_`) and percent signs (`%`) match literally.
 `-S` also matches heading slug IDs exactly.
@@ -58,20 +58,20 @@ Matching for `-S` and `-s` is case-insensitive substring; standard Unix glob wil
 ### Converting (after extraction or AST selection)
 
 ```sh
-duckeye -o text FILE                # plain text (no ANSI escapes)
-duckeye -o md -S Install FILE       # extract a section as markdown
-duckeye -o md -Q '.func' FILE       # export all functions as markdown API docs
-duckeye -o html -S Usage FILE       # extract a section as HTML
-duckeye -o pandoc FILE              # Pandoc AST JSON
-duckeye -o blocks FILE              # duck_blocks JSON
+duckeye -t text FILE                # plain text (no ANSI escapes)
+duckeye -t md -S Install FILE       # extract a section as markdown
+duckeye -t md -Q '.func' FILE       # export all functions as markdown API docs
+duckeye -t html -S Usage FILE       # extract a section as HTML
+duckeye -t pandoc FILE              # Pandoc AST JSON
+duckeye -t blocks FILE              # duck_blocks JSON
 ```
 
 `-o` applies **after** `-S`/`-s`/`-Q`, so it converts only the selected content.
-`-o` does not apply to `-r` or `-t`.
+`-o` does not apply to `-d` or `-t`.
 
 ### Data files & Tabular AST Exploration
 
-Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode without needing `-r`!
+Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode without needing `-d`!
 
 ```sh
 duckeye data.parquet                # auto-detects data mode (DuckDB box renderer)
@@ -81,14 +81,14 @@ duckeye -z data.parquet             # quick column summary (min, max, avg, quant
 duckeye -Z data.parquet             # smart column profile (sparklines, category frequencies, null %)
 duckeye -Z -w "category = 'tools'" products.parquet  # profile filtered subset
 der app.js                          # force raw AST table mode
-duckeye -r -Q '.call#eval' app.js   # query code AST nodes as table with line numbers & peek text
+duckeye -d -Q '.call#eval' app.js   # query code AST nodes as table with line numbers & peek text
 duckeye config.yaml                 # YAML as data table
 duckeye Cargo.toml                  # TOML configuration table
 duckeye spreadsheet.xlsx            # Excel spreadsheet
-duckeye -r report.pdf               # inspect PDF pages as data table
+duckeye -d report.pdf               # inspect PDF pages as data table
 duckeye archive.zip                 # inspect zip archive contents
 duckeye .git                        # inspect git commit log
-duckeye -r -f lines script.sh       # inspect file with line numbers & offsets
+duckeye -d -f lines script.sh       # inspect file with line numbers & offsets
 duckeye -w "score > 90" data.parquet  # -w implies data mode, full SQL WHERE syntax
 duckeye -n 20 huge.csv              # limit rows
 ```
@@ -97,10 +97,10 @@ duckeye -n 20 huge.csv              # limit rows
 
 ```sh
 duckeye wiki.zim                    # archive info
-duckeye -t wiki.zim                 # list all articles
+duckeye -T wiki.zim                 # list all articles
 duckeye -s 'photosynthesis' wiki.zim  # full-text Xapian search
 duckeye -S 'Chlorophyll' wiki.zim   # open an article
-duckeye -t 'zim://wiki.zim/Chlorophyll'  # TOC within one article
+duckeye -T 'zim://wiki.zim/Chlorophyll'  # TOC within one article
 duckeye 'zim://wiki.zim/_assets_/doc.pdf' # read embedded PDFs in ZIM
 ```
 
@@ -111,13 +111,13 @@ duckeye 'zim://wiki.zim/_assets_/doc.pdf' # read embedded PDFs in ZIM
 duckeye -s 'BREAKING' CHANGELOG.md || echo 'safe to upgrade'
 
 # Interactive fuzzy section picker
-duckeye -t spec.md | fzf | xargs -I{} duckeye -S {} spec.md
+duckeye -T spec.md | fzf | xargs -I{} duckeye -S {} spec.md
 
 # Convert a section of a DOCX to markdown
-duckeye -S Results -o md paper.docx > results.md
+duckeye -S Results -t md paper.docx > results.md
 
 # Query AST definitions programmatically
-duckeye -Q '.func#process' -o md src/worker.rs
+duckeye -Q '.func#process' -t md src/worker.rs
 ```
 
 ---
@@ -141,10 +141,10 @@ duckeye -Q '.func#process' -o md src/worker.rs
 5. **For PDFs, use `-P 1-5`** to read specific page ranges, or `-S` to jump
    to specific sections based on the document's outline.
 
-6. **For data inspection, use `-r`** rather than raw `duckdb` commands — duckeye
+6. **For data inspection, use `-d`** rather than raw `duckdb` commands — duckeye
    handles extension loading automatically and adapts column widths to terminal dimensions.
 
-7. **Stdin requires `-f` under `-r`** — data format cannot be safely sniffed.
+7. **Stdin requires `-f` under `-d`** — data format cannot be safely sniffed.
    Document and code formats (md, html, pdf, docx, shebangs) are sniffed automatically.
 
 8. **`-S` and `-s` exit 1 on no match** — use this in conditionals.
@@ -162,7 +162,7 @@ duckeye -Q '.func#process' -o md src/worker.rs
 | `.zim`, `zim://…` | `zim` DuckDB extension (handles HTML, markdown, and embedded PDFs) |
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | `sitting_duck` DuckDB extension (Tree-sitter AST to duck_blocks & CSS selector engine) |
 | `.docx` `.odt` `.epub` `.rst` `.org` `.tex` `.ipynb` `.rtf` `.textile` `.mediawiki` `.man` `.1`–`.9` | `pandoc(1)` |
-| anything under `-r` | DuckDB reader (parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, …) |
+| anything under `-d` | DuckDB reader (parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, …) |
 
 ---
 

@@ -20,15 +20,19 @@ usage: duckeye [OPTION]... [FILE]
 |---|---|---|
 | `-p` | `--page` | Page output through `$DUCKEYE_PAGER` (default: `less -R`) |
 | `-P` | `--pages RANGE` | PDF page or page range (e.g. `3`, `1-5`, `1..5`, `-10`, `5-`) |
-| `-t` | `--toc` | Print table of contents / outline, indented by level |
+| `-T` | `--toc` | Print table of contents / outline, indented by level |
 | `-S` | `--section NAME`| Print only the section whose heading matches NAME |
 | `-s` | `--search TEXT` | Search and print only innermost sections matching TEXT |
 | `-Q` | `--select SEL` | Query code AST by CSS selector (e.g. `.func`, `.class#Name`, `.func:async`) |
-| `-r` | `--raw` | Read file as data table (auto-enabled for data files: parquet, csv, json, yaml, toml, xlsx, ...) |
+| `-d` | `--data` | Read file as a data table (auto for parquet, csv, json, yaml, toml, xlsx, ...). Piped, emits JSONL |
+| `-D` | `--document` | Read as prose; undoes an earlier `-d` |
+| `-r` | `--raw` | Deprecated alias for `-d`; warns on stderr |
 | `-z` | `--summary` | Quick DuckDB `SUMMARIZE` breakdown; implies data mode |
 | `-Z` | `--profile` | Smart column profile with sparklines & category frequencies |
-| `-o` | `--output FMT` | Output format: `ansi` (default), `text`, `md`, `html`, `pandoc`, `blocks` |
-| `-f` | `--format FMT` | Override format detection or specify reader under `-r` |
+| `-i` | `--input FILE` | Input file; same as giving FILE positionally. Both is an error |
+| `-o` | `--output FILE` | Write to FILE instead of stdout. **Names a FILE, not a format** — use `-t` |
+| `-t` | `--to FMT` | Output format: `ansi` (default), `text`, `md`, `html`, `pandoc`, `blocks` |
+| `-f` | `--from FMT` | Override format detection, or name the DuckDB reader under `-d` |
 | `-w` | `--where EXPR` | SQL `WHERE` expression for filtering; implies data mode |
 | `-n` | `--limit N` | Cap row count in data modes or ZIM search listings |
 | | `--color WHEN` | Color handling: `auto` (default), `always`, `never` |

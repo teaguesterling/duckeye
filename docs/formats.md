@@ -44,7 +44,7 @@ asking for two pages of four hundred reads two.
 
 ## Data & Config Formats (Automatic Raw / Summary / Profile)
 
-Data files automatically default to raw table mode without requiring `-r` (or can be forced with the `der` alias). Under data modes (`-r`, `-z`, `-Z`, `der`), `duckeye` opens files via DuckDB's fast columnar scanner:
+Data files automatically default to data table mode without requiring `-d` (or can be forced with the `der` alias). Under data modes (`-d`, `-z`, `-Z`, `der`), `duckeye` opens files via DuckDB's fast columnar scanner:
 
 | Format | Extensions | Engine | Reader Function |
 |---|---|---|---|
@@ -89,7 +89,7 @@ When reading standard input (`cat file | duckeye -` or bare pipes) or extensionl
 duckeye 'git://README.md@v0.12.0'
 
 # Outline code definitions at HEAD~1
-duckeye -t 'git://src/main.rs@HEAD~1'
+duckeye -T 'git://src/main.rs@HEAD~1'
 
 # Search past version of a document
 duckeye -s 'Install' 'git://docs/installation.md@v0.10.0'

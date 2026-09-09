@@ -92,7 +92,7 @@ if [[ -n $pandoc_works ]]; then
     w=${spec%%:*}; ext=${spec##*:}
     if pandoc "$TMP/src.md" -t "$w" -o "$TMP/canary.$ext" 2>/dev/null; then
       has ".$ext renders"          "$CANARY"            $DUCKEYE "$TMP/canary.$ext"
-      has ".$ext toc"              'Integration Canary' $DUCKEYE -t "$TMP/canary.$ext"
+      has ".$ext toc"              'Integration Canary' $DUCKEYE -T "$TMP/canary.$ext"
       has ".$ext section"          'More prose'         $DUCKEYE -S 'Second' "$TMP/canary.$ext"
     else
       skipping ".$ext" "pandoc cannot write $w here"
@@ -126,11 +126,11 @@ duckdb -c "COPY (SELECT 1 AS id, '$CANARY' AS word) TO '$TMP/d.parquet';
 printf 'word: %s\n' "$CANARY" > "$TMP/d.yaml"
 printf 'word = "%s"\n' "$CANARY" > "$TMP/d.toml"
 for ext in parquet csv json yaml toml; do
-  has "-d $ext" "$CANARY" $DUCKEYE -r "$TMP/d.$ext"
+  has "-d $ext" "$CANARY" $DUCKEYE -d "$TMP/d.$ext"
 done
 if command -v zip >/dev/null; then
   (cd "$TMP" && zip -q z.zip d.csv)
-  has '-d zip lists members' 'd.csv' $DUCKEYE -r "$TMP/z.zip"
+  has '-d zip lists members' 'd.csv' $DUCKEYE -d "$TMP/z.zip"
 else
   skipping 'zip' 'zip not installed'
 fi
@@ -140,7 +140,7 @@ printf 'def %s(x):\n    return x\n' "$CANARY" > "$TMP/c.py"
 printf '#!/usr/bin/env bash\n%s() { :; }\n' "$CANARY" > "$TMP/c.sh"
 for f in c.py c.sh; do
   has "$f renders"  "$CANARY" $DUCKEYE "$TMP/$f"
-  has "$f as data"  "$CANARY" $DUCKEYE -r "$TMP/$f"
+  has "$f as data"  "$CANARY" $DUCKEYE -d "$TMP/$f"
 done
 # -Q addresses the AST by CSS selector; it is the one verb with no document analogue.
 has 'python -Q selector' "$CANARY" $DUCKEYE -Q 'function_definition' "$TMP/c.py"
@@ -148,10 +148,10 @@ has 'python -Q selector' "$CANARY" $DUCKEYE -Q 'function_definition' "$TMP/c.py"
 echo 'schemes'
 # git:// resolves against the repo containing the cwd, so this must run from the
 # checkout -- the suite cds there at the top.
-no_out 'git:// toc'      $DUCKEYE -t 'git://README.md@HEAD'
+no_out 'git:// toc'      $DUCKEYE -T 'git://README.md@HEAD'
 has    'git:// section'  'Install'  $DUCKEYE -S Install 'git://README.md@HEAD'
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -f ${DUCKEYE_TEST_ZIM:-} ]]; then
-  no_out 'zim toc' $DUCKEYE -t "$DUCKEYE_TEST_ZIM"
+  no_out 'zim toc' $DUCKEYE -T "$DUCKEYE_TEST_ZIM"
 else
   skipping 'zim' 'set DUCKEYE_TEST_ZIM to an archive'
 fi
@@ -163,7 +163,7 @@ echo 'cross-format invariants'
 if [[ -n $pandoc_works ]]; then
   for ext in html rst org textile mediawiki docx odt epub rtf tex ipynb; do
     [[ -f $TMP/canary.$ext ]] || continue
-    got=$($DUCKEYE -o text "$TMP/canary.$ext" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
+    got=$($DUCKEYE -t text "$TMP/canary.$ext" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
     # Converters legitimately differ in punctuation and emphasis markers, so compare
     # the words that carry meaning rather than demanding byte equality -- a stricter
     # check would fail on rtf's escaping and teach everyone to ignore this test.
@@ -212,7 +212,7 @@ else
       fail=$((fail+1)); printf '  FAIL %s: source sha differs from manifest (fixture is of a different document)\n' "$fx"; continue
     fi
     live="$TMP/$fx.live.json"
-    $DUCKEYE -o blocks "$srcpath" > "$live" 2>/dev/null
+    $DUCKEYE -t blocks "$srcpath" > "$live" 2>/dev/null
     # Block-for-block comparison is only meaningful where duckeye and panduck use the
     # SAME reader. They do for markdown and webbed. They do NOT for pdf: duckeye goes
     # read_pdf -> per-page text -> parse_markdown_to_duck_blocks, which emits inline
@@ -267,7 +267,7 @@ hygiene_ran=0
 for f in canary.docx canary.md; do
   [[ -f $TMP/$f ]] || continue
   hygiene_ran=$((hygiene_ran+1))
-  out=$($DUCKEYE -t "$TMP/$f" 2>/dev/null)
+  out=$($DUCKEYE -T "$TMP/$f" 2>/dev/null)
   # Non-emptiness is asserted FIRST and separately. Checking only for the absence of
   # a notice passes on empty output, and a duckeye that printed nothing at all would
   # score this green -- caught by running the suite against a stub that exits 0

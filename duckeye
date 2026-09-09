@@ -910,10 +910,21 @@ FROM __duckeye_src"
   esac
   load="${no_autoload:-}"
   for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
+  # Piped output is read by programs, not people, so it leaves the box behind. JSONL
+  # rather than CSV/TSV because duckeye's cells routinely hold document text: .mode tabs
+  # emits an embedded tab or newline RAW, silently turning one row into extra columns or
+  # extra lines, and CSV quotes it correctly but still spans physical lines so grep and
+  # wc -l miscount. JSONL escapes both, stays one record per line, and renders
+  # STRUCT/LIST/MAP as real JSON instead of DuckDB's display syntax.
+  #
+  # -Z is the exception: it is textplot ANSI histograms, and the picture IS the output.
+  # As JSON it would be a table of bar-chart strings, so it keeps the box on every path.
   if want_color; then
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -c "$load $sql")
-  else
+  elif [[ $mode == profile ]]; then
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth 0" -c "$load $sql")
+  else
+    duck=(duckdb $(duckdb_color_mode) -cmd ".mode jsonlines" -c "$load $sql")
   fi
   page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
   "${duck[@]}" | "${page[@]}"
@@ -956,10 +967,11 @@ if [[ $key == *.zim ]]; then
     load="LOAD zim; "
     for e in $DUCKEYE_EXTS; do load+="LOAD $e; "; done
     page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
+    # Same rule as the data modes: a pipe gets JSONL, a terminal or pager gets the box.
     if want_color; then
       duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -s "$load" -s "$zsql" | "${page[@]}"
     else
-      duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth 0" -s "$load" -s "$zsql" | "${page[@]}"
+      duckdb $(duckdb_color_mode) -cmd ".mode jsonlines" -s "$load" -s "$zsql" | "${page[@]}"
     fi
     exit "${PIPESTATUS[0]}"
   fi

@@ -331,6 +331,34 @@ has 'summary with -z' 'null_percentage' $DUCKEYE -z "$TMP/d.parquet"
 has 'profile with -Z' 'distribution'    $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile with -Z and -w' '33.3%'     $DUCKEYE -Z -w 'score > 6' "$TMP/d.parquet"
 has 'profile temporal date' 'created_date' $DUCKEYE -Z "$TMP/d.parquet"
+
+# Piped data output is read by programs, not people, so it leaves the box behind.
+# These assertions exist because the box->JSONL switch passed this entire suite
+# unnoticed: every data test above matches a bare token like name_1 that appears in
+# both formats, so nothing here could distinguish them. An assertion that cannot
+# fail occupies the space where a real check belongs.
+duckdb -c "COPY (SELECT 1 AS id, 'a'||chr(9)||'b' AS has_tab, 'l1'||chr(10)||'l2' AS has_nl)
+           TO '$TMP/gnarly.csv';" >/dev/null 2>&1
+has 'piped -r emits JSONL'        '{"id":' $DUCKEYE -r "$TMP/gnarly.csv"
+# The TAB is the discriminator, not the newline: DuckDB's box mode already escapes an
+# embedded newline as \n but emits an embedded tab RAW, so a '\n' assertion passes in
+# both formats and proves nothing. Asserting the whole record is stronger still -- it
+# pins structure, both escapes, and field order in one check that box cannot satisfy.
+has 'piped -r escapes a tab'      '\t'     $DUCKEYE -r "$TMP/gnarly.csv"
+has 'piped -r emits the exact record' \
+    '{"id":1,"has_tab":"a\tb","has_nl":"l1\nl2"}' $DUCKEYE -r "$TMP/gnarly.csv"
+# One record stays on one physical line. This is the whole reason for JSONL over
+# TSV/CSV: .mode tabs emits the embedded tab and newline RAW and splits this single
+# row across two lines, and CSV quotes them but still spans lines, so grep and
+# wc -l miscount either way.
+ok  'piped -r keeps a record on one line' \
+    bash -c "[[ \$($DUCKEYE -r '$TMP/gnarly.csv' 2>/dev/null | wc -l) -eq 1 ]]"
+has 'piped -z emits JSONL'        '{"'     $DUCKEYE -z "$TMP/d.parquet"
+# -Z is textplot ANSI histograms and the picture IS the output, so it keeps the box
+# on every path; as JSON it would be a table of bar-chart strings.
+has 'piped -Z stays visual'       '│'      $DUCKEYE -Z "$TMP/d.parquet"
+# A pager means a person is reading, so -p keeps the box even though stdout is a pipe.
+has '-p keeps the box'            '│'      env DUCKEYE_PAGER=cat $DUCKEYE -p -r "$TMP/d.parquet"
 has 'profile temporal span' 'days' $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile list len' 'len' $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile map entries' 'entries' $DUCKEYE -Z "$TMP/d.parquet"

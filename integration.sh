@@ -63,8 +63,26 @@ The word pumpernickel survives conversion.
 More prose here.
 MD
 
+# pandoc is REQUIRED, not optional: format coverage is the whole point of this file,
+# and a missing converter must not read as success. `command -v` is insufficient --
+# measured, a pandoc stub that exits 1 satisfies it and then every conversion lands in
+# the skip branch, giving "16 passed, 0 failed, 14 skipped" and an exit code of 0. The
+# check therefore CONVERTS something and looks at the result.
+pandoc_works=
+if command -v pandoc >/dev/null && pandoc "$TMP/src.md" -t html -o "$TMP/.probe.html" 2>/dev/null \
+   && [[ -s $TMP/.probe.html ]]; then pandoc_works=1; fi
+if [[ -z $pandoc_works ]]; then
+  if [[ -n ${DUCKEYE_INTEGRATION_ALLOW_SKIP:-} ]]; then
+    skipping 'ALL document formats' 'pandoc missing or non-functional (allowed by env)'
+  else
+    fail=$((fail+1))
+    printf '  FAIL pandoc is missing or non-functional -- document coverage cannot run\n'
+    printf '       set DUCKEYE_INTEGRATION_ALLOW_SKIP=1 to downgrade this to a skip\n'
+  fi
+fi
+
 echo 'document formats (one source, every encoding)'
-if command -v pandoc >/dev/null; then
+if [[ -n $pandoc_works ]]; then
   # writer:extension. duckeye routes these through pandoc(1), except md/html which
   # go to the markdown and webbed extensions -- both are covered so a regression in
   # either path shows up here.
@@ -80,8 +98,6 @@ if command -v pandoc >/dev/null; then
       skipping ".$ext" "pandoc cannot write $w here"
     fi
   done
-else
-  skipping 'document formats' 'pandoc not installed'
 fi
 
 echo 'pdf'
@@ -144,7 +160,7 @@ echo 'cross-format invariants'
 # The property this suite exists for: the same content, through every path, is still
 # the same content. A per-format render test can pass while the formats disagree
 # about what the document SAYS; this compares them to each other.
-if command -v pandoc >/dev/null; then
+if [[ -n $pandoc_works ]]; then
   for ext in html rst org textile mediawiki docx odt epub rtf tex ipynb; do
     [[ -f $TMP/canary.$ext ]] || continue
     got=$($DUCKEYE -o text "$TMP/canary.$ext" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
@@ -163,8 +179,10 @@ echo 'stream hygiene'
 # Extension deprecation notices belong on stderr. If one reaches stdout it lands
 # inside a table of contents or a converted document, and every downstream consumer
 # inherits it silently.
+hygiene_ran=0
 for f in canary.docx canary.md; do
   [[ -f $TMP/$f ]] || continue
+  hygiene_ran=$((hygiene_ran+1))
   out=$($DUCKEYE -t "$TMP/$f" 2>/dev/null)
   # Non-emptiness is asserted FIRST and separately. Checking only for the absence of
   # a notice passes on empty output, and a duckeye that printed nothing at all would
@@ -178,6 +196,26 @@ for f in canary.docx canary.md; do
     pass=$((pass+1)); printf '  ok   %s toc: stdout free of extension notices\n' "$f"
   fi
 done
+
+# A skip that hides a non-run is the failure this suite is most likely to have, so
+# assert that work actually happened rather than only that nothing broke. Measured:
+# with a broken pandoc the suite scored "0 failed" having tested no document format
+# at all. zim is the one legitimate skip -- it needs an archive the user supplies.
+ran=$((pass + fail))
+if [[ -n ${DUCKEYE_INTEGRATION_ALLOW_SKIP:-} ]]; then
+  # The override has to actually override, or it is a flag that lies. It relaxes BOTH
+  # guards -- otherwise setting it downgrades the pandoc failure and then trips the
+  # floor anyway, which is the same red run with a more confusing message.
+  printf '  note DUCKEYE_INTEGRATION_ALLOW_SKIP set: %d assertions ran; coverage is PARTIAL\n' "$ran"
+else
+  if (( hygiene_ran == 0 )); then
+    fail=$((fail+1)); printf '  FAIL stream hygiene ran no cases (fixtures absent)\n'
+  fi
+  if (( ran < 60 )); then
+    fail=$((fail+1))
+    printf '  FAIL only %d assertions ran; expected at least 60 -- something skipped silently\n' "$ran"
+  fi
+fi
 
 printf '\n%d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip"
 (( fail == 0 ))

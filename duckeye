@@ -1229,6 +1229,60 @@ css_alias() {
 # dialect to keep in sync. prototypes/leveled_ast.sql has the generic form, and
 # teaguesterling/sitting_duck#117 asks for the two changes that remove the
 # workarounds below.
+# -S/-s compute a SPAN over document order; -Q selects nodes from a tree. To compose
+# them the span has to come FIRST -- narrow the document, then select inside it --
+# which is why these produce a DOCUMENT-PRODUCING EXPRESSION rather than a finished
+# query. On their own the result is serialised straight out; with -Q it becomes the
+# document the selector runs against. Before this, -Q rewrote the document first and
+# -S then searched the selector's leftovers for a heading, which is why `-S Install
+# -Q code` reported "no section matching 'Install'" while plain `-S Install` worked.
+section_span_doc() {
+  printf '%s\n' "WITH doc AS MATERIALIZED ($1),
+     h AS (SELECT e.level AS lvl, e.title AS title, e.id AS id, e.element_order AS ord
+           FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
+     sec AS (SELECT h1.ord AS s, coalesce(min(h2.ord) - 1, 2147483647) AS e
+             FROM h h1 LEFT JOIN h h2 ON h2.ord > h1.ord AND h2.lvl <= h1.lvl
+             WHERE h1.title ILIKE '%$pat%' ESCAPE '\\' OR h1.id = '$pat'
+             GROUP BY h1.ord),
+     -- A substring can match both a chapter and a section inside it. The chapter
+     -- already carries the child, so keeping both printed it twice; drop any span
+     -- another span contains.
+     top AS (SELECT s, e FROM sec a
+             WHERE NOT EXISTS (SELECT 1 FROM sec b
+                               WHERE b.s <= a.s AND b.e >= a.e AND (b.s, b.e) <> (a.s, a.e)))
+     SELECT duck_blocks_reorder(flatten(list(duck_blocks_slice(doc.blocks, top.s, top.e)
+                                             ORDER BY top.s))) AS blocks
+     FROM doc, top HAVING count(*) > 0"
+}
+
+# Spans here stop at the next heading of *any* level, so a hit reports the innermost
+# section that holds it rather than nesting parent inside child.
+search_span_doc() {
+  printf '%s\n' "WITH doc AS MATERIALIZED ($1),
+     h AS (SELECT e.element_order AS ord
+           FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
+     span AS (SELECT ord AS s, coalesce(lead(ord) OVER (ORDER BY ord) - 1, 2147483647) AS e
+              FROM h
+              UNION ALL   -- anything ahead of the first heading, and whole
+                          -- documents that have no headings at all
+              SELECT 0 AS s, e FROM (SELECT coalesce((SELECT min(ord) - 1 FROM h),
+                                                     2147483647)::INTEGER AS e)
+              WHERE e >= 0),
+     hit AS (SELECT s, e FROM doc, span
+             WHERE duck_blocks_to_match_text(duck_blocks_slice(doc.blocks, span.s, span.e))
+                   ILIKE '%$pat%' ESCAPE '\\')
+     SELECT duck_blocks_reorder(flatten(list(duck_blocks_slice(doc.blocks, hit.s, hit.e)
+                                             ORDER BY hit.s))) AS blocks
+     FROM doc, hit HAVING count(*) > 0"
+}
+
+# Narrow BEFORE selecting. mode is left alone: it still names what the user asked for,
+# which is what the empty-result messages below report against.
+case $mode in
+  section) doc=$(section_span_doc "$doc") ;;
+  search)  doc=$(search_span_doc "$doc") ;;
+esac
+
 #
 # Until now, -Q on a document was SILENTLY IGNORED: the selector was accepted and
 # the whole file rendered as though it had never been given.
@@ -1338,7 +1392,9 @@ cte="WITH doc AS MATERIALIZED ($doc)"
 # "to the end of the document" — db_blocks_slice takes an inclusive order range,
 # and inline children share the block's order span, so they slice along with it.
 case $mode in
-  full)
+  full|section|search)
+    # section and search share this: their span SQL already ran, above, as part of
+    # building $doc. One emit path for all three is the point of that refactor.
     # WHERE blocks IS NOT NULL, because an aggregate with no GROUP BY still returns
     # one row when nothing matched, and list() over zero rows is SQL NULL. Measured:
     # `-Q nosuchtype` printed the four characters NULL on stdout and exited 0 -- on
@@ -1359,42 +1415,6 @@ case $mode in
     sql="$cte, t AS (SELECT r.* FROM doc, duck_blocks_toc_rows(doc.blocks) r)
          SELECT string_agg(repeat('  ', t.indent) || t.title, chr(10) ORDER BY t.element_order)
          FROM t HAVING count(*) > 0;" ;;
-  section)
-    # Nearest following heading of the same or higher level bounds the section,
-    # so asking for a chapter yields its subsections too.
-    sql="$cte,
-         h AS (SELECT e.level AS lvl, e.title AS title, e.id AS id, e.element_order AS ord
-               FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
-         sec AS (SELECT h1.ord AS s, coalesce(min(h2.ord) - 1, 2147483647) AS e
-                 FROM h h1 LEFT JOIN h h2 ON h2.ord > h1.ord AND h2.lvl <= h1.lvl
-                 WHERE h1.title ILIKE '%$pat%' ESCAPE '\\' OR h1.id = '$pat'
-                 GROUP BY h1.ord),
-         -- A substring can match both a chapter and a section inside it. The chapter
-         -- already carries the child, so keeping both printed it twice; drop any span
-         -- another span contains.
-         top AS (SELECT s, e FROM sec a
-                 WHERE NOT EXISTS (SELECT 1 FROM sec b
-                                   WHERE b.s <= a.s AND b.e >= a.e AND (b.s, b.e) <> (a.s, a.e)))
-         SELECT $(emit "duck_blocks_reorder(flatten(list(duck_blocks_slice(doc.blocks, top.s, top.e) ORDER BY top.s)))")
-         FROM doc, top HAVING count(*) > 0;" ;;
-  search)
-    # Spans here stop at the next heading of *any* level, so a hit reports the
-    # innermost section that holds it rather than nesting parent inside child.
-    sql="$cte,
-         h AS (SELECT e.element_order AS ord
-               FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
-         span AS (SELECT ord AS s, coalesce(lead(ord) OVER (ORDER BY ord) - 1, 2147483647) AS e
-                  FROM h
-                  UNION ALL   -- anything ahead of the first heading, and whole
-                              -- documents that have no headings at all
-                  SELECT 0 AS s, e FROM (SELECT coalesce((SELECT min(ord) - 1 FROM h),
-                                                         2147483647)::INTEGER AS e)
-                  WHERE e >= 0),
-         hit AS (SELECT s, e FROM doc, span
-                 WHERE duck_blocks_to_match_text(duck_blocks_slice(doc.blocks, span.s, span.e))
-                       ILIKE '%$pat%' ESCAPE '\\')
-         SELECT $(emit "duck_blocks_reorder(flatten(list(duck_blocks_slice(doc.blocks, hit.s, hit.e) ORDER BY hit.s)))")
-         FROM doc, hit HAVING count(*) > 0;" ;;
 esac
 
 [[ $out_fmt == html ]] && exts+=" webbed"     # duck_blocks_to_html lives there
@@ -1438,15 +1458,15 @@ if ! grep -q '[^[:space:]]' "$out"; then
   case $mode in
     toc)     die "no headings in $f" ;;
     section|search)
-             # -Q rewrites the document BEFORE -S/-s slice it, so a selector that
-             # drops headings leaves nothing for the phrase to match. Measured: `-S
-             # Install` works, `-S Install -Q code` reports no section matching
-             # 'Install' -- blaming the phrase for what the selector removed.
+             # Composed, these run span-then-select, so an empty result has two
+             # causes and this cannot tell them apart in one query: the phrase found
+             # no section, or the section held nothing matching the selector. Name
+             # both rather than pick one -- the previous message picked wrong.
              [[ -n ${selector:-} ]] &&
-               die "no section matching '$arg' after -Q '$selector' narrowed $f
-       -Q is applied FIRST, so -S/-s only see what the selector kept. To select
-       inside a section instead, pipe: duckeye -S '$arg' -t md FILE | duckeye -Q
-       '$selector' -f md -"
+               die "no output for '$arg' with -Q '$selector' in $f
+       -S/-s narrow the document first, then -Q selects inside what is left. So
+       either no section matched '$arg', or nothing in it matched '$selector'.
+       Drop -Q to see whether the section itself is there."
              die "no section matching '$arg' in $f" ;;
     full)    [[ -n $zim_open ]] && die "no article matching '$arg' in $f"
              # -Q produced nothing. Two causes, and the second is not obvious:

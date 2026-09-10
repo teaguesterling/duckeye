@@ -878,11 +878,22 @@ no_leak 'flag after FILE is not a file count' 'only one FILE' \
 has 'two files still counted' 'only one FILE' \
     bash -c "$DUCKEYE -T '$TMP/doc.md' '$TMP/list.md' 2>&1 >/dev/null"
 
-# -Q rewrites the document before -S slices it, so a selector that drops headings
-# leaves nothing to match. Blaming the phrase sent this session looking for a -S bug.
-has 'S+Q blames the selector, not the phrase' 'narrowed' \
-    bash -c "$DUCKEYE -S Alpha -Q 'code' '$TMP/doc.md' 2>&1 >/dev/null"
-has 'S+Q suggests the pipe' 'duckeye -S' \
+# -S/-s narrow the document, THEN -Q selects inside it. Before that ordering, -Q ran
+# first and -S searched the selector's leftovers for a heading, so `-S Beta -Q code`
+# returned nothing and blamed the phrase.
+has 'S then Q selects inside the section' 'code_block_token' \
+    $DUCKEYE -S Beta -Q 'code' -t text "$TMP/doc.md"
+has 's then Q selects inside the section' 'code_block_token' \
+    $DUCKEYE -s 'beta body' -Q 'code' -t text "$TMP/doc.md"
+# ...and the narrowing is real: Alpha has no code block, so the SAME selector that
+# succeeds under Beta must find nothing under Alpha. Without span-then-select this
+# passes for the wrong reason, since -Q code alone matches the document-wide block.
+no      'S then Q is actually scoped'   $DUCKEYE -S Alpha -Q 'code' -t text "$TMP/doc.md"
+no_leak 'S then Q scoping drops Beta code' 'code_block_token' \
+        $DUCKEYE -S Alpha -Q 'code' -t text "$TMP/doc.md"
+# An empty composed result has two causes and one query cannot separate them, so the
+# message must name both instead of picking one -- picking one is what went wrong.
+has 'S+Q empty names both causes' 'either no section matched' \
     bash -c "$DUCKEYE -S Alpha -Q 'code' '$TMP/doc.md' 2>&1 >/dev/null"
 # A plain -S miss keeps the plain message -- the new one must not swallow it.
 has 'plain -S miss keeps its message' "no section matching 'nosuchsection'" \

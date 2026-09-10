@@ -365,8 +365,16 @@ $ duckeye -Q 'heading#Installation' -t text guide.md
 Installation
 ```
 
-**10 — Narrow to a section, then select inside it.** These compose through a
-pipe, because `-S` emits a document that `-Q` can read back:
+**10 — Narrow to a section, then select inside it.** `-S`/`-s` run **first** and
+`-Q` selects within what is left, so the two compose in one command:
+
+```console
+$ duckeye -S 'Install' -Q 'code' -t text guide.md
+curl -sL example.com/i.sh | sh
+```
+
+They still compose through a pipe when you want a format change in between,
+since `-S` emits a document `-Q` can read back:
 
 ```console
 $ duckeye -S 'Install' -t md guide.md | duckeye -Q 'code' -t text -f md -
@@ -395,6 +403,42 @@ Run the installer:
 ...
 ```
 
+**13 — The subsection headings under one chapter**, which is the outline of a
+part of the document rather than the whole of it:
+
+```console
+$ duckeye -S 'Usage' -Q 'h3' -t text guide.md
+Advanced
+```
+
+**14 — One node type inside matching sections, across a whole tree.** This is the
+composition that motivates the ordering: sections chosen by phrase, nodes chosen
+by type, over many files, converted on the way out:
+
+```console
+$ duckeye -S 'Setup' -Q 'code' -t md 'docs/**/*.md'
+``` python
+setup_a()
+```
+
+``` python
+setup_b()
+```
+```
+
+**15 — The scoping is real, not cosmetic.** `-Q 'a'` finds the link in this
+document, but not when the search is confined to a section that does not contain
+it — the same selector, a different document:
+
+```console
+$ duckeye -Q 'a' -t html guide.md
+<a href="https://example.com">link</a>
+
+$ duckeye -S 'Install' -Q 'a' -t html guide.md
+duckeye: no output for 'Install' with -Q 'a' in guide.md
+...
+```
+
 Child (`>`) and descendant (` `) combinators both work, and differ as in CSS:
 `list > list_item` takes only direct children, `list li` takes any depth.
 
@@ -408,7 +452,6 @@ These are measured limits, not guesses:
 | `-Q 'code, blockquote'` | selector groups are not supported; run the two queries separately |
 | `-Q 'a'` with `-t ansi` or `-t md` | no output — a standalone inline has no block to render inside. It does work with `-t text`, `-t html` and `-t blocks`. |
 | `-Q 'heading:contains(Install)'` | pseudo-class predicates are not supported; `-S Install` is the substring query |
-| `-S X -Q Y` in one command | `-Q` is applied **first**, so `-S` only sees what the selector kept — usually nothing. Use the pipe in example 10. duckeye says so rather than blaming the phrase. |
 | a flag after FILE | not parsed — `duckeye -S X doc.md -t md` fails. Flags come before the file. |
 
 A `-Q` that matches nothing prints **nothing** on stdout, writes a message to

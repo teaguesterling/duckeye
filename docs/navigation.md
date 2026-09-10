@@ -133,6 +133,28 @@ duckeye -Q 'h2' README.md      # same as heading[heading_level=2]
 duckeye -Q 'ul li' NOTES.md    # list items inside a list
 ```
 
+### Composing with `-S` and `-s`
+
+`-S`/`-s` compute a **span** over document order; `-Q` selects nodes from a tree.
+Given both, the span runs **first** and the selector then works inside what is
+left:
+
+```bash
+duckeye -S 'Install' -Q 'code' -t text guide.md   # code blocks in that section
+duckeye -S 'Setup'   -Q 'code' -t md 'docs/**/*.md'
+duckeye -s 'systemd' -Q 'li'   -t md notes.md     # innermost section, then items
+```
+
+That ordering is the only one that composes: a selector applied first usually
+removes the headings, leaving `-S` nothing to match. When a composed query comes
+back empty, either the phrase matched no section or the section held nothing
+matching the selector — one query cannot separate those, so the message names
+both and suggests dropping `-Q` to tell which.
+
+Headings do not *contain* the prose after them — both sit at level 1 — so
+"everything under a heading" is a span, not a descendant selector. That is why
+the job belongs to `-S` rather than to `-Q`.
+
 ### Two limits worth knowing
 
 **A match carries its subtree, and a block-kind match also carries its

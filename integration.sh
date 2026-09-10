@@ -231,9 +231,21 @@ GMD
   # README's reason for preferring it over -S would be gone.
   no  'README 9: #name is case-sensitive' \
       $DUCKEYE -Q 'heading#installation' -t text "$TMP/guide.md"
-  ok  'README 10: -S piped into -Q' bash -c \
+  has 'README 10: -S then -Q in one command' 'curl -sL' \
+      $DUCKEYE -S 'Install' -Q 'code' -t text "$TMP/guide.md"
+  ok  'README 10: -S piped into -Q still works' bash -c \
       "$DUCKEYE -S 'Install' -t md '$TMP/guide.md' \
        | $DUCKEYE -Q 'code' -t text -f md - | grep -q 'curl -sL'"
+  has 'README 13: -S then -Q h3'  'Advanced' \
+      $DUCKEYE -S 'Usage' -Q 'h3' -t text "$TMP/guide.md"
+  has 'README 14: -S then -Q across a tree' 'setup_b()' \
+      $DUCKEYE -S 'Setup' -Q 'code' -t md "$TMP/tree/**/*.md"
+  # README 15 claims the scoping is real: the SAME selector that finds the link
+  # document-wide must find nothing once confined to a section without it. If this
+  # ever passes, -Q stopped being scoped by -S and example 15 became a lie.
+  has 'README 15: -Q a finds the link'   '<a href' $DUCKEYE -Q 'a' -t html "$TMP/guide.md"
+  no  'README 15: -S scopes that away' \
+      $DUCKEYE -S 'Install' -Q 'a' -t html "$TMP/guide.md"
   has 'README 11: typed select across tree' 'setup_a()' \
       $DUCKEYE -Q 'code[language=python]' -t text "$TMP/tree/**/*.md"
   has 'README 12: -s innermost section' 'Run the installer' \

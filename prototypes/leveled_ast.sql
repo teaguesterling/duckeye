@@ -162,3 +162,125 @@ CREATE OR REPLACE MACRO leveled_ast(src, order_col, level_col, type_col, name_co
 -- Neither is a new engine. ast_select_from already reads its source through
 -- query_table(), so it was always generic over the table -- the AST is simply the
 -- only thing that had ever been passed to it.
+
+-- ---------------------------------------------------------------------------
+-- ATTRIBUTES
+--
+-- sitting_duck's [attr=value] is backed by a FIXED allowlist -- name, type,
+-- language, semantic, modifier, annotation, qualified, signature, params, peek,
+-- receiver -- and anything else raises "unknown attribute". That is good error
+-- design for an AST, and it means arbitrary source attributes (heading_level,
+-- href, src, page_number) cannot pass through its engine unchanged.
+--
+-- So attributes are matched HERE, in a layer over the structural result, in the
+-- long form (node_id, key, value). Two sources, per the parameterisation:
+--
+--   leveled_attrs_map(...)   a MAP(VARCHAR,VARCHAR) column -- duck_block's shape
+--   leveled_attrs_cols(...)  named scalar columns, one attribute each
+--
+-- node_id must agree with leveled_ast's, which is row_number + 1 because node 1
+-- is the synthetic root. Both macros below reproduce that offset rather than
+-- assuming it.
+
+CREATE OR REPLACE MACRO leveled_attrs_map(src, order_col, partition_col, map_col) AS TABLE
+  WITH n AS (
+    SELECT list_value(columns(lambda c: c = order_col))[1]     AS ord,
+           list_value(columns(lambda c: c = partition_col))[1] AS part,
+           list_value(columns(lambda c: c = map_col))[1]       AS m
+    FROM query_table(src)
+  ),
+  idd AS (
+    SELECT part, m, row_number() OVER (PARTITION BY part ORDER BY ord) + 1 AS node_id FROM n
+  )
+  SELECT node_id, part, unnest(map_keys(m)) AS key, unnest(map_values(m)) AS value
+  FROM idd WHERE m IS NOT NULL AND len(map_keys(m)) > 0;
+
+-- Named scalar columns, one attribute each. Implemented by taking the ROW as JSON
+-- and picking the requested keys: a dynamic set of columns cannot be collected into
+-- one list, because `[columns(...)]` and `list_value(columns(...))` both expand the
+-- star across the whole expression and yield one list PER column ([1] and [x]),
+-- not one list of all of them. to_json(row) sidesteps that and costs one function
+-- call; it is the only place JSON is used, and only as a transport.
+CREATE OR REPLACE MACRO leveled_attrs_cols(src, order_col, partition_col, attr_cols) AS TABLE
+  WITH n AS (
+    SELECT list_value(columns(lambda c: c = order_col))[1]     AS ord,
+           list_value(columns(lambda c: c = partition_col))[1] AS part,
+           to_json(srcrow)                                     AS j
+    FROM query_table(src) AS srcrow
+  ),
+  idd AS (
+    SELECT part, j, row_number() OVER (PARTITION BY part ORDER BY ord) + 1 AS node_id FROM n
+  )
+  SELECT i.node_id, i.part, u.k AS key, json_extract_string(i.j, '$.' || u.k) AS value
+  FROM idd i, unnest(attr_cols) AS u(k)
+  WHERE json_extract_string(i.j, '$.' || u.k) IS NOT NULL;
+
+-- Pull [key op value] conditions out of a selector, using the SAME css parse
+-- sitting_duck uses, so the two never disagree about what the selector says.
+-- Value node types: integer_value (2), plain_value (bare word), string_value
+-- ("quoted"). op is the operator token between them; '=' when absent means
+-- presence-only, e.g. [href].
+CREATE OR REPLACE MACRO leveled_conditions(selector) AS TABLE
+  WITH sel AS (SELECT * FROM parse_ast_list_table(selector, 'css'))
+  SELECT
+    an.name AS key,
+    coalesce((SELECT op.type FROM sel op
+              WHERE op.parent_id = an.parent_id AND op.type LIKE '%=%' LIMIT 1), '') AS op,
+    (SELECT trim(v.name, '"''') FROM sel v
+      WHERE v.parent_id = an.parent_id
+        AND v.type IN ('integer_value','plain_value','string_value') LIMIT 1) AS value
+  FROM sel an
+  WHERE an.type = 'attribute_name';
+
+-- The selector minus its attribute groups, for handing to ast_select_from.
+-- PROTOTYPE LIMITATION: a regex strip, so a ']' inside a quoted attribute value
+-- would break it. Correct for the shapes duck_blocks produce; not a parser.
+CREATE OR REPLACE MACRO leveled_strip_attrs(selector) AS
+  regexp_replace(selector, '\[[^\]]*\]', '', 'g');
+
+-- LIMITATION, measured, and the reason this layer is a prototype rather than an
+-- answer: attribute conditions are applied to the RESULT node, so they only work
+-- when the attribute is on the node being selected.
+--
+--   heading[heading_level=2]           -> heading(Beta)      correct
+--   heading ~ code                     -> code(code)         correct
+--   heading[heading_level=2] ~ code    -> (none)             WRONG
+--
+-- In `A[attr] ~ B` the attribute constrains A and the result is B, but a post-filter
+-- over the result set cannot see A. Stripping the attributes to get the structural
+-- match, then re-applying them afterwards, discards which node each condition
+-- belonged to.
+--
+-- This is not fixable in a layer. Attributes have to be evaluated INSIDE the engine,
+-- where the selector's context nodes are still bound -- which is precisely what
+-- sitting_duck already does for its eleven allowlisted names. The upstream ask is
+-- therefore sharper than "publish SEMANTIC_TYPE": make the attribute allowlist
+-- DYNAMIC over the source table's columns, so a projected table's own attributes are
+-- first-class. The existing error message ("unknown attribute ... Supported
+-- attributes: ...") is already the right shape; it just needs a wider set.
+--
+-- CLASSES (.foo) are unsupported for the same underlying reason: `.class` resolves
+-- through is_semantic_type() against a SEMANTIC_TYPE column that no outside caller
+-- can construct. `.heading` returns nothing today. Treating a column as a class
+-- source has the same context problem as attributes and belongs in the same fix.
+
+-- leveled_select — structural match via sitting_duck, attribute match here.
+--   projected  table name from leveled_ast()
+--   attrs      table name in long form (node_id, key, value)
+--   selector   full CSS selector, attributes included
+-- Every [condition] must hold: a bare [key] tests presence, [key=value] equality.
+CREATE OR REPLACE MACRO leveled_select(projected, attrs, selector) AS TABLE
+  WITH base AS (
+    SELECT * FROM ast_select_from(projected, leveled_strip_attrs(selector))
+  ),
+  cond AS (SELECT * FROM leveled_conditions(selector))
+  SELECT b.* FROM base b
+  WHERE NOT EXISTS (
+    SELECT 1 FROM cond c
+    WHERE NOT EXISTS (
+      SELECT 1 FROM query_table(attrs) a
+      WHERE a.node_id = b.node_id
+        AND a.key = c.key
+        AND (c.value IS NULL OR a.value = c.value)
+    )
+  );

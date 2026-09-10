@@ -601,6 +601,14 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
     -- with exit 0 -- plausible text and success for a document that is not there.
     -- Worst shape for anything piping duckeye. error() raises, so the exit code
     -- says so; it stays lazy in a non-taken CASE arm, unlike the readers above.
+    -- NULL here really does mean absent, but only because the SCALAR resolves
+    -- redirects. Measured on duckdb_zim's test.zim: zim_mimetype('A/Photosynth')
+    -- returns 'text/html' while read_zim's mimetype COLUMN returns NULL for that
+    -- same redirect entry. Two APIs, one entry, different answers. Had the scalar
+    -- behaved like the column, every arm above would miss (NULL LIKE 'x%' is NULL,
+    -- not false -- even the text/% catch-all) and every redirect would report
+    -- 'entry not found' for an entry that exists. Nothing in the code says this;
+    -- reported to Zim-Dev, who found the column half.
     ELSE CASE WHEN zim_mimetype(archive, entry) IS NULL
            THEN error('zim entry not found: ' || entry)
            ELSE duck_block_paragraph('(no renderer for '

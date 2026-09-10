@@ -709,13 +709,38 @@ if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   # function parse_html_blocks, which rejects the COLUMN that -S passes it -- and
   # this suite stayed green throughout, because a Binder Error exits non-zero too.
   # The positive case is what discriminates.
+  # DERIVE the title and entry from the archive when they are not given. They used
+  # to need their own env vars on top of DUCKEYE_TEST_ZIM, so the two cases that
+  # matter most skipped even WITH an archive present -- measured: pointing the suite
+  # at a real archive still printed "skip zim -S opens an article". A second gate on
+  # the assertion that already hid a weeks-long regression is the worst place for one.
+  if [[ -z ${DUCKEYE_TEST_ZIM_TITLE:-} || -z ${DUCKEYE_TEST_ZIM_HTML:-} ]]; then
+    # OFFSET 0 blocks filter pushdown, as in duckeye itself (duckdb_zim#29).
+    zrow=$(duckdb -noheader -list -c "LOAD zim; SELECT title||chr(9)||path
+             FROM (SELECT * FROM read_zim('$Z') OFFSET 0)
+             WHERE NOT is_redirect AND mimetype LIKE 'text/html%'
+               AND coalesce(title,'') <> ''
+             -- RICHEST article, not the first. Measured on duckdb_zim's test.zim:
+             -- the first is A/Calcium, whose whole body is <h1>Calcium</h1>, so the
+             -- body assertion below could not tell 'opened the article' from
+             -- 'echoed the heading' -- the one thing it exists to discriminate.
+             ORDER BY length(zim_get_text('$Z', path)) DESC LIMIT 1;" 2>/dev/null | tail -1)
+    : "${DUCKEYE_TEST_ZIM_TITLE:=${zrow%%$'\t'*}}"
+    : "${DUCKEYE_TEST_ZIM_HTML:=${zrow#*$'\t'}}"
+    : "${DUCKEYE_TEST_ZIM_HTML_TEXT:=$DUCKEYE_TEST_ZIM_TITLE}"
+  fi
   if [[ -n ${DUCKEYE_TEST_ZIM_TITLE:-} ]]; then
     has 'zim -S opens an article' "$DUCKEYE_TEST_ZIM_TITLE" \
         $DUCKEYE -S "$DUCKEYE_TEST_ZIM_TITLE" -t text "$Z"
     # and returns the BODY, not just the matched title
+    # The body must exceed the TITLE, which is what discriminates "opened the
+    # article" from "echoed the heading". A fixed char floor cannot: 500 assumes a
+    # Wikipedia-sized archive and fails on a minimal test fixture, so the floor is
+    # relative to what a title-only answer would have produced.
     n=$($DUCKEYE -S "$DUCKEYE_TEST_ZIM_TITLE" -t text "$Z" 2>/dev/null | wc -c)
-    if (( n > 500 )); then pass=$((pass+1)); printf '  ok   %s (%d chars)\n' 'zim -S returns the body' "$n"
-    else fail=$((fail+1)); printf '  FAIL %s (only %d chars)\n' 'zim -S returns the body' "$n"; fi
+    floor=$(( ${#DUCKEYE_TEST_ZIM_TITLE} + 20 ))
+    if (( n > floor )); then pass=$((pass+1)); printf '  ok   %s (%d chars > %d)\n' 'zim -S returns the body' "$n" "$floor"
+    else fail=$((fail+1)); printf '  FAIL %s (%d chars, needs > %d -- title only?)\n' 'zim -S returns the body' "$n" "$floor"; fi
   else
     skipping 'zim -S opens an article' 'set DUCKEYE_TEST_ZIM_TITLE'
   fi

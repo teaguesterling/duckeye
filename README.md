@@ -624,15 +624,16 @@ anything, or to convert an AST into blocks; three extensions still use it to
 |---|---|
 | `.ipynb` | panduck returns one `raw` block holding the whole markdown cell verbatim, so no headings are extracted and `-T`/`-S` find nothing ([panduck#39](https://github.com/teaguesterling/duckdb_panduck/issues/39)) |
 | `.rst` | reads correctly and headings work, but table cells keep literal inline markup — a `**bold**` cell stays asterisks ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)) |
-| `.man`, `.N` | panduck declines roff deliberately: it is a macro language, and a reader that half-implements it produces documents that look right and are wrong |
+| `.man`, `.N` | no extension in the stack reads roff — `panduck_can_read('a.man')` is false — so pandoc is the only route. Whether panduck intends to support it is not recorded either way |
 
 Everything else — `.docx .odt .epub .org .tex .rtf .textile .mediawiki`, plus
 `.md` and `.html` — is read natively, with no pandoc process.
 
 Closing [#38](https://github.com/teaguesterling/duckdb_panduck/issues/38) and
 [#39](https://github.com/teaguesterling/duckdb_panduck/issues/39) leaves roff as
-the only format needing pandoc, and panduck declines roff by design — so those
-two issues are the whole remaining distance.
+the only format needing pandoc — so those two issues are most of the remaining
+distance. Whether roff is ever read natively is an open question, not a settled
+one.
 
 ## Formats
 

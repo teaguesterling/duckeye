@@ -345,6 +345,14 @@ elif [[ ! -f $PF/parsed/manifest.csv ]]; then
 else
   # installed reader versions, for the version-match arm
   inst=$(duckdb -noheader -list -c "SELECT extension_name||'='||extension_version FROM duckdb_extensions() WHERE extension_name IN ('markdown','webbed','pdf') AND installed;" 2>/dev/null | paste -sd' ')
+  # panduck's own version, which the manifest does NOT record (panduck#40). Every
+  # fixture is read through read_panduck_doc, so panduck code is in the path for all
+  # of them -- two_pages_pdf most visibly, whose heading levels come from a
+  # dense_rank() over font_size in panduck rather than from the pdf extension. So a
+  # panduck change can move a fixture while every recorded version stays identical.
+  # Without this the verdict below blames the SIBLING by elimination, which is the
+  # false attribution this check exists to prevent.
+  pdv=$(duckdb -noheader -list -c "SELECT extension_version FROM duckdb_extensions() WHERE extension_name='panduck' AND installed;" 2>/dev/null | tail -1)
   rows=$(duckdb -noheader -list -c "SELECT fixture||'|'||source||'|'||source_sha256||'|'||reader_extension||'|'||reader_version FROM read_csv('$PF/parsed/manifest.csv');" 2>/dev/null)
   [[ -z $rows ]] && { fail=$((fail+1)); printf '  FAIL manifest.csv read produced no rows\n'; }
   while IFS='|' read -r fx src sha ext ver; do
@@ -402,7 +410,11 @@ print(str(len(b))+':'+','.join(str(x['attributes'].get('page_number','')) for x 
       if [[ -n $vmatch ]]; then printf '  ok   %s matches stored blocks\n' "$fx"
       else printf '  ok   %s matches despite %s moving off %s (upgrade was benign)\n' "$fx" "$ext" "$ver"; fi
     elif [[ -n $vmatch ]]; then
-      fail=$((fail+1)); printf '  FAIL %s: %s blocks differ with %s still at %s -- REGRESSION\n' "$fx" "$diffs" "$ext" "$ver"
+      fail=$((fail+1))
+      printf '  FAIL %s: %s blocks differ with %s still at %s\n' "$fx" "$diffs" "$ext" "$ver"
+      printf '       %s did not move, but the manifest records no panduck version, so panduck\n' "$ext"
+      printf '       (installed %s) is not excluded -- do not call this a %s regression\n' "${pdv:-unknown}" "$ext"
+      printf '       until panduck#40 lands a panduck_version column and it too is unchanged\n'
     else
       skip=$((skip+1)); printf '  skip %s: %s blocks differ, %s moved off %s -- expected drift, regenerate\n' "$fx" "$diffs" "$ext" "$ver"
     fi

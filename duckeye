@@ -1246,6 +1246,7 @@ if [[ -n ${selector:-} && -n $doc && $mode != raw && $mode != summary && $mode !
   qsel=$(q "$(css_alias "$selector")")
   premacro+="CREATE OR REPLACE TEMP TABLE __qb AS
       SELECT row_number() OVER () AS ord, b.level AS lvl, b.element_type AS ty,
+             b.kind AS knd,
              coalesce(b.content,'') AS nm, b.attributes AS atr, b AS blk
       FROM (SELECT unnest(blocks) AS b FROM ($doc));
     CREATE OR REPLACE TEMP TABLE __qn AS
@@ -1294,12 +1295,31 @@ if [[ -n ${selector:-} && -n $doc && $mode != raw && $mode != summary && $mode !
   # text of their own -- a list_item's words live in child paragraphs, a paragraph's
   # in inline children -- so returning bare matches renders empty. Measured: `-Q
   # list_item` matched both items and printed nothing until the span was included.
+  #
+  # A block-kind match ALSO carries its ANCESTOR chain, because a child block is not
+  # well-formed outside its container and the writers differ on how badly they take
+  # it. Measured on a .docx, where the reader puts the item text on the list_item
+  # itself rather than in a child paragraph: `-Q li` selected both items, yet
+  # duck_blocks_to_pandoc_ast returned "blocks":[] -- a list_item with no enclosing
+  # list is not representable in the Pandoc AST, so the text was DROPPED, and -t md
+  # printed nothing. Pulling the real ancestors (rather than synthesising a wrapper)
+  # keeps the container's own attributes -- bullet vs ordered, start number.
+  #
+  # kind='inline' matches are deliberately excluded: an inline's ancestor is the
+  # paragraph holding it, and returning that would answer `-Q strong` with the whole
+  # surrounding sentence. Those keep failing with the message that explains why.
   doc="SELECT list(k.blk ORDER BY k.ord) AS blocks FROM __qb k
        WHERE EXISTS (
          SELECT 1 FROM __qs s JOIN __qn n ON n.node_id = s.node_id
          WHERE k.ord >= n.ord
            AND k.ord < coalesce((SELECT min(e.ord) FROM __qn e
-                 WHERE e.ord > n.ord AND e.lvl <= n.lvl), 2147483647))"
+                 WHERE e.ord > n.ord AND e.lvl <= n.lvl), 2147483647))
+          OR EXISTS (
+         SELECT 1 FROM __qs s JOIN __qn n ON n.node_id = s.node_id
+         JOIN __qb m ON m.ord = n.ord
+         WHERE m.knd = 'block' AND k.ord < n.ord AND k.lvl < n.lvl
+           AND n.ord < coalesce((SELECT min(e.ord) FROM __qn e
+                 WHERE e.ord > k.ord AND e.lvl <= k.lvl), 2147483647))"
 fi
 
 cte="WITH doc AS MATERIALIZED ($doc)"
@@ -1407,10 +1427,18 @@ if ! grep -q '[^[:space:]]' "$out"; then
              # standalone -- an inline is drawn as part of its containing block, so
              # a list of only inlines renders empty. Measured: `-Q bold` selects the
              # node and prints nothing. Exiting 0 with empty output hid both.
+             # Do not claim "nothing matched" -- at this point only the OUTPUT is
+             # known to be empty, and there are two other causes. Measured:
+             # `-Q li` on a .docx prints the items, `-Q li -t blocks` shows them in
+             # the JSON, and `-Q li -t md` produces nothing, because a bare
+             # list_item is not valid Pandoc AST outside its list. Saying "no blocks
+             # matching" there is simply false.
              [[ -n ${selector:-} ]] &&
-               die "no blocks matching '$selector' in $f
-       (inline types -- bold, italic, text, link -- render only inside their
-        containing block, so selecting one alone produces no output)" ;;
+               die "no output for '$selector' in $f
+       Either nothing matched, or every match was an inline type (bold, italic,
+       text, link), which renders only inside its containing block. Block-kind
+       matches carry their container, so -Q li works; -Q strong cannot, because
+       its container is the whole surrounding paragraph -- select that instead." ;;
   esac
 fi
 

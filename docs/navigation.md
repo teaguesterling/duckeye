@@ -135,9 +135,18 @@ duckeye -Q 'ul li' NOTES.md    # list items inside a list
 
 ### Two limits worth knowing
 
-**A match carries its subtree.** Container blocks hold no text of their own — a
-`list_item`'s words live in child paragraphs — so `-Q li` returns the item *and*
-its contents. Without that it would render empty.
+**A match carries its subtree, and a block-kind match also carries its
+ancestors.** Container blocks hold no text of their own — a `list_item`'s words
+live in child paragraphs — so `-Q li` returns the item *and* its contents. It
+also returns the enclosing `list`, because a `list_item` is not well-formed
+outside one: converted to a Pandoc AST it simply vanishes, and `-t md` would
+print nothing. The real ancestors are used, not a synthesised wrapper, so the
+container keeps its own attributes — bullet vs ordered, start number.
+
+The ancestor rule applies to `kind='block'` matches only. Inlines are excluded
+deliberately: an inline's container is the whole surrounding paragraph, and
+answering `-Q strong` with the entire sentence would not be the thing you asked
+for.
 
 **Attributes only work on the selected node.** `-Q 'h2 ~ code'` is refused rather
 than answered wrongly: attributes are matched after the structural selector, so a
@@ -158,6 +167,23 @@ The `-t, --to FMT` flag serializes the extracted document or section into differ
 * `md`: Markdown (converts section through pandoc).
 * `blocks`: Raw JSON array of DuckDB `duck_block` structs.
 * `pandoc`: Pandoc JSON AST.
+
+### Reading one format, querying as HTML, writing another
+
+`-f`/`-i`, `-Q`, and `-t` are independent stages, so all three can differ:
+
+```bash
+duckeye -Q 'h2' -t md    report.docx    # docx in, CSS query, markdown out
+duckeye -Q 'li' -t html  report.docx    # → <ul><li>alpha</li><li>beta</li></ul>
+duckeye -Q 'h1' -t md -o out.md  paper.odt
+```
+
+The selector runs on the duck_block vocabulary that every reader produces, so
+the HTML aliases (`h2`, `li`, `p`, `a`) work the same whatever the input format
+was. One caveat is worth knowing: a *writer* can flatten structure the selector
+needs. Pandoc's RTF writer, for instance, turns lists into bullet-prefixed
+paragraphs, so an `.rtf` produced that way holds no `list_item` for `-Q li` to
+find. That is a property of the file, not of the query.
 
 ```console
 # Extract section of a Word document as Markdown

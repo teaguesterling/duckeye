@@ -61,6 +61,9 @@ The word pumpernickel survives conversion.
 ## Second Section
 
 More prose here.
+
+- quincunx item
+- second item
 MD
 
 # pandoc is REQUIRED, not optional: format coverage is the whole point of this file,
@@ -94,6 +97,20 @@ if [[ -n $pandoc_works ]]; then
       has ".$ext renders"          "$CANARY"            $DUCKEYE "$TMP/canary.$ext"
       has ".$ext toc"              'Integration Canary' $DUCKEYE -T "$TMP/canary.$ext"
       has ".$ext section"          'More prose'         $DUCKEYE -S 'Second' "$TMP/canary.$ext"
+      # Readers disagree on where a list item's text lives: the markdown reader puts
+      # it in a child paragraph, the docx reader puts it on the list_item itself. A
+      # bare list_item is not representable in the Pandoc AST, so the docx shape used
+      # to convert to "blocks":[] and -t md printed NOTHING while -Q li alone worked.
+      # Asserting across every reader is what catches a shape like that.
+      # rtf is exempt, and the reason is the format, not duckeye: pandoc's RTF
+      # WRITER flattens a list into bullet-prefixed paragraphs, so canary.rtf holds
+      # no list structure to select. Measured -- its blocks are six paragraphs and
+      # headings, zero list_item. `-Q li` finding nothing there is correct.
+      if [[ $ext == rtf ]]; then
+        skipping ".$ext -Q li" "pandoc's rtf writer flattens lists to paragraphs"
+      else
+        has ".$ext -Q li survives -t md" 'quincunx' $DUCKEYE -Q 'li' -t md "$TMP/canary.$ext"
+      fi
     else
       skipping ".$ext" "pandoc cannot write $w here"
     fi

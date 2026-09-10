@@ -96,6 +96,15 @@ cat >"$TMP/flat.md" <<'EOF'
 just a paragraph, no headings at all
 EOF
 
+# A list, for the -Q ancestor-chain cases. A list_item is not well-formed outside
+# its list, so selecting one has to bring the list along.
+cat >"$TMP/list.md" <<'EOF'
+# Listing
+
+- alpha item
+- beta item
+EOF
+
 # Two adjacent prose blocks inside ONE section, for the cross-block search case.
 cat >"$TMP/span.md" <<'EOF'
 # Doc
@@ -798,8 +807,22 @@ no_leak 'doc -Q h2 excludes h1'    'Title'   $DUCKEYE -Q 'h2' "$TMP/doc.md"
 # An empty -Q result used to exit 0 printing nothing. Inline types are the
 # non-obvious cause: they render only inside their containing block.
 no  'doc -Q empty result fails'    $DUCKEYE -Q 'strong' "$TMP/doc.md"
-has 'doc -Q empty explains inline' 'render only inside' \
+has 'doc -Q empty explains inline' 'renders only inside' \
     bash -c "$DUCKEYE -Q 'strong' '$TMP/doc.md' 2>&1 >/dev/null"
+# The message must NOT claim nothing matched -- it cannot tell the two apart, and
+# claiming the wrong one sent a real debugging session down the wrong path.
+no_leak 'doc -Q empty avoids false claim' 'no blocks matching' \
+    bash -c "$DUCKEYE -Q 'strong' '$TMP/doc.md' 2>&1 >/dev/null"
+
+# A block-kind match carries its ancestors, so the writers see a well-formed
+# container. Without this, a list_item alone converts to an empty Pandoc AST and
+# -t md prints nothing at all.
+has 'doc -Q li keeps the list (blocks)' '"element_type":"list"' \
+    $DUCKEYE -Q 'li' -t blocks "$TMP/list.md"
+has 'doc -Q li renders as md list'   '-   alpha item' $DUCKEYE -Q 'li' -t md   "$TMP/list.md"
+has 'doc -Q li renders as html list' '<ul>'           $DUCKEYE -Q 'li' -t html "$TMP/list.md"
+# Ancestors, not the whole document: the heading is outside the list's subtree.
+no_leak 'doc -Q li excludes the heading' 'Listing' $DUCKEYE -Q 'li' -t md "$TMP/list.md"
 
 echo 'v1 flags'
 # The README embeds its own copy of the option list, and copies drift: it documented

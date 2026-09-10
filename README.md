@@ -191,7 +191,7 @@ renderer (`-o` names an output FILE):
 |---|---|
 | `ansi` | styled terminal text (default) |
 | `text` | plain text |
-| `md` | markdown, via a Pandoc AST |
+| `md` | markdown, via `duck_blocks_to_md` |
 | `html` | HTML, via `duck_blocks_to_html` |
 | `pandoc` | a Pandoc AST, ready to pipe into `pandoc -f json` |
 | `blocks` | the duck_blocks structures themselves, as JSON |
@@ -210,29 +210,30 @@ $ duckeye -S Install -t html README.md
 $ duckeye -t pandoc spec.rst | pandoc -f json -t docx -o spec.docx
 ```
 
-`-t pandoc` stamps the `pandoc-api-version` your local pandoc actually speaks, since the
-extension hardcodes an old one (see below). `-t` doesn't apply to `-d` (that output is a
+`-t pandoc` builds its AST with panduck, which reports the api version it emits, so
+the stamp is right without consulting the local pandoc. `-t` doesn't apply to `-d` (that output is a
 data table), to `-T` (already plain text), or to an archive's corpus listings — but it
 does apply to `-S` on an archive, which opens a document.
 
-**Known limitation — `-t md` and `-t pandoc` on tables from a native reader.** Both
-route through `duck_blocks_to_pandoc_ast`, and in the currently published
-`duck_block_utils` a table is exported in a shape real pandoc refuses:
+**`-t md` does not shell out.** It calls `duck_blocks_to_md`, one of the
+duck_blocks writers, so *writing* markdown needs no `pandoc` binary and takes no
+round trip through a Pandoc AST. `-t pandoc` is the only format that builds one.
+(Reading `.rst`, `.ipynb` and `.man` still runs `pandoc` — that is the reader
+side, and unchanged.)
 
-```console
-$ duckeye -t md notes.md          # notes.md contains a table
-JSON parse error: ... constructor Table ... expected Array but got Object
-```
+That matters for more than a dependency. A Pandoc AST has no representation for a
+block that cannot stand at the top level, and `duck_blocks_to_pandoc_ast` drops
+those silently rather than failing:
 
-The split is the opposite of what you would guess. A table read by **pandoc**
-(`.docx .odt .epub .rst .org .tex .rtf .textile .man .mediawiki`) carries a preserved
-AST tuple and converts fine. A table read **natively** (`.md`, `.html`, and a `zim://`
-article, which uses the HTML reader) has no such tuple and fails. Documents without
-tables are unaffected, as are `-t ansi`, `-t text`, `-t html` and `-t blocks`.
+| fragment | `-t pandoc` | `-t md` |
+|---|---|---|
+| paragraph, heading, code | converts | converts |
+| `list_item` on its own | **dropped — `blocks: []`** | `- macOS supported` |
+| an inline (`link`, `bold`) | **dropped — `blocks: []`** | `[link](https://example.com)` |
 
-Fixed upstream in `duck_block_utils` v1.7.0 and gone as soon as that reaches the
-community extension repository; nothing in duckeye needs to change. `test.sh` carries a
-guard that reports it as known-broken and says so loudly when it clears.
+Whole documents are unaffected in either writer: measured, an 11-block document
+produces 11 top-level AST blocks. It is fragments — exactly what `-Q` produces —
+where the AST loses content, which is why `-t md` no longer goes through one.
 
 ## Querying documents by CSS selector (`-Q`) — **experimental**
 
@@ -299,9 +300,8 @@ $ duckeye -Q 'li' -t html guide.docx
 
 ```console
 $ duckeye -Q 'list li' -t md guide.md
--   macOS supported
-
--   Linux supported
+- macOS supported
+- Linux supported
 ```
 
 **6 — Write the result to a file** with `-o` (`-t` picks the format, `-o` picks
@@ -347,11 +347,11 @@ $ duckeye -S 'Setup' -t md 'docs/**/*.md'
 
 ## Setup Details
 
-``` python
+```python
 setup_a()
 ```
 
-``` python
+```python
 setup_b()
 ```
 ```
@@ -417,11 +417,11 @@ by type, over many files, converted on the way out:
 
 ```console
 $ duckeye -S 'Setup' -Q 'code' -t md 'docs/**/*.md'
-``` python
+```python
 setup_a()
 ```
 
-``` python
+```python
 setup_b()
 ```
 ```
@@ -461,7 +461,7 @@ These are measured limits, not guesses:
 |---|---|
 | `-Q 'h2 code'` | refused — an attribute on a *context* node is unsupported, and `h2` is shorthand for one. Use `heading code`. |
 | `-Q 'code, blockquote'` | selector groups are not supported; run the two queries separately |
-| `-Q 'a'` with `-t ansi` or `-t md` | no output — a standalone inline has no block to render inside. It does work with `-t text`, `-t html` and `-t blocks`. |
+| `-Q 'a'` with `-t ansi` | no output — the terminal renderer draws an inline as part of its containing block. Every other writer emits it as a fragment: `-t md` gives `[link](https://example.com)`. |
 | `-Q 'heading:contains(Install)'` | pseudo-class predicates are not supported; `-S Install` is the substring query |
 | a flag after FILE | not parsed — `duckeye -S X doc.md -t md` fails. Flags come before the file. |
 
@@ -722,15 +722,15 @@ against the libraries, not duckeye:
 - **`-t` on a ZIM archive works around a `read_zim` pushdown bug** that silently ignores
   a `mimetype` filter and returns every row
   ([duckdb_zim#29](https://github.com/teaguesterling/duckdb_zim/issues/29)).
-- **`-t pandoc` needs its version stamp rewritten**, which duckeye does for you:
-  `duck_blocks_to_pandoc_ast` hardcodes `pandoc-api-version [1,20]`, which pandoc 3.x
-  rejects outright
-  ([duck_block_utils#22](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/22)).
-- **`-t md` and `-t pandoc` fail on documents containing tables**, because the AST
-  encodes `Table` with duck_blocks' `{headers, rows}` object where pandoc expects an
-  array
-  ([duck_block_utils#23](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/23)).
-  `-t html` and `-t text` are unaffected.
+- **`panduck_blocks_to_pandoc_ast` returns `meta` and `blocks` as JSON *strings***,
+  so every caller has to re-cast them before the result is emittable Pandoc JSON.
+  duckeye does that in a macro; a `panduck_blocks_to_pandoc_json()` would retire it.
+  (It does report the api version it emits, so duckeye no longer runs `pandoc -t
+  json` just to read one — that workaround is gone.)
+- **`-t pandoc` silently drops fragments that cannot stand at the top level of a
+  Pandoc AST** — a `list_item` outside its list, or a bare inline — returning
+  `blocks: []` instead of wrapping them or raising. Whole documents convert
+  correctly. `-t md` is unaffected: it uses `duck_blocks_to_md` and renders both.
 - **`-o text` runs words together** around inline markup, since `db_blocks_to_text`
   concatenates a block's inline children rather than walking them
   ([duck_block_utils#20](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/20)).

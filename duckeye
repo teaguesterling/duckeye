@@ -216,7 +216,8 @@ emit() {
     text)      printf 'duck_blocks_to_text(%s)' "$1" ;;
     html)      printf 'duck_blocks_to_html(%s)' "$1" ;;
     blocks)    printf 'to_json(%s)' "$1" ;;
-    pandoc|md) printf 'db_to_pandoc_json(%s)' "$1" ;;
+    md)        printf 'duck_blocks_to_md(%s)' "$1" ;;
+    pandoc)    printf 'db_to_pandoc_json(%s)' "$1" ;;
     *)         die "unknown output format: $out_fmt (ansi, text, md, html, pandoc, blocks)" 64 ;;
   esac
 }
@@ -283,13 +284,6 @@ setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -T, -S,
 # duck_blocks_to_pandoc_ast stamps pandoc-api-version [1,20], which pandoc 3.x refuses
 # outright (teaguesterling/duckdb_duck_block_utils#22). The encoding itself is fine, so
 # ask the local pandoc what version it speaks and stamp that instead.
-pandoc_apiver() {
-  local v
-  command -v pandoc >/dev/null &&
-    v=$(printf 'x\n' | pandoc -t json 2>/dev/null |
-        sed -n 's/^{*"pandoc-api-version":\[\([0-9,]*\)\].*/[\1]/p' | head -1)
-  printf '%s' "${v:-[1,20]}"
-}
 
 # Guess a format from the first bytes, for stdin with no -f. Only claims what it can
 # actually tell apart; anything else falls through to markdown, which is the format
@@ -407,8 +401,6 @@ if [[ $out_fmt != ansi ]]; then
   emit x >/dev/null                       # reject an unknown format before doing work
   [[ $mode == raw || $mode == summary || $mode == profile ]] && die '-t does not apply to data modes: output is a data table' 64
   [[ $mode == toc ]] && die '-t does not apply to -T: the outline is already plain text' 64
-  [[ $out_fmt == md ]] && ! command -v pandoc >/dev/null &&
-    die '-t md converts through pandoc, which is not installed' 3
 fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/duckeye.XXXXXX") || die 'cannot create temp directory'
@@ -1433,11 +1425,17 @@ case $mode in
 esac
 
 [[ $out_fmt == html ]] && exts+=" webbed"     # duck_blocks_to_html lives there
-if [[ $out_fmt == pandoc || $out_fmt == md ]]; then
+[[ $out_fmt == md   ]] && exts+=" markdown"   # duck_blocks_to_md lives there
+if [[ $out_fmt == pandoc ]]; then
+  exts+=" panduck"
+  # panduck's builder reports the api version it actually emits, so duckeye no longer
+  # runs `pandoc -t json` just to read a version number out of the output. The casts
+  # remain because the struct carries meta and blocks as JSON STRINGS; a panduck
+  # function returning ready-to-write Pandoc JSON would retire this macro too.
   premacro+="CREATE OR REPLACE TEMP MACRO db_to_pandoc_json(b) AS (
-    json_object('pandoc-api-version', '$(pandoc_apiver)'::JSON,
-                'meta',   duck_blocks_to_pandoc_ast(b).meta::JSON,
-                'blocks', duck_blocks_to_pandoc_ast(b).blocks::JSON)); "
+    json_object('pandoc-api-version', panduck_blocks_to_pandoc_ast(b)['pandoc-api-version']::JSON,
+                'meta',   panduck_blocks_to_pandoc_ast(b)['meta']::JSON,
+                'blocks', panduck_blocks_to_pandoc_ast(b)['blocks']::JSON)); "
 fi
 
 load="${prethreads:-}"
@@ -1470,14 +1468,6 @@ if [[ -n $via_pandoc ]]; then
   (( st[1] )) && exit "${st[1]}"
 else
   "${duck[@]}" >"$out" || exit $?
-fi
-
-# Only convert if there IS an AST. An empty $out means the query matched nothing, and
-# handing pandoc an empty file makes it print "JSON parse error: not enough input",
-# which reports a duckeye result as a pandoc failure. The guard below owns that case.
-if [[ $out_fmt == md && -s $out ]]; then
-  pandoc -f json -t markdown <"$out" >"$tmp/md" || die 'pandoc could not read the AST'
-  mv "$tmp/md" "$out"
 fi
 
 # duckdb prints a blank line for a single NULL row, so test for real content.

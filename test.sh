@@ -111,6 +111,7 @@ EOF
 
 # The README's "what doesn't work yet" table for -Q. Those are measured limits, and a
 # limit that quietly lifts makes the README wrong, so each row is asserted.
+mkdir -p "$TMP/nopandoc"   # an empty bin dir, to run duckeye with no pandoc on PATH
 cat >"$TMP/sel.md" <<'EOF'
 # Guide
 
@@ -846,7 +847,7 @@ no_leak 'doc -Q empty avoids false claim' 'no blocks matching' \
 # -t md prints nothing at all.
 has 'doc -Q li keeps the list (blocks)' '"element_type":"list"' \
     $DUCKEYE -Q 'li' -t blocks "$TMP/list.md"
-has 'doc -Q li renders as md list'   '-   alpha item' $DUCKEYE -Q 'li' -t md   "$TMP/list.md"
+has 'doc -Q li renders as md list'   '- alpha item' $DUCKEYE -Q 'li' -t md   "$TMP/list.md"
 has 'doc -Q li renders as html list' '<ul>'           $DUCKEYE -Q 'li' -t html "$TMP/list.md"
 # Ancestors, not the whole document: the heading is outside the list's subtree.
 no_leak 'doc -Q li excludes the heading' 'Listing' $DUCKEYE -Q 'li' -t md "$TMP/list.md"
@@ -923,11 +924,31 @@ no_leak 'plain -S miss mentions no selector' 'narrowed' \
 
 # README limits: pseudo-class predicates are not supported (-S is the substring query).
 no 'README limit: :contains unsupported' $DUCKEYE -Q 'heading:contains(Alpha)' "$TMP/doc.md"
-# A standalone inline renders in the writers that can emit a fragment, not in the
-# ones that need a containing block. Both halves are asserted so neither drifts.
-no  'README limit: inline -t md has no output'   $DUCKEYE -Q 'a' -t md   "$TMP/sel.md"
-has 'README limit: inline -t html works' '<a href' $DUCKEYE -Q 'a' -t html "$TMP/sel.md"
-has 'README limit: inline -t text works' 'link'    $DUCKEYE -Q 'a' -t text "$TMP/sel.md"
+# A standalone inline renders in every writer that can emit a FRAGMENT. -t md joined
+# them when it stopped round-tripping through the Pandoc AST, where a bare inline has
+# no representation; only the ansi renderer still needs a containing block.
+has 'README limit: inline -t html works' '<a href'  $DUCKEYE -Q 'a' -t html "$TMP/sel.md"
+has 'README limit: inline -t text works' 'link'     $DUCKEYE -Q 'a' -t text "$TMP/sel.md"
+has 'inline -t md works natively'  '[link](https://example.com)' \
+    $DUCKEYE -Q 'a' -t md "$TMP/sel.md"
+
+# -t md calls duck_blocks_to_md directly: no Pandoc AST, no pandoc(1). The AST route
+# emitted pandoc's own dialect (loose lists, a space after the fence marker, simple
+# tables) and dropped anything that cannot sit at an AST's top level.
+has 'md writer emits a tight list'  '- alpha item' $DUCKEYE -Q 'li' -t md "$TMP/list.md"
+no_leak 'md writer avoids loose list' '-   alpha'  $DUCKEYE -Q 'li' -t md "$TMP/list.md"
+has 'md writer emits a tagged fence' '```sh'       $DUCKEYE -t md "$TMP/sel.md"
+no_leak 'md writer avoids spaced fence' '``` sh'   $DUCKEYE -t md "$TMP/sel.md"
+# -t md must not need the pandoc binary. A stub that RECORDS being called proves it
+# without having to rebuild a PATH that still finds duckdb: shadow pandoc, run the
+# conversion, then assert both that it worked and that the stub was never touched.
+printf '#!/bin/sh\ntouch "$0.called"\nexit 1\n' >"$TMP/nopandoc/pandoc"
+chmod +x "$TMP/nopandoc/pandoc"
+ok  'md writer needs no pandoc(1)' bash -c \
+    "rm -f '$TMP/nopandoc/pandoc.called'
+     PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -t md '$TMP/sel.md' | grep -q 'Guide' \
+       && [ ! -e '$TMP/nopandoc/pandoc.called' ]"
+no  'README limit: inline -t ansi still cannot' $DUCKEYE -Q 'a' -t ansi "$TMP/sel.md"
 
 echo 'v1 flags'
 # The README embeds its own copy of the option list, and copies drift: it documented

@@ -710,6 +710,21 @@ DUCKEYE_TEST_ZIM=~/wikipedia.zim ./test.sh    # include the ZIM cases
 Covers every format and mode against fixtures it generates, plus the error paths and the
 quoting edge cases. ZIM cases skip unless `DUCKEYE_TEST_ZIM` points at an archive.
 
+`./integration.sh` runs one document through every format end to end. It can also
+check duckeye's blocks against panduck's **pre-parsed fixtures**, which is how a
+reader change upstream is caught before it reaches a user:
+
+```sh
+DUCKEYE_PANDUCK_FIXTURES=~/Projects/duckdb_panduck/test/fixtures ./integration.sh
+```
+
+Each fixture's manifest records the sha256 of the document its blocks were made
+from, and the run refuses to compare when the source has moved — a fixture of a
+different document would otherwise report agreement or a regression that is not
+one. `pdf` is compared on the `page_break` contract only, because duckeye and
+panduck reach PDF blocks by different routes and a block-for-block diff there
+reports a difference that is by design.
+
 ## AI agent integration
 
 A [skill file](skills/duckeye/SKILL.md) teaches AI coding agents how to use

@@ -218,8 +218,7 @@ does apply to `-S` on an archive, which opens a document.
 **`-t md` does not shell out.** It calls `duck_blocks_to_md`, one of the
 duck_blocks writers, so *writing* markdown needs no `pandoc` binary and takes no
 round trip through a Pandoc AST. `-t pandoc` is the only format that builds one.
-(Reading `.rst`, `.ipynb` and `.man` still runs `pandoc` — that is the reader
-side, and unchanged.)
+(Reading `.rst`, `.ipynb` and `.man` still runs `pandoc` — see below.)
 
 That matters for more than a dependency. A Pandoc AST has no representation for a
 block that cannot stand at the top level, and `duck_blocks_to_pandoc_ast` drops
@@ -614,6 +613,21 @@ Entries are dispatched on their mimetype, so a stylesheet renders as code instea
 being parsed as a page. That matters more than it sounds: a Gutenberg archive is 1.3M
 images against 141k HTML files, and even a Wikipedia carries CSS, JavaScript, and
 hundreds of thousands of entries with no mimetype at all.
+
+## The remaining `pandoc` dependency
+
+The goal is for panduck to do all of it. `pandoc(1)` is no longer used to write
+anything, or to convert an AST into blocks; three extensions still use it to
+**read**, and each for a measured reason:
+
+| ext | why pandoc still reads it |
+|---|---|
+| `.ipynb` | panduck returns one `raw` block holding the whole markdown cell verbatim, so no headings are extracted and `-T`/`-S` find nothing |
+| `.rst` | reads correctly and headings work, but table cells keep literal inline markup — a `**bold**` cell stays asterisks |
+| `.man`, `.N` | panduck declines roff deliberately: it is a macro language, and a reader that half-implements it produces documents that look right and are wrong |
+
+Everything else — `.docx .odt .epub .org .tex .rtf .textile .mediawiki`, plus
+`.md` and `.html` — is read natively, with no pandoc process.
 
 ## Formats
 

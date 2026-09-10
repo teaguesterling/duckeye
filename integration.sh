@@ -121,6 +121,10 @@ if [[ -n $pandoc_works ]]; then
       has ".$ext renders"          "$CANARY"            $DUCKEYE "$TMP/canary.$ext"
       has ".$ext toc"              'Integration Canary' $DUCKEYE -T "$TMP/canary.$ext"
       has ".$ext section"          'More prose'         $DUCKEYE -S 'Second' "$TMP/canary.$ext"
+      # The deprecated duck_block_utils converter announced itself on stderr for every
+      # pandoc-routed format. Asserting per-format is what proves the reader moved.
+      no_leak ".$ext no deprecated converter" 'pandoc_ast_to_blocks is DEPRECATED' \
+          bash -c "$DUCKEYE -T '$TMP/canary.$ext' 2>&1"
       # Readers disagree on where a list item's text lives: the markdown reader puts
       # it in a child paragraph, the docx reader puts it on the list_item itself. A
       # bare list_item is not representable in the Pandoc AST, so the docx shape used

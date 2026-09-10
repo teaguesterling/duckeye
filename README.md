@@ -622,12 +622,17 @@ anything, or to convert an AST into blocks; three extensions still use it to
 
 | ext | why pandoc still reads it |
 |---|---|
-| `.ipynb` | panduck returns one `raw` block holding the whole markdown cell verbatim, so no headings are extracted and `-T`/`-S` find nothing |
-| `.rst` | reads correctly and headings work, but table cells keep literal inline markup — a `**bold**` cell stays asterisks |
+| `.ipynb` | panduck returns one `raw` block holding the whole markdown cell verbatim, so no headings are extracted and `-T`/`-S` find nothing ([panduck#39](https://github.com/teaguesterling/duckdb_panduck/issues/39)) |
+| `.rst` | reads correctly and headings work, but table cells keep literal inline markup — a `**bold**` cell stays asterisks ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)) |
 | `.man`, `.N` | panduck declines roff deliberately: it is a macro language, and a reader that half-implements it produces documents that look right and are wrong |
 
 Everything else — `.docx .odt .epub .org .tex .rtf .textile .mediawiki`, plus
 `.md` and `.html` — is read natively, with no pandoc process.
+
+Closing [#38](https://github.com/teaguesterling/duckdb_panduck/issues/38) and
+[#39](https://github.com/teaguesterling/duckdb_panduck/issues/39) leaves roff as
+the only format needing pandoc, and panduck declines roff by design — so those
+two issues are the whole remaining distance.
 
 ## Formats
 
@@ -738,13 +743,15 @@ against the libraries, not duckeye:
   ([duckdb_zim#29](https://github.com/teaguesterling/duckdb_zim/issues/29)).
 - **`panduck_blocks_to_pandoc_ast` returns `meta` and `blocks` as JSON *strings***,
   so every caller has to re-cast them before the result is emittable Pandoc JSON.
-  duckeye does that in a macro; a `panduck_blocks_to_pandoc_json()` would retire it.
+  duckeye does that in a macro; a `panduck_blocks_to_pandoc_json()` would retire it
+  ([panduck#37](https://github.com/teaguesterling/duckdb_panduck/issues/37)).
   (It does report the api version it emits, so duckeye no longer runs `pandoc -t
   json` just to read one — that workaround is gone.)
 - **`-t pandoc` silently drops fragments that cannot stand at the top level of a
   Pandoc AST** — a `list_item` outside its list, or a bare inline — returning
   `blocks: []` instead of wrapping them or raising. Whole documents convert
-  correctly. `-t md` is unaffected: it uses `duck_blocks_to_md` and renders both.
+  correctly. `-t md` is unaffected: it uses `duck_blocks_to_md` and renders both
+  ([panduck#36](https://github.com/teaguesterling/duckdb_panduck/issues/36)).
 - **`-o text` runs words together** around inline markup, since `db_blocks_to_text`
   concatenates a block's inline children rather than walking them
   ([duck_block_utils#20](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/20)).

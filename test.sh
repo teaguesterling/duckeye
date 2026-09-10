@@ -763,6 +763,44 @@ else
   skipping 'man without pandoc' 'no man fixture'
 fi
 
+# -Q on DOCUMENTS. duck_blocks are the same shape as an AST -- depth-first order
+# plus a level column -- so they project into sitting_duck's node schema and its
+# selector engine runs unchanged. Before this, -Q on a document was accepted and
+# SILENTLY IGNORED: the whole file rendered as though no selector was given, which
+# is why 'selects only headings' below is the load-bearing assertion.
+echo 'document selectors'
+has 'doc -Q selects headings'      'Alpha'   $DUCKEYE -Q 'heading' "$TMP/doc.md"
+no_leak 'doc -Q drops non-matches' 'kumquat' $DUCKEYE -Q 'heading' "$TMP/doc.md"
+# A match carries its SUBTREE: container blocks hold no text of their own, so a
+# bare list_item or paragraph would render empty without it.
+has 'doc -Q carries the subtree'   'alpha body' $DUCKEYE -Q 'paragraph' "$TMP/doc.md"
+# attributes, from the duck_block attributes MAP
+has 'doc -Q attribute filters'     'Alpha'   $DUCKEYE -Q 'heading[heading_level=2]' "$TMP/doc.md"
+no_leak 'doc -Q attribute excludes' 'Title'  $DUCKEYE -Q 'heading[heading_level=2]' "$TMP/doc.md"
+# An attribute on a context node cannot be honoured by a post-filter, so it must
+# refuse rather than quietly return nothing. See teaguesterling/sitting_duck#117.
+no  'doc -Q refuses context attrs'  $DUCKEYE -Q 'heading[heading_level=2] ~ code' "$TMP/doc.md"
+has 'doc -Q context attr names the issue' 'sitting_duck#117' \
+    bash -c "$DUCKEYE -Q 'heading[heading_level=2] ~ code' '$TMP/doc.md' 2>&1 >/dev/null"
+# and the code path is untouched
+has 'code -Q still works'          'execute' $DUCKEYE -Q 'function_definition' "$TMP/test_code.py"
+# HTML aliases: a preprocessor over the selector, so people who know HTML but not
+# the duck_block vocabulary can still query. h1..h6 rewrite to an attribute on the
+# SELECTED node, which is the case the post-filter handles correctly.
+has 'doc -Q h2 alias'              'Alpha'   $DUCKEYE -Q 'h2' "$TMP/doc.md"
+# doc.md has no list, so the li alias is asserted against rich.md, which does.
+# The first version of this pointed at doc.md and failed for the honest reason:
+# -Q li matched nothing and (correctly, now) errored.
+[[ -f $TMP/rich.md ]] &&
+  has 'doc -Q li alias'            'alpha item' $DUCKEYE -Q 'li' "$TMP/rich.md"
+has 'doc -Q p alias'               'alpha body' $DUCKEYE -Q 'p' "$TMP/doc.md"
+no_leak 'doc -Q h2 excludes h1'    'Title'   $DUCKEYE -Q 'h2' "$TMP/doc.md"
+# An empty -Q result used to exit 0 printing nothing. Inline types are the
+# non-obvious cause: they render only inside their containing block.
+no  'doc -Q empty result fails'    $DUCKEYE -Q 'strong' "$TMP/doc.md"
+has 'doc -Q empty explains inline' 'render only inside' \
+    bash -c "$DUCKEYE -Q 'strong' '$TMP/doc.md' 2>&1 >/dev/null"
+
 echo 'v1 flags'
 # The README embeds its own copy of the option list, and copies drift: it documented
 # `-q` for the AST selector (the flag is -Q) and, through the v1 rename, listed -t

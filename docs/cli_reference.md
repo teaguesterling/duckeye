@@ -23,7 +23,7 @@ usage: duckeye [OPTION]... [FILE]
 | `-T` | `--toc` | Print table of contents / outline, indented by level |
 | `-S` | `--section NAME`| Print only the section whose heading matches NAME |
 | `-s` | `--search TEXT` | Search and print only innermost sections matching TEXT |
-| `-Q` | `--select SEL` | Query code AST by CSS selector (e.g. `.func`, `.class#Name`, `.func:async`) |
+| `-Q` | `--select SEL` | Query by CSS selector — code (`.func`, `.class#Name`) or documents (`heading`, `h2`, `li`, `code[language=sh]`) |
 | `-d` | `--data` | Read file as a data table (auto for parquet, csv, json, yaml, toml, xlsx, ...). Piped, emits JSONL |
 | `-D` | `--document` | Undo an earlier `-d`. Data files still route to data — use `-f` to name a document reader |
 | `-r` | `--raw` | Deprecated alias for `-d`; warns on stderr |

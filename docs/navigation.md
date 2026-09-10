@@ -93,6 +93,61 @@ $ duckeye -P 1-5 -T manual.pdf
 
 ---
 
+## 5b. Querying documents by CSS selector (`-Q`)
+
+`-Q` queries source code by CSS selector through `sitting_duck`. It works on
+**documents** too, because duck_blocks have the same shape as an AST — a
+depth-first ordering plus a level column — so they project into the same selector
+engine. One selector language, code and prose.
+
+```sh
+duckeye -Q 'heading' README.md          # every heading
+duckeye -Q 'list_item' NOTES.md         # list items, with their text
+duckeye -Q 'code' guide.md              # fenced code blocks
+duckeye -Q 'list > list_item' NOTES.md  # direct children only
+duckeye -Q 'paragraph > code' README.md # inline code inside paragraphs
+```
+
+**Attributes** come from the block's own attribute map:
+
+```sh
+duckeye -Q 'heading[heading_level=2]' README.md   # only h2s
+duckeye -Q 'heading[id=install-update]' README.md # by slug
+duckeye -Q 'code[language=sh]' README.md          # shell blocks only
+duckeye -Q 'heading[id]' README.md                # any heading that has an id
+```
+
+**HTML aliases** are accepted for the common types, so you can query with the
+vocabulary you already know. `h1`–`h6` become a heading plus a level attribute:
+
+| alias | duck_block type | | alias | duck_block type |
+|---|---|---|---|---|
+| `h1`…`h6` | `heading[heading_level=N]` | | `a` | `link` |
+| `p` | `paragraph` | | `strong`, `b` | `bold` |
+| `ul`, `ol` | `list` | | `em`, `i` | `italic` |
+| `li` | `list_item` | | `img` | `image` |
+| `pre` | `code` | | `del` | `strikethrough` |
+
+```sh
+duckeye -Q 'h2' README.md      # same as heading[heading_level=2]
+duckeye -Q 'ul li' NOTES.md    # list items inside a list
+```
+
+### Two limits worth knowing
+
+**A match carries its subtree.** Container blocks hold no text of their own — a
+`list_item`'s words live in child paragraphs — so `-Q li` returns the item *and*
+its contents. Without that it would render empty.
+
+**Attributes only work on the selected node.** `-Q 'h2 ~ code'` is refused rather
+than answered wrongly: attributes are matched after the structural selector, so a
+condition on a context node cannot be honoured. Tracked upstream as
+[sitting_duck#117](https://github.com/teaguesterling/sitting_duck/issues/117).
+
+Selecting an inline type alone (`bold`, `text`, `link`) produces no output —
+inlines render only inside their containing block — and duckeye says so rather
+than exiting silently.
+
 ## 6. Output Format Conversion (`-t`)
 
 The `-t, --to FMT` flag serializes the extracted document or section into different formats (`-o` names an output FILE):

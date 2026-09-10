@@ -42,7 +42,9 @@ Options:
                          level (so a chapter carries its subsections)
   -s, --search TEXT      print only the innermost sections whose text contains
                          TEXT, headings and code blocks included
-  -Q, --select SEL       query code AST by CSS selector (.func, .class#Name, .func:async, ...)
+  -Q, --select SEL       query by CSS selector. Code: .func, .class#Name,
+                         .func:async. Documents: heading, li, h2, code[language=sh],
+                         list > list_item -- HTML type names are accepted as aliases
   -d, --data             read FILE as data, not prose: SELECT * FROM FILE
                          (parquet, csv, json, xlsx, ...). Piped, it emits JSONL
   -D, --document         undo an earlier -d and read FILE as prose. Data files
@@ -1178,6 +1180,128 @@ fi
 
 # MATERIALIZED: the section/search queries reference the document more than once,
 # and the pandoc path's source is stdin, which can only be read one time.
+# HTML aliases for duck_block types. A preprocessor over the selector, applied
+# before it reaches the css parse, so `-Q 'h2'` and `-Q 'li'` work for anyone who
+# knows HTML but not the duck_block vocabulary. h1..h6 rewrite to an ATTRIBUTE on
+# the selected node, which is exactly the case the post-filter handles correctly.
+#
+# Word-boundary substitution rather than a parse rewrite: rebuilding a selector from
+# its parse tree is more machinery than this earns, and the boundaries hold for
+# every shape duck_block selectors take. It would mis-fire on a tag name appearing
+# inside a quoted attribute VALUE (-Q 'a[href="li"]'), which is why the aliases run
+# only over the portion outside brackets.
+css_alias() {
+  local sel=$1 head tail
+  # split at the first '[' so attribute values are never rewritten
+  if [[ $sel == *\[* ]]; then head=${sel%%\[*}; tail=${sel:${#head}}; else head=$sel; tail=; fi
+  head=$(printf '%s' "$head" | sed -E '
+    s/\bh([1-6])\b/heading[heading_level=\1]/g
+    s/\bp\b/paragraph/g
+    s/\b(ul|ol)\b/list/g
+    s/\bli\b/list_item/g
+    s/\ba\b/link/g
+    s/\b(strong|b)\b/bold/g
+    s/\b(em|i)\b/italic/g
+    s/\bpre\b/code/g
+    s/\bimg\b/image/g
+    s/\bbr\b/line_break/g
+    s/\bdel\b/strikethrough/g')
+  printf '%s%s' "$head" "$tail"
+}
+
+# ---------------------------------------------------------------- -Q on documents
+# -Q queries source code by CSS selector through sitting_duck. Documents can be
+# queried the same way, because duck_blocks are the same SHAPE as an AST: a
+# depth-first ordering plus a level column fully determines a tree, so node_id is
+# row position and a node's parent is the nearest preceding row at a smaller level.
+# Projecting that into sitting_duck's node schema lets ast_select_from run
+# unchanged -- one selector language over code and prose, rather than a second
+# dialect to keep in sync. prototypes/leveled_ast.sql has the generic form, and
+# teaguesterling/sitting_duck#117 asks for the two changes that remove the
+# workarounds below.
+#
+# Until now, -Q on a document was SILENTLY IGNORED: the selector was accepted and
+# the whole file rendered as though it had never been given.
+# Code sources already honour -Q: they route through sitting_duck's own
+# ast_select/ast_select_from before ever building blocks, so $doc for them is
+# ALREADY the selected subset. Re-projecting it here would apply the document
+# pipeline to an AST-derived block list and select from the wrong tree -- measured,
+# it broke `-Q` on .py and on code globs while document selectors worked.
+if [[ -n ${selector:-} && -n $doc && $mode != raw && $mode != summary && $mode != profile
+      && $doc != *ast_to_blocks* && $doc != *ast_select* ]]; then
+  # An attribute on a CONTEXT node cannot work here. Attributes are matched after
+  # the structural selector, so a condition on any node but the selected one is
+  # lost -- `heading[heading_level=2] ~ code` would quietly return nothing. Refuse
+  # rather than answer wrongly; sitting_duck#117 ask 1 is the real fix.
+  aliased=$(css_alias "$selector")
+  if [[ $aliased =~ \[[^]]*\][^[]*[\>\+\~[:space:]] ]]; then
+    die "-Q: an attribute on a context node is not supported for documents yet ($selector).
+       Put the attribute on the selected node, or see teaguesterling/sitting_duck#117" 64
+  fi
+  exts+=" sitting_duck"
+  # SEMANTIC_TYPE is not in duckdb_types(), so typed NULLs must be borrowed from a
+  # zero-row read_ast() of a real source file. duckeye itself is one, and is always
+  # present. sitting_duck#117 ask 2 would remove this.
+  qself=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+  qsel=$(q "$(css_alias "$selector")")
+  premacro+="CREATE OR REPLACE TEMP TABLE __qb AS
+      SELECT row_number() OVER () AS ord, b.level AS lvl, b.element_type AS ty,
+             coalesce(b.content,'') AS nm, b.attributes AS atr, b AS blk
+      FROM (SELECT unnest(blocks) AS b FROM ($doc));
+    CREATE OR REPLACE TEMP TABLE __qn AS
+      SELECT 1 AS node_id, 0 AS ord, (SELECT min(lvl) FROM __qb) - 1 AS lvl, 'document' AS ty, '' AS nm
+      UNION ALL SELECT ord + 1, ord, lvl, ty, nm FROM __qb;
+    CREATE OR REPLACE TEMP TABLE __qa AS
+      SELECT a.node_id::BIGINT AS node_id, a.ty::VARCHAR AS type,
+             (SELECT semantic_type FROM read_ast('$qself') WHERE false) AS semantic_type,
+             0::UTINYINT AS flags, a.nm::VARCHAR AS name,
+             (SELECT qualified_name FROM read_ast('$qself') WHERE false) AS qualified_name,
+             NULL::VARCHAR AS signature_type,
+             (SELECT parameters FROM read_ast('$qself') WHERE false) AS parameters,
+             NULL::VARCHAR[] AS modifiers, NULL::VARCHAR AS annotations,
+             '$src'::VARCHAR AS file_path, 'duck_block' AS language,
+             NULL::UINTEGER AS start_line, NULL::UINTEGER AS end_line,
+             (SELECT max(p.node_id) FROM __qn p WHERE p.ord < a.ord AND p.lvl < a.lvl)::BIGINT AS parent_id,
+             a.lvl::UINTEGER AS depth,
+             (row_number() OVER (PARTITION BY (SELECT max(p.node_id) FROM __qn p
+                WHERE p.ord < a.ord AND p.lvl < a.lvl) ORDER BY a.ord) - 1)::INTEGER AS sibling_index,
+             (SELECT count(*) FROM __qn c WHERE c.ord > a.ord AND c.lvl = a.lvl + 1
+                AND c.ord < coalesce((SELECT min(e.ord) FROM __qn e
+                     WHERE e.ord > a.ord AND e.lvl <= a.lvl), 2147483647))::UINTEGER AS children_count,
+             (SELECT count(*) FROM __qn d WHERE d.ord > a.ord
+                AND d.ord < coalesce((SELECT min(e.ord) FROM __qn e
+                     WHERE e.ord > a.ord AND e.lvl <= a.lvl), 2147483647))::UINTEGER AS descendant_count,
+             (SELECT scope FROM read_ast('$qself') WHERE false) AS scope,
+             a.nm::VARCHAR AS peek
+      FROM __qn a;
+    CREATE OR REPLACE TEMP TABLE __qat AS
+      SELECT ord + 1 AS node_id, unnest(map_keys(atr)) AS key, unnest(map_values(atr)) AS value
+      FROM __qb WHERE atr IS NOT NULL AND len(map_keys(atr)) > 0;
+    CREATE OR REPLACE TEMP TABLE __qc AS
+      SELECT an.name AS key,
+             (SELECT trim(v.name, '\"') FROM parse_ast_list_table('$qsel','css') v
+               WHERE v.parent_id = an.parent_id
+                 AND v.type IN ('integer_value','plain_value','string_value') LIMIT 1) AS value
+      FROM parse_ast_list_table('$qsel','css') an WHERE an.type = 'attribute_name';
+    CREATE OR REPLACE TEMP TABLE __qs AS
+      SELECT b.node_id FROM ast_select_from('__qa',
+               regexp_replace('$qsel', '\[[^\]]*\]', '', 'g')) b
+      WHERE NOT EXISTS (SELECT 1 FROM __qc c WHERE NOT EXISTS (
+              SELECT 1 FROM __qat a WHERE a.node_id = b.node_id AND a.key = c.key
+                AND (c.value IS NULL OR a.value = c.value)));
+    "
+  # A match carries its SUBTREE, not just the matched node. Container blocks hold no
+  # text of their own -- a list_item's words live in child paragraphs, a paragraph's
+  # in inline children -- so returning bare matches renders empty. Measured: `-Q
+  # list_item` matched both items and printed nothing until the span was included.
+  doc="SELECT list(k.blk ORDER BY k.ord) AS blocks FROM __qb k
+       WHERE EXISTS (
+         SELECT 1 FROM __qs s JOIN __qn n ON n.node_id = s.node_id
+         WHERE k.ord >= n.ord
+           AND k.ord < coalesce((SELECT min(e.ord) FROM __qn e
+                 WHERE e.ord > n.ord AND e.lvl <= n.lvl), 2147483647))"
+fi
+
 cte="WITH doc AS MATERIALIZED ($doc)"
 
 # A section runs to the block before the next heading. INT_MAX stands in for
@@ -1276,7 +1400,17 @@ if ! grep -q '[^[:space:]]' "$out"; then
     toc)     die "no headings in $f" ;;
     section) die "no section matching '$arg' in $f" ;;
     search)  die "no section matching '$arg' in $f" ;;
-    full)    [[ -n $zim_open ]] && die "no article matching '$arg' in $f" ;;
+    full)    [[ -n $zim_open ]] && die "no article matching '$arg' in $f"
+             # -Q produced nothing. Two causes, and the second is not obvious:
+             # either no block matched, or the matches were INLINE types (bold,
+             # italic, text, link) which duck_blocks_render_ansi does not render
+             # standalone -- an inline is drawn as part of its containing block, so
+             # a list of only inlines renders empty. Measured: `-Q bold` selects the
+             # node and prints nothing. Exiting 0 with empty output hid both.
+             [[ -n ${selector:-} ]] &&
+               die "no blocks matching '$selector' in $f
+       (inline types -- bold, italic, text, link -- render only inside their
+        containing block, so selecting one alone produces no output)" ;;
   esac
 fi
 

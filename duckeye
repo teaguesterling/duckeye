@@ -422,7 +422,17 @@ if [[ -n $in_file ]]; then
   set -- "$in_file"
 fi
 f=${1:-}
-[[ $# -le 1 ]] || die 'only one FILE at a time' 64
+# Parsing stops at the first non-flag, so anything after FILE lands here as a second
+# FILE. Saying "only one FILE" about `-t text` is false and reads as a glob problem.
+# Measured: `-S Setup doc.md -t text` reported two files while the identical command
+# with -t before doc.md worked, which looked like -S not supporting what -Q supports.
+if [[ $# -gt 1 ]]; then
+  for extra in "${@:2}"; do
+    [[ $extra == -* ]] &&
+      die "flags must come before FILE (saw $extra after $1)" 64
+  done
+  die 'only one FILE at a time' 64
+fi
 
 # Standard input: an explicit "-", or no FILE at all with something piped in. It is
 # spooled to a file rather than streamed because pandoc needs to seek (a .docx is a zip),
@@ -1427,8 +1437,17 @@ fi
 if ! grep -q '[^[:space:]]' "$out"; then
   case $mode in
     toc)     die "no headings in $f" ;;
-    section) die "no section matching '$arg' in $f" ;;
-    search)  die "no section matching '$arg' in $f" ;;
+    section|search)
+             # -Q rewrites the document BEFORE -S/-s slice it, so a selector that
+             # drops headings leaves nothing for the phrase to match. Measured: `-S
+             # Install` works, `-S Install -Q code` reports no section matching
+             # 'Install' -- blaming the phrase for what the selector removed.
+             [[ -n ${selector:-} ]] &&
+               die "no section matching '$arg' after -Q '$selector' narrowed $f
+       -Q is applied FIRST, so -S/-s only see what the selector kept. To select
+       inside a section instead, pipe: duckeye -S '$arg' -t md FILE | duckeye -Q
+       '$selector' -f md -"
+             die "no section matching '$arg' in $f" ;;
     full)    [[ -n $zim_open ]] && die "no article matching '$arg' in $f"
              # -Q produced nothing. Two causes, and the second is not obvious:
              # either no block matched, or the matches were INLINE types (bold,

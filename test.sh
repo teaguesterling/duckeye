@@ -864,6 +864,34 @@ no_leak 'code -Q zero match prints no NULL' 'NULL' $DUCKEYE -Q 'nosuchnode' "$TM
 # ...and -t md must not report a duckeye result as a pandoc failure.
 no_leak 'doc -Q zero match hides pandoc error' 'JSON parse error' \
     bash -c "$DUCKEYE -Q 'nosuchtype' -t md '$TMP/sel.md' 2>&1"
+
+# Two diagnostics that used to name the wrong culprit. Both are documented in the
+# README's limits table, so both are pinned.
+#
+# Parsing stops at the first non-flag, so `-t text` after FILE became a second FILE
+# and was reported as "only one FILE at a time" -- which reads as a glob problem.
+has 'flag after FILE names the flag' 'flags must come before FILE' \
+    bash -c "$DUCKEYE -S Alpha '$TMP/doc.md' -t text 2>&1 >/dev/null"
+no_leak 'flag after FILE is not a file count' 'only one FILE' \
+    bash -c "$DUCKEYE -S Alpha '$TMP/doc.md' -t text 2>&1 >/dev/null"
+# ...but two real files must still say that.
+has 'two files still counted' 'only one FILE' \
+    bash -c "$DUCKEYE -T '$TMP/doc.md' '$TMP/list.md' 2>&1 >/dev/null"
+
+# -Q rewrites the document before -S slices it, so a selector that drops headings
+# leaves nothing to match. Blaming the phrase sent this session looking for a -S bug.
+has 'S+Q blames the selector, not the phrase' 'narrowed' \
+    bash -c "$DUCKEYE -S Alpha -Q 'code' '$TMP/doc.md' 2>&1 >/dev/null"
+has 'S+Q suggests the pipe' 'duckeye -S' \
+    bash -c "$DUCKEYE -S Alpha -Q 'code' '$TMP/doc.md' 2>&1 >/dev/null"
+# A plain -S miss keeps the plain message -- the new one must not swallow it.
+has 'plain -S miss keeps its message' "no section matching 'nosuchsection'" \
+    bash -c "$DUCKEYE -S nosuchsection '$TMP/doc.md' 2>&1 >/dev/null"
+no_leak 'plain -S miss mentions no selector' 'narrowed' \
+    bash -c "$DUCKEYE -S nosuchsection '$TMP/doc.md' 2>&1 >/dev/null"
+
+# README limits: pseudo-class predicates are not supported (-S is the substring query).
+no 'README limit: :contains unsupported' $DUCKEYE -Q 'heading:contains(Alpha)' "$TMP/doc.md"
 # A standalone inline renders in the writers that can emit a fragment, not in the
 # ones that need a containing block. Both halves are asserted so neither drifts.
 no  'README limit: inline -t md has no output'   $DUCKEYE -Q 'a' -t md   "$TMP/sel.md"

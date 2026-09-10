@@ -214,6 +214,35 @@ GMD
   ok  'README: h3 == heading[heading_level=3]' bash -c \
       "diff <($DUCKEYE -Q 'h3' -t md '$TMP/guide.docx') \
             <($DUCKEYE -Q 'heading[heading_level=3]' -t md '$TMP/guide.docx')"
+
+  # Examples 7-12: the more involved queries. A heading does NOT contain the prose
+  # after it -- both sit at level 1 -- so "under a heading" is a SPAN (-S), not a
+  # descendant selector. These pin that distinction and the pipe that composes them.
+  mkdir -p "$TMP/tree/sub"
+  printf '# Alpha Doc\n\n## Setup Notes\n\n```python\nsetup_a()\n```\n' >"$TMP/tree/a.md"
+  printf '# Beta Doc\n\n## Setup Details\n\n```python\nsetup_b()\n```\n' >"$TMP/tree/sub/b.md"
+  has 'README 7: -S phrase carries the body' 'curl -sL' \
+      $DUCKEYE -S 'Install' -t text "$TMP/guide.md"
+  has 'README 8: -S across a glob'  'setup_b()' \
+      $DUCKEYE -S 'Setup' -t md "$TMP/tree/**/*.md"
+  has 'README 9: #name exact match' 'Installation' \
+      $DUCKEYE -Q 'heading#Installation' -t text "$TMP/guide.md"
+  # ...and #name is EXACT and case-sensitive, unlike -S. If it ever loosened, the
+  # README's reason for preferring it over -S would be gone.
+  no  'README 9: #name is case-sensitive' \
+      $DUCKEYE -Q 'heading#installation' -t text "$TMP/guide.md"
+  ok  'README 10: -S piped into -Q' bash -c \
+      "$DUCKEYE -S 'Install' -t md '$TMP/guide.md' \
+       | $DUCKEYE -Q 'code' -t text -f md - | grep -q 'curl -sL'"
+  has 'README 11: typed select across tree' 'setup_a()' \
+      $DUCKEYE -Q 'code[language=python]' -t text "$TMP/tree/**/*.md"
+  has 'README 12: -s innermost section' 'Run the installer' \
+      $DUCKEYE -s 'installer' -t text "$TMP/guide.md"
+  # Child vs descendant differ as in CSS; both must keep working.
+  has 'README: child combinator'      'macOS supported' \
+      $DUCKEYE -Q 'list > list_item' -t md "$TMP/guide.md"
+  has 'README: descendant combinator' 'macOS supported' \
+      $DUCKEYE -Q 'list li' -t md "$TMP/guide.md"
 else
   skipping 'README -Q examples' 'pandoc missing or non-functional'
 fi

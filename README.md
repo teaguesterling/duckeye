@@ -313,6 +313,91 @@ $ cat warning.md
 > A quoted warning.
 ```
 
+### More involved queries
+
+**Headings do not contain their content.** This is the thing to internalise: in
+the `duck_block` tree a heading and the prose after it are *siblings*, both at
+level 1. So "everything under the *Install* heading" is not a descendant
+selector — it is a **span**, from the heading to the next heading of the same or
+higher level, and that is what `-S` computes. `-Q` walks the tree; `-S`/`-s`
+walk the document. Reach for whichever one matches the question.
+
+**7 — Everything under headings containing a phrase.** `-S` matches a substring,
+case-insensitively, and carries the whole section including its subsections:
+
+```console
+$ duckeye -S 'Install' -t text guide.md
+Installation
+
+Run the installer:
+
+curl -sL example.com/i.sh | sh
+
+macOS supported
+
+Linux supported
+```
+
+**8 — The same phrase across a whole tree**, converted on the way out. Globs work
+for `-T`, `-S`, `-s` and `-Q` alike:
+
+```console
+$ duckeye -S 'Setup' -t md 'docs/**/*.md'
+## Setup Notes
+
+## Setup Details
+
+``` python
+setup_a()
+```
+
+``` python
+setup_b()
+```
+```
+
+**9 — An exact heading rather than a phrase.** `#name` matches the block's text
+exactly and case-sensitively, and returns only the heading — where `-S` matches
+loosely and returns the body too. Use it when a phrase would be ambiguous:
+
+```console
+$ duckeye -Q 'heading#Installation' -t text guide.md
+Installation
+```
+
+**10 — Narrow to a section, then select inside it.** These compose through a
+pipe, because `-S` emits a document that `-Q` can read back:
+
+```console
+$ duckeye -S 'Install' -t md guide.md | duckeye -Q 'code' -t text -f md -
+curl -sL example.com/i.sh | sh
+```
+
+**11 — One node type across a tree**, which is the query `grep` cannot express
+because it does not know where a fence starts:
+
+```console
+$ duckeye -Q 'code[language=python]' -t text 'docs/**/*.md'
+setup_a()
+
+setup_b()
+```
+
+**12 — The innermost section holding a term.** `-s` reports the smallest section
+that contains a match, so a hit lands on the subsection rather than wrapping the
+whole chapter around it:
+
+```console
+$ duckeye -s 'installer' -t text guide.md
+Installation
+
+Run the installer:
+...
+```
+
+Child (`>`) and descendant (` `) combinators both work, and differ as in CSS:
+`list > list_item` takes only direct children, `list li` takes any depth.
+
 ### What doesn't work yet
 
 These are measured limits, not guesses:
@@ -322,6 +407,9 @@ These are measured limits, not guesses:
 | `-Q 'h2 code'` | refused — an attribute on a *context* node is unsupported, and `h2` is shorthand for one. Use `heading code`. |
 | `-Q 'code, blockquote'` | selector groups are not supported; run the two queries separately |
 | `-Q 'a'` with `-t ansi` or `-t md` | no output — a standalone inline has no block to render inside. It does work with `-t text`, `-t html` and `-t blocks`. |
+| `-Q 'heading:contains(Install)'` | pseudo-class predicates are not supported; `-S Install` is the substring query |
+| `-S X -Q Y` in one command | `-Q` is applied **first**, so `-S` only sees what the selector kept — usually nothing. Use the pipe in example 10. duckeye says so rather than blaming the phrase. |
+| a flag after FILE | not parsed — `duckeye -S X doc.md -t md` fails. Flags come before the file. |
 
 A `-Q` that matches nothing prints **nothing** on stdout, writes a message to
 stderr and exits non-zero — the same in every `-t`, so it is safe to test in a

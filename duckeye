@@ -1401,8 +1401,15 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
   # PR #30) makes a fragment legal input and wraps it with an IMPLICIT parent, so
   # -t pandoc stops dropping content even without this block. That fixes the data
   # loss, not the output: an implicit parent is synthetic and carries no attributes,
-  # while this carries the REAL ancestors -- bullet vs ordered, start number. Keep
-  # both. Gate any use of the new functions on the artifact, not the spec version:
+  # while this carries the REAL ancestors -- bullet vs ordered, start number.
+  #
+  # They COMPOSE, which is the part that decides what to do rather than what to
+  # keep: spec 6.6 states that repair leaves a real ancestor alone. So the shape is
+  # not "mine INSTEAD of repair" but this block first, repair on top -- this supplies
+  # the attributes when the ancestors are known, repair covers what is left. Nothing
+  # is double-wrapped and nothing is lost either way.
+  #
+  # Gate any use of the new functions on the artifact, not the spec version:
   #   SELECT count(*) FROM duckdb_functions() WHERE function_name='duck_blocks_repair'
   # Measured 2026-09-10 on installed 9599650 / spec 6.5: absent.
   doc="SELECT list(k.blk ORDER BY k.ord) AS blocks FROM __qb k

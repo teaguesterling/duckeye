@@ -1124,6 +1124,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
   *.php|*.php3|*.php4|*.php5|*.phtml|*.lua|*.r|*.sh|*.bash|*.zsh|*.zig|*.dart|\
   *.sql|*.gql|*.graphql|*.tf|*.tfvars|*.hcl|*.css|.auto)
     exts="sitting_duck"
+    code_src=1     # this reader applies -Q itself; see the -Q block's guard
     if [[ -n ${selector:-} ]]; then
       premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');
 CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(q "$selector")'); "
@@ -1278,10 +1279,18 @@ search_span_doc() {
 
 # Narrow BEFORE selecting. mode is left alone: it still names what the user asked for,
 # which is what the empty-result messages below report against.
+span_probe=
 case $mode in
   section) doc=$(section_span_doc "$doc") ;;
   search)  doc=$(search_span_doc "$doc") ;;
 esac
+# Keep the span on its own, before -Q rewrites $doc again. An empty composed result
+# has two causes -- the phrase found no section, or the section held nothing matching
+# the selector -- and the finished query cannot tell them apart. This asks the span
+# alone, but ONLY when the result came back empty, so a successful run never pays for
+# it. Saying "either A or B" was honest; saying which one is useful.
+[[ -n ${selector:-} && $mode != full ]] &&
+  span_probe="SELECT count(*) FROM ($doc) WHERE blocks IS NOT NULL;"
 
 #
 # Until now, -Q on a document was SILENTLY IGNORED: the selector was accepted and
@@ -1291,8 +1300,14 @@ esac
 # ALREADY the selected subset. Re-projecting it here would apply the document
 # pipeline to an AST-derived block list and select from the wrong tree -- measured,
 # it broke `-Q` on .py and on code globs while document selectors worked.
-if [[ -n ${selector:-} && -n $doc && $mode != raw && $mode != summary && $mode != profile
-      && $doc != *ast_to_blocks* && $doc != *ast_select* ]]; then
+# The test is an explicit flag, not a substring of $doc. It used to be `$doc !=
+# *ast_to_blocks*`, which was meant to spot sitting_duck's ast_to_blocks_from -- but
+# duck_block_utils' pandoc_ast_to_blocks CONTAINS that substring, so every
+# pandoc-routed format (.rst, .ipynb, .man) matched the exclusion and had its -Q
+# silently ignored. Measured: `-Q code -t text doc.rst` rendered the whole document.
+# Silent ignore is the exact failure this block was added to end.
+if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
+      && $mode != raw && $mode != summary && $mode != profile ]]; then
   # An attribute on a CONTEXT node cannot work here. Attributes are matched after
   # the structural selector, so a condition on any node but the selected one is
   # lost -- `heading[heading_level=2] ~ code` would quietly return nothing. Refuse
@@ -1431,6 +1446,18 @@ for e in $DUCKEYE_BASE $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
 duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")
 [[ -n $premacro ]] && duck+=(-s "$premacro")   # its own -s: macros must exist before $sql binds
 duck+=(-s "$sql")
+
+# Runs $span_probe through the same reader the real query used -- a pandoc-routed
+# file has to be piped in again, since its blocks arrive on stdin, not from a path.
+# Only ever called on the failure path.
+span_rows() {
+  local q=(duckdb -list -noheader -s "$load" -s "$span_probe")
+  if [[ -n $via_pandoc ]]; then
+    pandoc -f "$from" "$f" -t json 2>/dev/null | "${q[@]}" 2>/dev/null
+  else
+    "${q[@]}" 2>/dev/null
+  fi
+}
 page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
 
 # Buffered so an empty result can be reported instead of printed as silence.
@@ -1458,15 +1485,14 @@ if ! grep -q '[^[:space:]]' "$out"; then
   case $mode in
     toc)     die "no headings in $f" ;;
     section|search)
-             # Composed, these run span-then-select, so an empty result has two
-             # causes and this cannot tell them apart in one query: the phrase found
-             # no section, or the section held nothing matching the selector. Name
-             # both rather than pick one -- the previous message picked wrong.
-             [[ -n ${selector:-} ]] &&
-               die "no output for '$arg' with -Q '$selector' in $f
-       -S/-s narrow the document first, then -Q selects inside what is left. So
-       either no section matched '$arg', or nothing in it matched '$selector'.
-       Drop -Q to see whether the section itself is there."
+             # Composed, these run span-then-select. Re-run the span by itself to say
+             # WHICH half came up empty rather than listing both possibilities.
+             if [[ -n $span_probe ]]; then
+               [[ $(span_rows) == 0 ]] && die "no section matching '$arg' in $f"
+               die "no blocks matching '$selector' inside '$arg' in $f
+       The section is there; nothing in it matched the selector. Drop -Q to see
+       the section, or widen the selector."
+             fi
              die "no section matching '$arg' in $f" ;;
     full)    [[ -n $zim_open ]] && die "no article matching '$arg' in $f"
              # -Q produced nothing. Two causes, and the second is not obvious:

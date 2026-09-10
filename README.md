@@ -435,8 +435,19 @@ $ duckeye -Q 'a' -t html guide.md
 <a href="https://example.com">link</a>
 
 $ duckeye -S 'Install' -Q 'a' -t html guide.md
-duckeye: no output for 'Install' with -Q 'a' in guide.md
-...
+duckeye: no blocks matching 'a' inside 'Install' in guide.md
+       The section is there; nothing in it matched the selector. Drop -Q to see
+       the section, or widen the selector.
+```
+
+Note which half it blames. A composed query can come back empty because the
+phrase matched no section, or because the section held nothing matching the
+selector — so on a miss (and only on a miss) duckeye re-runs the span alone to
+find out which, and says so:
+
+```console
+$ duckeye -S 'Nonexistent' -Q 'a' guide.md
+duckeye: no section matching 'Nonexistent' in guide.md
 ```
 
 Child (`>`) and descendant (` `) combinators both work, and differ as in CSS:

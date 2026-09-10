@@ -147,9 +147,10 @@ duckeye -s 'systemd' -Q 'li'   -t md notes.md     # innermost section, then item
 
 That ordering is the only one that composes: a selector applied first usually
 removes the headings, leaving `-S` nothing to match. When a composed query comes
-back empty, either the phrase matched no section or the section held nothing
-matching the selector — one query cannot separate those, so the message names
-both and suggests dropping `-Q` to tell which.
+back empty there are two possible causes — the phrase matched no section, or the
+section held nothing matching the selector. The finished query cannot separate
+them, so on a miss (and only on a miss) the span is re-run on its own and the
+message names the half that actually failed.
 
 Headings do not *contain* the prose after them — both sit at level 1 — so
 "everything under a heading" is a span, not a descendant selector. That is why

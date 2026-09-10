@@ -20,6 +20,19 @@ pass=0 fail=0 skip=0 known=0 fixed=0
 declare -A known_by; cause=unattributed
 strip() { sed 's/\x1b\[[0-9;]*m//g'; }
 
+# bash runs command_not_found_handle in a SUBSHELL, so a counter incremented here is
+# discarded -- measured. The marker file is what survives, and the summary turns it
+# into a non-zero exit. Without this a misspelled or missing helper is a silent no-op:
+# bash reports it on stderr and the suite counts neither pass nor fail, so the
+# assertion simply vanishes. Measured: 13 no_leak calls and 2 no calls disappeared
+# this way while the suite still printed "0 failed".
+SUITE_BUG=$TMP/.suite_bug
+command_not_found_handle() {
+  printf '  FAIL undefined helper or command: %s\n' "$1"
+  : >"$SUITE_BUG"
+  return 127
+}
+
 # ok NAME CMD...        — must exit 0
 # no NAME CMD...        — must exit non-zero
 # has NAME PATTERN CMD... — must exit 0 and its output must match PATTERN
@@ -891,10 +904,17 @@ has 's then Q selects inside the section' 'code_block_token' \
 no      'S then Q is actually scoped'   $DUCKEYE -S Alpha -Q 'code' -t text "$TMP/doc.md"
 no_leak 'S then Q scoping drops Beta code' 'code_block_token' \
         $DUCKEYE -S Alpha -Q 'code' -t text "$TMP/doc.md"
-# An empty composed result has two causes and one query cannot separate them, so the
-# message must name both instead of picking one -- picking one is what went wrong.
-has 'S+Q empty names both causes' 'either no section matched' \
+# An empty composed result has two causes. Rather than list both, the span is re-run
+# on the failure path to say which -- so the two cases must produce DIFFERENT messages.
+has 'S+Q empty: selector missed, section exists' "no blocks matching 'code' inside 'Alpha'" \
     bash -c "$DUCKEYE -S Alpha -Q 'code' '$TMP/doc.md' 2>&1 >/dev/null"
+has 'S+Q empty: section itself missing' "no section matching 'nosuchsection'" \
+    bash -c "$DUCKEYE -S nosuchsection -Q 'code' '$TMP/doc.md' 2>&1 >/dev/null"
+# ...and neither may claim the other's cause.
+no_leak 'S+Q selector miss does not blame the phrase' 'no section matching' \
+    bash -c "$DUCKEYE -S Alpha -Q 'code' '$TMP/doc.md' 2>&1 >/dev/null"
+no_leak 'S+Q section miss does not blame the selector' 'no blocks matching' \
+    bash -c "$DUCKEYE -S nosuchsection -Q 'code' '$TMP/doc.md' 2>&1 >/dev/null"
 # A plain -S miss keeps the plain message -- the new one must not swallow it.
 has 'plain -S miss keeps its message' "no section matching 'nosuchsection'" \
     bash -c "$DUCKEYE -S nosuchsection '$TMP/doc.md' 2>&1 >/dev/null"
@@ -995,4 +1015,5 @@ if (( known )); then
 fi
 (( fixed )) && printf ', %d NOW FIXED (remove guards)' "$fixed"
 printf '\n'
+[[ -e $SUITE_BUG ]] && { printf 'SUITE BUG: an undefined helper was called -- assertions were skipped\n'; exit 1; }
 (( fail == 0 ))

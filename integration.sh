@@ -46,7 +46,31 @@ no_out() { local n=$1; shift
   local out; out=$("$@" 2>/dev/null </dev/null)
   if [[ -z ${out//[[:space:]]/} ]]; then fail=$((fail+1)); printf '  FAIL %s (empty stdout)\n' "$n"
   else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
+# no_leak NAME PATTERN CMD... -- PATTERN must NOT appear on stdout. Asserting an
+# absence is the only way to catch a flag that is silently ignored, since output that
+# is too BROAD still contains everything a `has` looks for.
+no_leak() { local n=$1 pat=$2; shift 2
+  local out; out=$("$@" 2>/dev/null </dev/null | sed 's/\x1b\[[0-9;]*m//g')
+  if [[ $out == *"$pat"* ]]; then fail=$((fail+1)); printf '  FAIL %s (leaked %q)\n' "$n" "$pat"
+  else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
 skipping() { skip=$((skip+1)); printf '  skip %s (%s)\n' "$1" "$2"; }
+
+# no NAME CMD... -- CMD must exit non-zero.
+no() { local n=$1; shift
+  if "$@" >/dev/null 2>&1 </dev/null; then fail=$((fail+1)); printf '  FAIL %s (expected nonzero)\n' "$n"
+  else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
+# bash runs command_not_found_handle in a SUBSHELL, so a counter incremented here is
+# discarded -- measured. The marker file is what survives, and the summary turns it
+# into a non-zero exit. Without this a misspelled or missing helper is a silent no-op:
+# bash reports it on stderr and the suite counts neither pass nor fail, so the
+# assertion simply vanishes. Measured: 13 no_leak calls and 2 no calls disappeared
+# this way while the suite still printed "0 failed".
+SUITE_BUG=$TMP/.suite_bug
+command_not_found_handle() {
+  printf '  FAIL undefined helper or command: %s\n' "$1"
+  : >"$SUITE_BUG"
+  return 127
+}
 
 # ---------------------------------------------------------------- the canonical doc
 # One document, one distinctive word. CANARY must not appear in any format's own
@@ -111,6 +135,14 @@ if [[ -n $pandoc_works ]]; then
       else
         has ".$ext -Q li survives -t md" 'quincunx' $DUCKEYE -Q 'li' -t md "$TMP/canary.$ext"
       fi
+      # -Q must actually NARROW. It was silently ignored on every pandoc-routed
+      # format (.rst .ipynb .man) because the guard excluded any $doc containing
+      # "ast_to_blocks" -- meant for sitting_duck's ast_to_blocks_from, but
+      # pandoc_ast_to_blocks contains it too. Measured: `-Q code doc.rst` rendered
+      # the WHOLE document. A silent ignore passes any test that only greps for
+      # content, so this asserts what must be ABSENT.
+      no_leak ".$ext -Q h2 excludes body prose" 'pumpernickel' \
+          $DUCKEYE -Q 'h2' -t text "$TMP/canary.$ext"
     else
       skipping ".$ext" "pandoc cannot write $w here"
     fi
@@ -416,4 +448,5 @@ else
 fi
 
 printf '\n%d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip"
+[[ -e $SUITE_BUG ]] && { printf 'SUITE BUG: an undefined helper was called -- assertions were skipped\n'; exit 1; }
 (( fail == 0 ))

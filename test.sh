@@ -124,6 +124,9 @@ fenced_code_here
 > A quoted warning.
 EOF
 
+# A TIGHT list, to watch the markdown reader's tight/loose fidelity.
+printf -- '- a\n- b\n' >"$TMP/tight.md"
+
 # A list, for the -Q ancestor-chain cases. A list_item is not well-formed outside
 # its list, so selecting one has to bring the list along.
 cat >"$TMP/list.md" <<'EOF'
@@ -876,6 +879,21 @@ has 'doc -Q li renders as md list'   '- alpha item' $DUCKEYE -Q 'li' -t md   "$T
 has 'doc -Q li renders as html list' '<ul>'           $DUCKEYE -Q 'li' -t html "$TMP/list.md"
 # Ancestors, not the whole document: the heading is outside the list's subtree.
 no_leak 'doc -Q li excludes the heading' 'Listing' $DUCKEYE -Q 'li' -t md "$TMP/list.md"
+
+# The markdown reader emits the LOOSE encoding for both `- a\n- b` and `- a\n\n- b`,
+# so tight/loose does not survive the read. duck_block_utils rules that list_item
+# WITH content is a tight item and list_item with a child paragraph is loose, and
+# pandoc agrees -- Plain,Plain vs Para,Para on those two inputs. The user-visible
+# symptom is that converting a tight list through duckeye returns blank lines that
+# were not in the source; I had blamed pandoc's writer for that, wrongly.
+#
+# Gated on the PROPERTY duck_block_utils named, not on a version: content IS NOT
+# NULL on the first item of a known tight source. When the reader starts emitting
+# the tight shape this reports FIXED and the guard comes out.
+cause='markdown reader'
+emits 'tight list loses its tight shape' '"element_type":"list_item","content":null' \
+    $DUCKEYE -t blocks "$TMP/tight.md"
+cause=unattributed
 
 # README "what doesn't work yet". Each row fails a DIFFERENT way, and the difference
 # is the point: a refusal is a considered answer, an empty result is not.

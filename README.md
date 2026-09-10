@@ -765,6 +765,18 @@ against the libraries, not duckeye:
   ([panduck#37](https://github.com/teaguesterling/duckdb_panduck/issues/37)).
   (The builder does report the api version it emits, so duckeye no longer runs
   `pandoc -t json` just to read one — that workaround is already gone.)
+- **`.rst` and `.textile` keep literal table-cell markup.** A `**bold**` cell in
+  `.rst` stays asterisks; a `.textile` cell keeps its alignment markers (`<.`,
+  `>.`, `=.`) and `_.` can promote the wrong row to headers. Measured: panduck
+  reads `|<. a|>. 1|` / `|_. b|=. 2|` as headers `["b","=. 2"]`, where pandoc
+  gives cells `a, 1, b, 2`. Body text and headings are unaffected in both formats
+  ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)).
+- **A tight markdown list is read as a loose one.** `- a\n- b` and `- a\n\n- b`
+  produce identical blocks, so converting a tight list returns blank lines that
+  were not in the source. The distinction is carried by the block shape —
+  `list_item` with content is tight, with a child paragraph is loose — and the
+  markdown reader emits the loose form for both. `test.sh` guards it and will say
+  `FIXED` when it changes.
 - **`-t pandoc` silently drops fragments that cannot stand at the top level of a
   Pandoc AST** — a `list_item` outside its list, or a bare inline — returning
   `blocks: []` instead of wrapping them or raising. Whole documents convert

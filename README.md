@@ -744,10 +744,12 @@ against the libraries, not duckeye:
   ([duckdb_zim#29](https://github.com/teaguesterling/duckdb_zim/issues/29)).
 - **`panduck_blocks_to_pandoc_ast` returns `meta` and `blocks` as JSON *strings***,
   so every caller has to re-cast them before the result is emittable Pandoc JSON.
-  duckeye does that in a macro; a `panduck_blocks_to_pandoc_json()` would retire it
+  duckeye does that in a macro. panduck v0.4.1 has the one-call replacement,
+  `panduck_pandoc_ast_json(duck_block[])` — which takes *blocks* despite the name —
+  and duckeye will use it once the community registry serves a build that has it
   ([panduck#37](https://github.com/teaguesterling/duckdb_panduck/issues/37)).
-  (It does report the api version it emits, so duckeye no longer runs `pandoc -t
-  json` just to read one — that workaround is gone.)
+  (The builder does report the api version it emits, so duckeye no longer runs
+  `pandoc -t json` just to read one — that workaround is already gone.)
 - **`-t pandoc` silently drops fragments that cannot stand at the top level of a
   Pandoc AST** — a `list_item` outside its list, or a bare inline — returning
   `blocks: []` instead of wrapping them or raising. Whole documents convert

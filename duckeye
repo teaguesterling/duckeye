@@ -1439,8 +1439,21 @@ if [[ $out_fmt == pandoc ]]; then
   exts+=" panduck"
   # panduck's builder reports the api version it actually emits, so duckeye no longer
   # runs `pandoc -t json` just to read a version number out of the output. The casts
-  # remain because the struct carries meta and blocks as JSON STRINGS; a panduck
-  # function returning ready-to-write Pandoc JSON would retire this macro too.
+  # remain because the struct carries meta and blocks as JSON STRINGS.
+  #
+  # THIS WHOLE MACRO IS REPLACEABLE, gated on the artifact rather than on a version
+  # number: panduck v0.4.1 added
+  #
+  #     panduck_pandoc_ast_json(duck_block[]) -> VARCHAR
+  #
+  # which passes the acceptance test (duckdb -list of it, piped to `pandoc -f json`,
+  # exits 0). Do not trust the name -- despite "ast" it takes BLOCKS, while its
+  # sibling panduck_pandoc_ast_to_blocks really does take an AST, so the pair implies
+  # a symmetry that does not exist. That naming is why this was written by hand.
+  # Replace the macro body with a call to it once
+  #     SELECT count(*) FROM duckdb_functions() WHERE function_name='panduck_pandoc_ast_json'
+  # returns 1 against the INSTALLED extension; the community registry still served
+  # a57402b, which lacks it, when this was written.
   premacro+="CREATE OR REPLACE TEMP MACRO db_to_pandoc_json(b) AS (
     json_object('pandoc-api-version', panduck_blocks_to_pandoc_ast(b)['pandoc-api-version']::JSON,
                 'meta',   panduck_blocks_to_pandoc_ast(b)['meta']::JSON,

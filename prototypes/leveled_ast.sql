@@ -195,25 +195,33 @@ CREATE OR REPLACE MACRO leveled_attrs_map(src, order_col, partition_col, map_col
   SELECT node_id, part, unnest(map_keys(m)) AS key, unnest(map_values(m)) AS value
   FROM idd WHERE m IS NOT NULL AND len(map_keys(m)) > 0;
 
--- Named scalar columns, one attribute each. Implemented by taking the ROW as JSON
--- and picking the requested keys: a dynamic set of columns cannot be collected into
--- one list, because `[columns(...)]` and `list_value(columns(...))` both expand the
--- star across the whole expression and yield one list PER column ([1] and [x]),
--- not one list of all of them. to_json(row) sidesteps that and costs one function
--- call; it is the only place JSON is used, and only as a transport.
+-- Named scalar columns, one attribute each. UNPIVOT over a COLUMNS() filter turns
+-- them into the long form without JSON: DuckDB drops NULL cells by default, which
+-- is exactly the "attribute absent" semantics wanted. The columns are cast to
+-- VARCHAR because UNPIVOT requires one common type across the unpivoted set, and
+-- attributes are heterogeneous by nature.
+--
+-- (The earlier draft went through to_json(row) because a dynamic set of columns
+-- cannot be gathered into a list -- both `[columns(...)]` and
+-- `list_value(columns(...))` expand the star across the whole expression, giving one
+-- list PER column rather than one list of all. UNPIVOT is the right idiom and keeps
+-- JSON out of the default path entirely.)
 CREATE OR REPLACE MACRO leveled_attrs_cols(src, order_col, partition_col, attr_cols) AS TABLE
-  WITH n AS (
-    SELECT list_value(columns(lambda c: c = order_col))[1]     AS ord,
-           list_value(columns(lambda c: c = partition_col))[1] AS part,
-           to_json(srcrow)                                     AS j
-    FROM query_table(src) AS srcrow
-  ),
-  idd AS (
-    SELECT part, j, row_number() OVER (PARTITION BY part ORDER BY ord) + 1 AS node_id FROM n
-  )
-  SELECT i.node_id, i.part, u.k AS key, json_extract_string(i.j, '$.' || u.k) AS value
-  FROM idd i, unnest(attr_cols) AS u(k)
-  WHERE json_extract_string(i.j, '$.' || u.k) IS NOT NULL;
+  FROM (
+    UNPIVOT (
+      SELECT row_number() OVER (PARTITION BY __part ORDER BY __ord) + 1 AS node_id,
+             __part AS part,
+             * EXCLUDE (__ord, __part)
+      FROM (
+        SELECT list_value(columns(lambda c: c = order_col))[1]     AS __ord,
+               list_value(columns(lambda c: c = partition_col))[1] AS __part,
+               columns(lambda c: list_contains(attr_cols, c))::VARCHAR
+        FROM query_table(src)
+      )
+    )
+    ON COLUMNS(* EXCLUDE (node_id, part))
+    INTO NAME key VALUE value
+  );
 
 -- Pull [key op value] conditions out of a selector, using the SAME css parse
 -- sitting_duck uses, so the two never disagree about what the selector says.

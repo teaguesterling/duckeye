@@ -1329,7 +1329,13 @@ cte="WITH doc AS MATERIALIZED ($doc)"
 # and inline children share the block's order span, so they slice along with it.
 case $mode in
   full)
-    sql="$cte SELECT $(emit 'blocks') FROM doc;" ;;
+    # WHERE blocks IS NOT NULL, because an aggregate with no GROUP BY still returns
+    # one row when nothing matched, and list() over zero rows is SQL NULL. Measured:
+    # `-Q nosuchtype` printed the four characters NULL on stdout and exited 0 -- on
+    # documents AND on source code -- while -t md and -t html got the error right,
+    # because their extra conversion step turned that row into genuinely empty
+    # output and tripped the guard below. Dropping the row makes every writer agree.
+    sql="$cte SELECT $(emit 'blocks') FROM doc WHERE blocks IS NOT NULL;" ;;
   toc)
     # duck_blocks_toc_rows, not duck_blocks_toc. Both return the same five columns
     # today, but toc_rows is the row-shaped accessor BY RULING -- a table of contents
@@ -1409,7 +1415,10 @@ else
   "${duck[@]}" >"$out" || exit $?
 fi
 
-if [[ $out_fmt == md ]]; then
+# Only convert if there IS an AST. An empty $out means the query matched nothing, and
+# handing pandoc an empty file makes it print "JSON parse error: not enough input",
+# which reports a duckeye result as a pandoc failure. The guard below owns that case.
+if [[ $out_fmt == md && -s $out ]]; then
   pandoc -f json -t markdown <"$out" >"$tmp/md" || die 'pandoc could not read the AST'
   mv "$tmp/md" "$out"
 fi

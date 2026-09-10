@@ -96,6 +96,20 @@ cat >"$TMP/flat.md" <<'EOF'
 just a paragraph, no headings at all
 EOF
 
+# The README's "what doesn't work yet" table for -Q. Those are measured limits, and a
+# limit that quietly lifts makes the README wrong, so each row is asserted.
+cat >"$TMP/sel.md" <<'EOF'
+# Guide
+
+Prose with a [link](https://example.com) inside.
+
+```sh
+fenced_code_here
+```
+
+> A quoted warning.
+EOF
+
 # A list, for the -Q ancestor-chain cases. A list_item is not well-formed outside
 # its list, so selecting one has to bring the list along.
 cat >"$TMP/list.md" <<'EOF'
@@ -823,6 +837,38 @@ has 'doc -Q li renders as md list'   '-   alpha item' $DUCKEYE -Q 'li' -t md   "
 has 'doc -Q li renders as html list' '<ul>'           $DUCKEYE -Q 'li' -t html "$TMP/list.md"
 # Ancestors, not the whole document: the heading is outside the list's subtree.
 no_leak 'doc -Q li excludes the heading' 'Listing' $DUCKEYE -Q 'li' -t md "$TMP/list.md"
+
+# README "what doesn't work yet". Each row fails a DIFFERENT way, and the difference
+# is the point: a refusal is a considered answer, an empty result is not.
+has 'README limit: context-node attribute refused' 'context node' \
+    bash -c "$DUCKEYE -Q 'h2 code' '$TMP/sel.md' 2>&1 >/dev/null"
+# ...and the un-aliased form is the documented workaround, so it must NOT be refused.
+ok  'README limit: heading code is accepted' bash -c \
+    "$DUCKEYE -Q 'heading code' '$TMP/sel.md' >/dev/null 2>&1 || true
+     ! $DUCKEYE -Q 'heading code' '$TMP/sel.md' 2>&1 >/dev/null | grep -q 'context node'"
+no  'README limit: selector groups unsupported' $DUCKEYE -Q 'code, blockquote' "$TMP/sel.md"
+
+# A -Q that matches NOTHING must fail the same way in every writer. It used to print
+# the four characters NULL on stdout and exit 0 under -t ansi/text/blocks/pandoc,
+# because list() over zero rows is SQL NULL and the aggregate still returned a row.
+# Only -t md/-t html got it right, and only by accident. A silent wrong answer that
+# exits 0 is the worst shape for a tool meant to be piped, so every writer is pinned.
+for w in ansi text md html blocks pandoc; do
+  no      "doc -Q zero match fails (-t $w)"    $DUCKEYE -Q 'nosuchtype' -t $w "$TMP/sel.md"
+  no_leak "doc -Q zero match prints no NULL (-t $w)" 'NULL' \
+          $DUCKEYE -Q 'nosuchtype' -t $w "$TMP/sel.md"
+done
+# The same bug was on the CODE path, which is not the experimental one.
+no      'code -Q zero match fails'          $DUCKEYE -Q 'nosuchnode' "$TMP/test_code.py"
+no_leak 'code -Q zero match prints no NULL' 'NULL' $DUCKEYE -Q 'nosuchnode' "$TMP/test_code.py"
+# ...and -t md must not report a duckeye result as a pandoc failure.
+no_leak 'doc -Q zero match hides pandoc error' 'JSON parse error' \
+    bash -c "$DUCKEYE -Q 'nosuchtype' -t md '$TMP/sel.md' 2>&1"
+# A standalone inline renders in the writers that can emit a fragment, not in the
+# ones that need a containing block. Both halves are asserted so neither drifts.
+no  'README limit: inline -t md has no output'   $DUCKEYE -Q 'a' -t md   "$TMP/sel.md"
+has 'README limit: inline -t html works' '<a href' $DUCKEYE -Q 'a' -t html "$TMP/sel.md"
+has 'README limit: inline -t text works' 'link'    $DUCKEYE -Q 'a' -t text "$TMP/sel.md"
 
 echo 'v1 flags'
 # The README embeds its own copy of the option list, and copies drift: it documented

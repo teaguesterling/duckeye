@@ -184,10 +184,10 @@ documentation for syntax and supported features.
 
 ## Converting, not just reading
 
-`-o` writes the document through duck_blocks' own serializers rather than the terminal
-renderer:
+`-t` writes the document through duck_blocks' own serializers rather than the terminal
+renderer (`-o` names an output FILE):
 
-| `-o` | Output |
+| `-t` | Output |
 |---|---|
 | `ansi` | styled terminal text (default) |
 | `text` | plain text |
@@ -211,8 +211,8 @@ $ duckeye -t pandoc spec.rst | pandoc -f json -t docx -o spec.docx
 ```
 
 `-t pandoc` stamps the `pandoc-api-version` your local pandoc actually speaks, since the
-extension hardcodes an old one (see below). `-o` doesn't apply to `-d` (that output is a
-data table), to `-t` (already plain text), or to an archive's corpus listings — but it
+extension hardcodes an old one (see below). `-t` doesn't apply to `-d` (that output is a
+data table), to `-T` (already plain text), or to an archive's corpus listings — but it
 does apply to `-S` on an archive, which opens a document.
 
 **Known limitation — `-t md` and `-t pandoc` on tables from a native reader.** Both
@@ -233,6 +233,104 @@ tables are unaffected, as are `-t ansi`, `-t text`, `-t html` and `-t blocks`.
 Fixed upstream in `duck_block_utils` v1.7.0 and gone as soon as that reaches the
 community extension repository; nothing in duckeye needs to change. `test.sh` carries a
 guard that reports it as known-broken and says so loudly when it clears.
+
+## Querying documents by CSS selector (`-Q`) — **experimental**
+
+> **Experimental.** `-Q` on *documents* is newer than `-Q` on code and the syntax
+> may still change. The selector engine is currently hard-coded inside duckeye
+> rather than provided by an extension; the intent is to move it into
+> `sitting_duck` once the shape settles
+> ([sitting_duck#117](https://github.com/teaguesterling/sitting_duck/issues/117)).
+> `-Q` on source files is **not** experimental and is unaffected.
+
+The same `-Q` that addresses a syntax tree also addresses a document, because
+every reader produces the same `duck_block` vocabulary. Reading, querying and
+writing are independent stages, so the input format, the selector and the output
+format can all differ — you can read a `.docx`, query it as if it were HTML, and
+write markdown.
+
+The examples below are run against a `.docx` and a `.md` built from the same
+source, and the output shown is what they actually print.
+
+**1 — Read one format, write another.** HTML aliases work whatever the reader was:
+
+```console
+$ duckeye -Q 'h2' -t md guide.docx
+## Installation
+
+## Usage
+```
+
+**2 — Match on an attribute.** Aliases are shorthand for these; `h3` and
+`heading[heading_level=3]` are the same query:
+
+```console
+$ duckeye -Q 'heading[heading_level=3]' -t md guide.docx
+### Advanced
+```
+
+**3 — Pull every code block out of prose**, which is the thing `grep` cannot do
+because it has no idea where a fence begins:
+
+```console
+$ duckeye -Q 'code' -t text guide.md
+curl -sL example.com/i.sh | sh
+
+print("nested code")
+```
+
+Attribute predicates narrow that to one language:
+
+```console
+$ duckeye -Q 'code[language=python]' -t text guide.md
+print("nested code")
+```
+
+**4 — Container children carry their container.** A `list_item` is not
+well-formed outside a `list`, so selecting one brings the real list along —
+with its own attributes, bullet vs ordered:
+
+```console
+$ duckeye -Q 'li' -t html guide.docx
+<ul><li>macOS supported</li><li>Linux supported</li></ul>
+```
+
+**5 — Descendant combinators work**, so you can scope a type to its parent:
+
+```console
+$ duckeye -Q 'list li' -t md guide.md
+-   macOS supported
+
+-   Linux supported
+```
+
+**6 — Write the result to a file** with `-o` (`-t` picks the format, `-o` picks
+the destination):
+
+```console
+$ duckeye -Q 'blockquote' -t md -o warning.md guide.docx
+$ cat warning.md
+> A quoted warning.
+```
+
+### What doesn't work yet
+
+These are measured limits, not guesses:
+
+| Form | Result |
+|---|---|
+| `-Q 'h2 code'` | refused — an attribute on a *context* node is unsupported, and `h2` is shorthand for one. Use `heading code`. |
+| `-Q 'code, blockquote'` | selector groups are not supported; run the two queries separately |
+| `-Q 'a'` with `-t ansi` or `-t md` | no output — a standalone inline has no block to render inside. It does work with `-t text`, `-t html` and `-t blocks`. |
+
+A `-Q` that matches nothing prints **nothing** on stdout, writes a message to
+stderr and exits non-zero — the same in every `-t`, so it is safe to test in a
+pipeline. Earlier versions printed the four characters `NULL` and exited 0 under
+`-t ansi`, `-t text` and `-t blocks`.
+
+A *writer* can also flatten structure the selector needs: pandoc's RTF writer
+turns lists into bullet-prefixed paragraphs, so an `.rtf` produced that way holds
+no `list_item` for `-Q li` to find. That is a property of the file, not the query.
 
 ## Colour
 
@@ -406,7 +504,9 @@ it to `DUCKEYE_EXTS`.
 -T, --toc              table of contents / code definition outline
 -S, --section NAME     one section or function/method/class definition
 -s, --search TEXT      matching sections or AST definitions
--Q, --select SEL       AST selector for code definitions (.func, .class#Name, ...)
+-Q, --select SEL       query by CSS selector. Code: .func, .class#Name,
+                       .func:async. Documents: heading, li, h2, code[language=sh],
+                       list > list_item -- HTML type names are accepted as aliases
 -d, --data             read as data: SELECT * FROM FILE (reads AST on code files)
 -D, --document         undo an earlier -d (data files still route to data)
 -z, --summary          native column summary (DuckDB SUMMARIZE)

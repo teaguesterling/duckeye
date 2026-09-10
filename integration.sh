@@ -162,6 +162,62 @@ done
 # -Q addresses the AST by CSS selector; it is the one verb with no document analogue.
 has 'python -Q selector' "$CANARY" $DUCKEYE -Q 'function_definition' "$TMP/c.py"
 
+echo 'README -Q examples (experimental document selectors)'
+# The README publishes six -Q examples with their exact output. Examples in a README
+# rot silently, so each one runs here against the same fixture the README describes,
+# built into BOTH a .md and a .docx -- the two readers that disagree on list shape.
+if [[ -n $pandoc_works ]]; then
+  cat >"$TMP/guide.md" <<'GMD'
+# Field Guide
+
+Intro prose with a [link](https://example.com) inside.
+
+## Installation
+
+Run the installer:
+
+```sh
+curl -sL example.com/i.sh | sh
+```
+
+- macOS supported
+- Linux supported
+
+## Usage
+
+More prose here.
+
+> A quoted warning.
+
+### Advanced
+
+```python
+print("nested code")
+```
+GMD
+  pandoc "$TMP/guide.md" -t docx -o "$TMP/guide.docx" 2>/dev/null
+  has 'README 1: docx -Q h2 -t md'        '## Installation' \
+      $DUCKEYE -Q 'h2' -t md "$TMP/guide.docx"
+  has 'README 2: attribute predicate'     '### Advanced' \
+      $DUCKEYE -Q 'heading[heading_level=3]' -t md "$TMP/guide.docx"
+  has 'README 3: every code block'        'print("nested code")' \
+      $DUCKEYE -Q 'code' -t text "$TMP/guide.md"
+  has 'README 4: li carries its list'     '<ul><li>macOS supported</li>' \
+      $DUCKEYE -Q 'li' -t html "$TMP/guide.docx"
+  has 'README 5: descendant combinator'   'macOS supported' \
+      $DUCKEYE -Q 'list li' -t md "$TMP/guide.md"
+  ok  'README 6: -t md -o FILE'           bash -c \
+      "$DUCKEYE -Q 'blockquote' -t md -o '$TMP/warning.md' '$TMP/guide.docx' \
+       && grep -q 'A quoted warning' '$TMP/warning.md'"
+  # The alias is exactly shorthand for the attribute form -- if these ever diverge
+  # the README's claim that they are the same query is false.
+  ok  'README: h3 == heading[heading_level=3]' bash -c \
+      "diff <($DUCKEYE -Q 'h3' -t md '$TMP/guide.docx') \
+            <($DUCKEYE -Q 'heading[heading_level=3]' -t md '$TMP/guide.docx')"
+else
+  skipping 'README -Q examples' 'pandoc missing or non-functional'
+fi
+
 echo 'schemes'
 # git:// resolves against the repo containing the cwd, so this must run from the
 # checkout -- the suite cds there at the top.

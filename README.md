@@ -784,9 +784,12 @@ against the libraries, not duckeye:
   `blocks: []` instead of wrapping them or raising. Whole documents convert
   correctly. `-t md` is unaffected: it uses `duck_blocks_to_md` and renders both
   ([panduck#36](https://github.com/teaguesterling/duckdb_panduck/issues/36)).
-  Fixed in duck_block_utils spec 6.6 — a fragment becomes legal input, wrapped with
-  an implicit parent — which is not yet in a published build: the installed one is
-  `9599650`, spec 6.5, where `duck_blocks_repair` does not resolve.
+  Fixed in duck_block_utils spec 1.2 (drafted as 6.6, before the internal 6.x
+  numbering was retired) — a fragment becomes legal input, wrapped with an implicit
+  parent — which is not yet in a published build: the installed one is `9599650`,
+  reporting spec 6.5, where `duck_blocks_repair` does not resolve. duckeye gates on
+  whether the function resolves, not on the version, which is what makes a
+  renumbering like that one a non-event here.
 - **`-o text` runs words together** around inline markup, since `db_blocks_to_text`
   concatenates a block's inline children rather than walking them
   ([duck_block_utils#20](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/20)).

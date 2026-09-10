@@ -771,12 +771,14 @@ against the libraries, not duckeye:
   reads `|<. a|>. 1|` / `|_. b|=. 2|` as headers `["b","=. 2"]`, where pandoc
   gives cells `a, 1, b, 2`. Body text and headings are unaffected in both formats
   ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)).
-- **A tight markdown list is read as a loose one.** `- a\n- b` and `- a\n\n- b`
-  produce identical blocks, so converting a tight list returns blank lines that
-  were not in the source. The distinction is carried by the block shape —
-  `list_item` with content is tight, with a child paragraph is loose — and the
-  markdown reader emits the loose form for both. `test.sh` guards it and will say
-  `FIXED` when it changes.
+- **A loose markdown list is silently converted to a tight one.** Two defects in
+  opposite directions: the reader collapses tight onto loose (`- a\n- b` and
+  `- a\n\n- b` produce identical blocks), and `duck_blocks_to_md` collapses loose
+  back onto tight. They cancel for a tight list, which round-trips correctly *by
+  two errors agreeing*; a loose list loses its blank lines end to end. The
+  distinction is carried by the block shape — `list_item` with content is tight,
+  with a child paragraph is loose — and neither half implements it.
+  `test.sh` guards the reader half and will say `FIXED` when it changes.
 - **`-t pandoc` silently drops fragments that cannot stand at the top level of a
   Pandoc AST** — a `list_item` outside its list, or a bare inline — returning
   `blocks: []` instead of wrapping them or raising. Whole documents convert

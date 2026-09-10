@@ -884,8 +884,10 @@ no_leak 'doc -Q li excludes the heading' 'Listing' $DUCKEYE -Q 'li' -t md "$TMP/
 # so tight/loose does not survive the read. duck_block_utils rules that list_item
 # WITH content is a tight item and list_item with a child paragraph is loose, and
 # pandoc agrees -- Plain,Plain vs Para,Para on those two inputs. The user-visible
-# symptom is that converting a tight list through duckeye returns blank lines that
-# were not in the source; I had blamed pandoc's writer for that, wrongly.
+# symptom runs the OTHER way, and this comment said the reverse until markdown
+# measured it: duck_blocks_to_md collapses loose onto tight, so a TIGHT list
+# round-trips correctly by two errors cancelling, while a LOOSE list silently loses
+# its blank lines. Measured end to end -- both inputs give '- alpha\n- beta'.
 #
 # Gated on the PROPERTY duck_block_utils named, not on a version: content IS NOT
 # NULL on the first item of a known tight source. When the reader starts emitting

@@ -217,7 +217,7 @@ emit() {
     html)      printf 'duck_blocks_to_html(%s)' "$1" ;;
     blocks)    printf 'to_json(%s)' "$1" ;;
     md)        printf 'duck_blocks_to_md(%s)' "$1" ;;
-    pandoc)    printf 'db_to_pandoc_json(%s)' "$1" ;;
+    pandoc)    printf 'to_json(duck_blocks_to_pandoc_ast(%s))' "$1" ;;
     *)         die "unknown output format: $out_fmt (ansi, text, md, html, pandoc, blocks)" 64 ;;
   esac
 }
@@ -1465,30 +1465,17 @@ esac
 
 [[ $out_fmt == html ]] && exts+=" webbed"     # duck_blocks_to_html lives there
 [[ $out_fmt == md   ]] && exts+=" markdown"   # duck_blocks_to_md lives there
-if [[ $out_fmt == pandoc ]]; then
-  exts+=" panduck"
-  # panduck's builder reports the api version it actually emits, so duckeye no longer
-  # runs `pandoc -t json` just to read a version number out of the output. The casts
-  # remain because the struct carries meta and blocks as JSON STRINGS.
-  #
-  # THIS WHOLE MACRO IS REPLACEABLE, gated on the artifact rather than on a version
-  # number: panduck v0.4.1 added
-  #
-  #     panduck_pandoc_ast_json(duck_block[]) -> VARCHAR
-  #
-  # which passes the acceptance test (duckdb -list of it, piped to `pandoc -f json`,
-  # exits 0). Do not trust the name -- despite "ast" it takes BLOCKS, while its
-  # sibling panduck_pandoc_ast_to_blocks really does take an AST, so the pair implies
-  # a symmetry that does not exist. That naming is why this was written by hand.
-  # Replace the macro body with a call to it once
-  #     SELECT count(*) FROM duckdb_functions() WHERE function_name='panduck_pandoc_ast_json'
-  # returns 1 against the INSTALLED extension; the community registry still served
-  # a57402b, which lacks it, when this was written.
-  premacro+="CREATE OR REPLACE TEMP MACRO db_to_pandoc_json(b) AS (
-    json_object('pandoc-api-version', panduck_blocks_to_pandoc_ast(b)['pandoc-api-version']::JSON,
-                'meta',   panduck_blocks_to_pandoc_ast(b)['meta']::JSON,
-                'blocks', panduck_blocks_to_pandoc_ast(b)['blocks']::JSON)); "
-fi
+# -t pandoc needs no macro. duck_block_utils spec 1.2 returns meta and blocks as JSON
+# type rather than VARCHAR holding JSON, so to_json() of the struct IS the Pandoc
+# document -- measured, pandoc 3.1.3 accepts it, hyphenated key and all.
+#
+# This reverses an earlier switch to panduck's builder, and the reason it reverses is
+# that both halves of that trade expired. panduck's builder was chosen because it
+# reported the api version it emits, which duck_block_utils then also did; and
+# duck_block_utils was avoided because it dropped fragments, which 1.2 fixed. As of
+# 6c1c2e5 duck_blocks_to_pandoc_ast wraps a fragment into its implicit parent while
+# panduck's a57402b still returns [] -- measured on a bare inline run, which is what
+# `-Q a` produces. So the better choice is now the one it used to be.
 
 load="${prethreads:-}"
 for e in $DUCKEYE_BASE $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done

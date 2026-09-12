@@ -758,13 +758,11 @@ against the libraries, not duckeye:
   a `mimetype` filter and returns every row
   ([duckdb_zim#29](https://github.com/teaguesterling/duckdb_zim/issues/29)).
 - **`panduck_blocks_to_pandoc_ast` returns `meta` and `blocks` as JSON *strings***,
-  so every caller has to re-cast them before the result is emittable Pandoc JSON.
-  duckeye does that in a macro. panduck v0.4.1 has the one-call replacement,
-  `panduck_pandoc_ast_json(duck_block[])` — which takes *blocks* despite the name —
-  and duckeye will use it once the community registry serves a build that has it
+  so a caller must re-cast them before the result is emittable Pandoc JSON
   ([panduck#37](https://github.com/teaguesterling/duckdb_panduck/issues/37)).
-  (The builder does report the api version it emits, so duckeye no longer runs
-  `pandoc -t json` just to read one — that workaround is already gone.)
+  duckeye no longer hits this: `-t pandoc` uses duck_block_utils' builder, whose
+  spec 1.2 struct carries `meta` and `blocks` as JSON *type*, so `to_json()` of it
+  is the Pandoc document and the macro that used to reassemble one is gone.
 - **`.rst` and `.textile` keep literal table-cell markup.** A `**bold**` cell in
   `.rst` stays asterisks; a `.textile` cell keeps its alignment markers (`<.`,
   `>.`, `=.`) and `_.` can promote the wrong row to headers. Measured: panduck
@@ -786,20 +784,13 @@ against the libraries, not duckeye:
   distinction is carried by the block shape — `list_item` with content is tight,
   with a child paragraph is loose — and neither half implements it.
   `test.sh` guards the reader half and will say `FIXED` when it changes.
-- **`-t pandoc` silently drops fragments that cannot stand at the top level of a
-  Pandoc AST** — a `list_item` outside its list, or a bare inline — returning
-  `blocks: []` instead of wrapping them or raising. Whole documents convert
-  correctly. `-t md` is unaffected: it uses `duck_blocks_to_md` and renders both
-  ([panduck#36](https://github.com/teaguesterling/duckdb_panduck/issues/36)).
-  Fixed in duck_block_utils spec 1.2 (drafted as 6.6, before the internal 6.x
-  numbering was retired) — a fragment becomes legal input, wrapped with an implicit
-  parent — which is not yet in a published build: the installed one is `9599650`,
-  reporting spec 6.5, where `duck_blocks_repair` does not resolve. duckeye gates on
-  whether the function resolves, not on the version, which is what makes a
-  renumbering like that one a non-event here.
-- **`-o text` runs words together** around inline markup, since `db_blocks_to_text`
-  concatenates a block's inline children rather than walking them
-  ([duck_block_utils#20](https://github.com/teaguesterling/duckdb_duck_block_utils/issues/20)).
+- **Fragments used to vanish from `-t pandoc`.** A `list_item` outside its list, or
+  a bare inline, exported as `blocks: []` — silent content loss, not a formatting
+  quirk. Fixed in duck_block_utils spec 1.2 (`6c1c2e5`), which makes a fragment
+  legal input and wraps it into its implicit parent, so `-Q a -t pandoc` now emits
+  `Plain` ([panduck#36](https://github.com/teaguesterling/duckdb_panduck/issues/36)).
+  An install older than that still drops them, silently. `panduck`'s own AST builder
+  is not yet fixed, which is why `-t pandoc` uses duck_block_utils'.
 
 ## License
 

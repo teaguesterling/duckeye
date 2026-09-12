@@ -900,43 +900,40 @@ emits 'tight list loses its tight shape' '"element_type":"list_item","content":n
     $DUCKEYE -t blocks "$TMP/tight.md"
 cause=unattributed
 
-# duck_block_utils 1c5f2a6 / v3.1.0 adds duck_blocks_repair and
-# duck_block_implicit_parent (spec 1.2, drafted as 6.6). Released but not yet served
-# by the community registry, so the installed build does not have them.
-#
-# This guard IS the gate. It probes the installed extension for the name and reports
-# FIXED the moment a duckdb run can resolve it -- no version string, no changelog, no
-# waiting to be told by the project that shipped it. A gate that fires itself is the
-# whole point; being notified is a courtesy, not a mechanism.
-#
-# When it goes FIXED: run duck_blocks_repair on -Q output ON TOP OF the ancestor
-# block in duckeye, not instead of it. Spec 1.2 states repair leaves a real ancestor
-# alone, so they compose; the ancestor block supplies real list attributes that an
-# implicit parent cannot.
+# duck_block_utils 6c1c2e5 / spec 1.2 fixed the fragment drop, so these replace the
+# availability guard that announced it. A fragment with no top-level Pandoc
+# representation used to export as blocks:[] -- silent content loss, and the reason
+# -Q li -t md printed nothing on a .docx. Both halves are asserted because they wrap
+# differently: a container child gets its container, a bare inline gets Plain.
 # The markdown reader emits YAML frontmatter as kind='block', element_type='metadata',
 # so it renders as body prose: `-t text` on a document with frontmatter prints
 # "title: Secret Title" above the first heading. The spec puts document metadata in
 # kind='value' -- and duckeye is already correct for that: a .docx's kind='value'
 # metadata does NOT reach -t text, measured. So this needs no workaround here and
 # MUST NOT get one; the output fixes itself when the reader sets the right kind.
-# Tracked as markdown#57, merged to their main and not in any served build.
+# markdown#57 is merged to their main; duck_block_utils is adding the rule as spec
+# 1.3 (duck_block_is_body(kind, element_type), and to_text no longer rendering
+# block/metadata), which is also unserved -- so either half landing clears this.
 cause='markdown reader'
 emits 'frontmatter leaks into the body' 'title: Secret Title' \
     $DUCKEYE -t text "$TMP/fm.md"
 # ...and the control that makes the guard meaningful: conformant value-kind metadata
-# is already skipped, so a FIXED here means the reader changed, not that duckeye
-# started filtering.
+# is already skipped, so a FIXED here means something upstream changed, not that
+# duckeye started filtering.
 no_leak 'value-kind metadata stays out of the body' '2026-' \
     $DUCKEYE -t text "$TMP/doc.md"
 cause=unattributed
 
-cause='duck_block_utils'
-broken 'duck_blocks_repair is available' 'RESOLVES' bash -c \
-  "duckdb -noheader -list -c \"LOAD duck_block_utils;
-     SELECT CASE WHEN EXISTS(SELECT 1 FROM duckdb_functions()
-                             WHERE function_name='duck_blocks_repair')
-                 THEN 'RESOLVES' ELSE 'absent' END;\" 2>/dev/null"
-cause=unattributed
+has 'fragment inline exports to pandoc' '"t":"Plain"' \
+    $DUCKEYE -Q 'a' -t pandoc "$TMP/sel.md"
+no_leak 'fragment inline is not dropped' '"blocks":[]' \
+    $DUCKEYE -Q 'a' -t pandoc "$TMP/sel.md"
+has 'fragment list_item exports to pandoc' '"t":"BulletList"' \
+    $DUCKEYE -Q 'li' -t pandoc "$TMP/list.md"
+# ...and what duckeye emits must be something real pandoc accepts, not merely
+# non-empty. This is the acceptance test the whole -t pandoc path is built against.
+ok  'pandoc accepts what -t pandoc emits' bash -c \
+    "$DUCKEYE -t pandoc '$TMP/sel.md' 2>/dev/null | pandoc -f json -t markdown >/dev/null"
 
 # README "what doesn't work yet". Each row fails a DIFFERENT way, and the difference
 # is the point: a refusal is a considered answer, an empty result is not.

@@ -127,6 +127,9 @@ EOF
 # A TIGHT list, to watch the markdown reader's tight/loose fidelity.
 printf -- '- a\n- b\n' >"$TMP/tight.md"
 
+# Frontmatter, for the metadata-leak guard below.
+printf -- '---\ntitle: Secret Title\nauthor: Jane\n---\n\n# Real Heading\n\nbody\n' >"$TMP/fm.md"
+
 # A list, for the -Q ancestor-chain cases. A list_item is not well-formed outside
 # its list, so selecting one has to bring the list along.
 cat >"$TMP/list.md" <<'EOF'
@@ -910,6 +913,23 @@ cause=unattributed
 # block in duckeye, not instead of it. Spec 1.2 states repair leaves a real ancestor
 # alone, so they compose; the ancestor block supplies real list attributes that an
 # implicit parent cannot.
+# The markdown reader emits YAML frontmatter as kind='block', element_type='metadata',
+# so it renders as body prose: `-t text` on a document with frontmatter prints
+# "title: Secret Title" above the first heading. The spec puts document metadata in
+# kind='value' -- and duckeye is already correct for that: a .docx's kind='value'
+# metadata does NOT reach -t text, measured. So this needs no workaround here and
+# MUST NOT get one; the output fixes itself when the reader sets the right kind.
+# Tracked as markdown#57, merged to their main and not in any served build.
+cause='markdown reader'
+emits 'frontmatter leaks into the body' 'title: Secret Title' \
+    $DUCKEYE -t text "$TMP/fm.md"
+# ...and the control that makes the guard meaningful: conformant value-kind metadata
+# is already skipped, so a FIXED here means the reader changed, not that duckeye
+# started filtering.
+no_leak 'value-kind metadata stays out of the body' '2026-' \
+    $DUCKEYE -t text "$TMP/doc.md"
+cause=unattributed
+
 cause='duck_block_utils'
 broken 'duck_blocks_repair is available' 'RESOLVES' bash -c \
   "duckdb -noheader -list -c \"LOAD duck_block_utils;

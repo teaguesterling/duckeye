@@ -771,6 +771,13 @@ against the libraries, not duckeye:
   reads `|<. a|>. 1|` / `|_. b|=. 2|` as headers `["b","=. 2"]`, where pandoc
   gives cells `a, 1, b, 2`. Body text and headings are unaffected in both formats
   ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)).
+- **YAML frontmatter renders as body text.** `-t text` on a document with
+  frontmatter prints `title: ...` above the first heading. The markdown reader
+  emits it as `kind='block'` with `element_type='metadata'`, where the spec puts
+  document metadata in `kind='value'`. duckeye needs no change: a `.docx`'s
+  `value`-kind metadata is already skipped, measured, so the output corrects itself
+  when the reader sets the right kind. `-T` is unaffected — an outline only lists
+  headings ([markdown#57](https://github.com/teaguesterling/duckdb_markdown/issues/57)).
 - **A loose markdown list is silently converted to a tight one.** Two defects in
   opposite directions: the reader collapses tight onto loose (`- a\n- b` and
   `- a\n\n- b` produce identical blocks), and `duck_blocks_to_md` collapses loose

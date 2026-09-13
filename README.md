@@ -764,11 +764,14 @@ against the libraries, not duckeye:
   spec 1.2 struct carries `meta` and `blocks` as JSON *type*, so `to_json()` of it
   is the Pandoc document and the macro that used to reassemble one is gone.
 - **`.rst` and `.textile` keep literal table-cell markup.** A `**bold**` cell in
-  `.rst` stays asterisks; a `.textile` cell keeps its alignment markers (`<.`,
-  `>.`, `=.`) and `_.` can promote the wrong row to headers. Measured: panduck
-  reads `|<. a|>. 1|` / `|_. b|=. 2|` as headers `["b","=. 2"]`, where pandoc
-  gives cells `a, 1, b, 2`. Body text and headings are unaffected in both formats
+  `.rst` stays asterisks. A `.textile` cell keeps its *alignment* modifiers — `<.`,
+  `>.`, `=.` survive into the content, where `_.` is consumed correctly:
+  `|_. Name|_. Value|` / `|<. left|>. right|` reads as headers `["Name","Value"]`
+  with a row `["<. left", ">. right"]`. Body text and headings are unaffected in
+  both formats
   ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)).
+  Both are fixed in panduck v0.5.0, which the community registry does not serve
+  yet — the served build is `c8aee8a` (v0.4.1), measured.
 - **YAML frontmatter renders as body prose in `-t text`.** The markdown reader emits
   it as `kind='block'` with `element_type='metadata'`, where the spec puts document
   metadata in `kind='value'`

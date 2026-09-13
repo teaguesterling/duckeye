@@ -1166,6 +1166,20 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
     #   .ipynb  panduck's reader emits a markdown cell as ONE raw block holding the
     #           cell source verbatim, so no headings are extracted: -T finds nothing
     #           and -S finds no sections. pandoc parses cell markdown into blocks.
+    #
+    #           ADOPTION PATH, when panduck v0.5.0 reaches the registry (#2688 open
+    #           as of 2026-09-12; served build is c8aee8a / v0.4.1, measured):
+    #           read_panduck_doc(src, expand_embedded := true) parses the cell and
+    #           this route can drop pandoc(1) entirely.
+    #
+    #           Do NOT gate that switch on the markdown extension resolving. It was
+    #           the obvious precaution and it is wrong: panduck reports the opt-in
+    #           path RAISES when markdown is absent -- a named error carrying the
+    #           install command, from an explicit guard added for their #25 -- rather
+    #           than silently falling back. A probe would only turn a loud, correct
+    #           failure into a quiet one. NOT VERIFIED HERE: v0.5.0 is not installable
+    #           yet, so this is panduck's measurement, not duckeye's. Re-run it before
+    #           switching.
     #   .rst    panduck's reader keeps literal inline markup inside table cells --
     #           a **plum** cell renders as **plum** rather than emphasised text.
     #   .man    panduck_can_read('a.man') is false and no extension in the stack

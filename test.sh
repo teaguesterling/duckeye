@@ -930,10 +930,23 @@ cause=unattributed
 # An earlier version of this greped every writer for the string and called three of
 # them broken. Two were correct serialisations. Only to_text renders it as body, and
 # duck_block_utils spec 1.3 fixes that one.
+# duckeye now filters non-body blocks before the text renderer, so ITS output is
+# clean. The guard therefore probes the UPSTREAM function directly -- otherwise it
+# would report FIXED because of duckeye's own workaround and the filter would never
+# be removed. Ask duck_blocks_to_text what it does with a metadata block, not what
+# duckeye prints.
 cause='duck_block_utils'
-emits 'frontmatter renders as body in -t text' 'title: Secret Title' \
-    $DUCKEYE -t text "$TMP/fm.md"
+emits 'duck_blocks_to_text renders metadata as body' 'title: Secret Title' bash -c \
+  "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD markdown;
+     SELECT duck_blocks_to_text(list(b)) FROM read_markdown_blocks('$TMP/fm.md') b;\" 2>/dev/null"
 cause=unattributed
+
+# duckeye's own output must be clean TODAY, whatever upstream does.
+no_leak 'duckeye -t text omits metadata' 'title: Secret Title' $DUCKEYE -t text "$TMP/fm.md"
+has     'duckeye -t text keeps the body' 'body'                $DUCKEYE -t text "$TMP/fm.md"
+# ...and the filter must not reach the FORMAT WRITERS, whose carriers are correct.
+has 'md keeps its frontmatter fence'  'title: Secret Title' $DUCKEYE -t md   "$TMP/fm.md"
+has 'html keeps its metadata carrier' 'frontmatter+yaml'    $DUCKEYE -t html "$TMP/fm.md"
 
 # The format writers are CONTROLS -- green today, and they catch the regression that
 # would matter: metadata escaping its carrier into body position.

@@ -773,13 +773,18 @@ against the libraries, not duckeye:
   it as `kind='block'` with `element_type='metadata'`, where the spec puts document
   metadata in `kind='value'`
   ([markdown#57](https://github.com/teaguesterling/duckdb_markdown/issues/57));
-  duck_block_utils spec 1.3 stops `duck_blocks_to_text` rendering it. Only that one
-  writer is affected. The others are already correct, and for a reason worth
-  knowing — the rule has two halves. **Renderers** (`text`, `ansi`) omit anything
-  that is not body. **Format writers** serialise metadata into the format's own
-  metadata home: `-t md` writes a `---` frontmatter fence, `-t html` a
-  non-rendering `<script type="application/vnd.frontmatter+yaml">` carrier, both of
-  which round-trip rather than leak. duckeye needs no change either way.
+  duck_block_utils spec 1.3 stops `duck_blocks_to_text` rendering it. **duckeye
+  filters it out of `-t text` in the meantime**, so the leak is not user-visible
+  here; the filter is the same predicate a layer out and becomes a no-op once 1.3
+  serves.
+
+  Only that one writer was affected, and the reason is worth knowing — the rule has
+  two halves. **Renderers** (`text`, `ansi`) omit anything that is not body.
+  **Format writers** serialise metadata into the format's own metadata home: `-t md`
+  writes a `---` frontmatter fence, `-t html` a non-rendering
+  `<script type="application/vnd.frontmatter+yaml">` carrier. Those round-trip
+  rather than leak, and duckeye deliberately does **not** filter them — doing so
+  would destroy correct output.
 - **A loose markdown list is silently converted to a tight one.** Two defects in
   opposite directions: the reader collapses tight onto loose (`- a\n- b` and
   `- a\n\n- b` produce identical blocks), and `duck_blocks_to_md` collapses loose

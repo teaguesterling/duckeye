@@ -769,16 +769,17 @@ against the libraries, not duckeye:
   reads `|<. a|>. 1|` / `|_. b|=. 2|` as headers `["b","=. 2"]`, where pandoc
   gives cells `a, 1, b, 2`. Body text and headings are unaffected in both formats
   ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)).
-- **YAML frontmatter renders as body text**, in `-t text`, `-t md` and `-t html`.
-  The markdown reader emits it as `kind='block'` with `element_type='metadata'`,
-  where the spec puts document metadata in `kind='value'`
-  ([markdown#57](https://github.com/teaguesterling/duckdb_markdown/issues/57)).
-  duckeye needs no change — a `.docx`'s `value`-kind metadata is already skipped,
-  and `-t ansi` and `-t pandoc` already skip this too, measured. But the fix is
-  spread across three extensions: `duck_blocks_to_text` (duck_block_utils, fixed in
-  spec 1.3), `duck_blocks_to_md` (markdown) and `duck_blocks_to_html` (webbed). Each
-  writer is guarded separately, so 1.3 landing will not mask the other two. `-T` is
-  unaffected — an outline only lists headings.
+- **YAML frontmatter renders as body prose in `-t text`.** The markdown reader emits
+  it as `kind='block'` with `element_type='metadata'`, where the spec puts document
+  metadata in `kind='value'`
+  ([markdown#57](https://github.com/teaguesterling/duckdb_markdown/issues/57));
+  duck_block_utils spec 1.3 stops `duck_blocks_to_text` rendering it. Only that one
+  writer is affected. The others are already correct, and for a reason worth
+  knowing — the rule has two halves. **Renderers** (`text`, `ansi`) omit anything
+  that is not body. **Format writers** serialise metadata into the format's own
+  metadata home: `-t md` writes a `---` frontmatter fence, `-t html` a
+  non-rendering `<script type="application/vnd.frontmatter+yaml">` carrier, both of
+  which round-trip rather than leak. duckeye needs no change either way.
 - **A loose markdown list is silently converted to a tight one.** Two defects in
   opposite directions: the reader collapses tight onto loose (`- a\n- b` and
   `- a\n\n- b` produce identical blocks), and `duck_blocks_to_md` collapses loose

@@ -27,3 +27,14 @@ jobs:
 
       - name: Run tests
         run: ./test.sh
+
+      # integration.sh had never run in CI. 127 assertions -- every format end to
+      # end, the README's published commands executed verbatim, cross-format
+      # invariants and stream hygiene -- existed and were dark, which is the same
+      # shape as an assertion that never executes.
+      #
+      # It is a separate step rather than appended to the one above so a failure
+      # names which suite failed, and so a red integration run cannot be mistaken
+      # for a unit regression.
+      - name: Run integration tests
+        run: ./integration.sh

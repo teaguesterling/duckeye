@@ -38,3 +38,16 @@ jobs:
       # for a unit regression.
       - name: Run integration tests
         run: ./integration.sh
+
+      # Every duck_block_utils/webbed/markdown/panduck function duckeye calls must
+      # exist in the INSTALLED binary. duckeye has no build step and no vendored
+      # header, so this is the only thing between a renamed upstream function and a
+      # Catalog Error in a user's terminal.
+      #
+      # Wired only after checking two things, in this order: that it can still FAIL
+      # (missing function exits 1, absent duckdb exits 2 -- a check that skips and
+      # returns 0 reproduces the defect it exists to catch), and that it EXISTS in a
+      # checkout. It did not: scripts/ is gitignored for operator tools and this had
+      # been swept in with them.
+      - name: Check every extension call resolves
+        run: ./scripts/check_block_functions.sh

@@ -30,7 +30,13 @@ TARGET=${1:-./duckeye}
 # pandoc-AST reader is panduck's. Before they were added, this check reported
 # duck_blocks_to_md as UNRESOLVED -- a false positive from its own stale list, and
 # the drift it would have caught on the day it happened had anything been running it.
-: "${DUCKEYE_CHECK_EXTS:=$DUCKEYE_BASE webbed markdown panduck}"
+#
+# excel is here and NOT in DUCKEYE_COMMUNITY on purpose: duckeye loads it per-format
+# for .xlsx rather than at startup. Leaving it out made this check report read_xlsx
+# UNRESOLVED against a path that works -- the same false-positive shape as the stale
+# list above, from the opposite direction. Any extension duckeye loads for ANY format
+# belongs here, not only the ones it always loads.
+: "${DUCKEYE_CHECK_EXTS:=$DUCKEYE_BASE webbed markdown panduck sitting_duck zim pdf excel yaml toml zipfs duck_tails read_lines textplot}"
 
 command -v duckdb >/dev/null || { echo 'duckdb not on PATH' >&2; exit 2; }
 [[ -r $TARGET ]] || { echo "cannot read $TARGET" >&2; exit 2; }
@@ -40,9 +46,15 @@ command -v duckdb >/dev/null || { echo 'duckdb not on PATH' >&2; exit 2; }
 mapfile -t own < <(grep -oE 'TEMP MACRO[[:space:]]+[a-z_][a-z0-9_]*' "$TARGET" \
                    | awk '{print $NF}' | sort -u)
 
-# The at-risk namespace, spanning both sides of the rename so this keeps working
-# after the migration lands.
-mapfile -t called < <(grep -oE '\b(db|duck_block|duck_blocks)_[a-z0-9_]+[[:space:]]*\(' "$TARGET" \
+# Every extension function duckeye calls, not only the duck_block namespace. The
+# original pattern covered 13 calls and the CI step describing it claimed more; the
+# reader and AST families are where a rename would actually reach a user, since
+# `-Q` on code goes through sitting_duck and every document format through a
+# read_*_blocks. Widened to 42, measured.
+#
+# read_csv/read_json/read_parquet/read_text are DuckDB core and resolve too, so they
+# cost a lookup and prove the pattern is not silently matching nothing.
+mapfile -t called < <(grep -oE '\b(db|duck_block|duck_blocks)_[a-z0-9_]+[[:space:]]*\(|\b(read|ast|zim|pdf|panduck|parse|tp)_[a-z0-9_]+[[:space:]]*\(|\bhtml_to_[a-z0-9_]+[[:space:]]*\(' "$TARGET" \
                       | sed 's/[[:space:]]*($//; s/($//' | tr -d '(' | sort -u)
 
 if ((${#called[@]} == 0)); then

@@ -39,10 +39,11 @@ jobs:
       - name: Run integration tests
         run: ./integration.sh
 
-      # Every duck_block_utils/webbed/markdown/panduck function duckeye calls must
-      # exist in the INSTALLED binary. duckeye has no build step and no vendored
-      # header, so this is the only thing between a renamed upstream function and a
-      # Catalog Error in a user's terminal.
+      # Every extension function duckeye calls -- 54 of them across fourteen
+      # extensions, including sitting_duck's AST family and every read_*_blocks --
+      # must exist in the INSTALLED binary. duckeye has no build step and no
+      # vendored header, so this is the only thing between a renamed upstream
+      # function and a Catalog Error in a user's terminal.
       #
       # Wired only after checking two things, in this order: that it can still FAIL
       # (missing function exits 1, absent duckdb exits 2 -- a check that skips and

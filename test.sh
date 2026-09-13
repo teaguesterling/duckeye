@@ -914,9 +914,33 @@ cause=unattributed
 # markdown#57 is merged to their main; duck_block_utils is adding the rule as spec
 # 1.3 (duck_block_is_body(kind, element_type), and to_text no longer rendering
 # block/metadata), which is also unserved -- so either half landing clears this.
-cause='markdown reader'
-emits 'frontmatter leaks into the body' 'title: Secret Title' \
+# One guard per WRITER, not one for the leak, because the writers live in three
+# different extensions and will be fixed at three different times:
+#
+#   duck_blocks_to_text     duck_block_utils   spec 1.3 fixes this one
+#   duck_blocks_render_ansi duck_block_utils   already clean, controlled below
+#   duck_blocks_to_md       markdown           not addressed
+#   duck_blocks_to_html     webbed             not addressed
+#
+# A single guard on -t text would have reported FIXED when 1.3 serves while -t md and
+# -t html still leaked. Measured before splitting: text, md and html all leak today.
+cause='duck_block_utils'
+emits 'frontmatter leaks via -t text' 'title: Secret Title' \
     $DUCKEYE -t text "$TMP/fm.md"
+cause='markdown reader'
+emits 'frontmatter leaks via -t md'   'title: Secret Title' \
+    $DUCKEYE -t md   "$TMP/fm.md"
+cause=webbed
+emits 'frontmatter leaks via -t html' 'title: Secret Title' \
+    $DUCKEYE -t html "$TMP/fm.md"
+cause=unattributed
+# ansi already skips it, so it is a control rather than a guard: if this ever starts
+# leaking, a renderer regressed rather than a reader.
+no_leak 'ansi does not leak frontmatter' 'title: Secret Title' \
+    $DUCKEYE -t ansi "$TMP/fm.md"
+has     'ansi still renders the body'    'body' \
+    $DUCKEYE -t ansi "$TMP/fm.md"
+cause='markdown reader'
 # ...and the control that makes the guard meaningful: conformant value-kind metadata
 # is already skipped, so a FIXED here means something upstream changed, not that
 # duckeye started filtering.

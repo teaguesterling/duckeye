@@ -345,17 +345,27 @@ elif [[ ! -f $PF/parsed/manifest.csv ]]; then
 else
   # installed reader versions, for the version-match arm
   inst=$(duckdb -noheader -list -c "SELECT extension_name||'='||extension_version FROM duckdb_extensions() WHERE extension_name IN ('markdown','webbed','pdf') AND installed;" 2>/dev/null | paste -sd' ')
-  # panduck's own version, which the manifest does NOT record (panduck#40). Every
-  # fixture is read through read_panduck_doc, so panduck code is in the path for all
-  # of them -- two_pages_pdf most visibly, whose heading levels come from a
-  # dense_rank() over font_size in panduck rather than from the pdf extension. So a
-  # panduck change can move a fixture while every recorded version stays identical.
-  # Without this the verdict below blames the SIBLING by elimination, which is the
-  # false attribution this check exists to prevent.
-  pdv=$(duckdb -noheader -list -c "SELECT extension_version FROM duckdb_extensions() WHERE extension_name='panduck' AND installed;" 2>/dev/null | tail -1)
-  rows=$(duckdb -noheader -list -c "SELECT fixture||'|'||source||'|'||source_sha256||'|'||reader_extension||'|'||reader_version FROM read_csv('$PF/parsed/manifest.csv');" 2>/dev/null)
+  # panduck's own version. Every fixture is read through read_panduck_doc, so panduck
+  # code is in the path for all of them -- two_pages_pdf most visibly, whose heading
+  # levels come from a dense_rank() over font_size in panduck rather than from the
+  # pdf extension. So a panduck change can move a fixture while every SIBLING version
+  # stays identical, and a verdict that ignores panduck blames the sibling by
+  # elimination.
+  #
+  # Read via panduck_version(), NOT duckdb_extensions().extension_version: the
+  # manifest's panduck_version column (panduck#40) is written by the generator from
+  # panduck_version(), which reports a commit sha and never a release tag. Comparing
+  # across the two would compare different identifier spaces. Measured: installed
+  # panduck_version() = c8aee8a, the v0.4.1 commit.
+  pdv=$(duckdb -noheader -list -c "LOAD panduck; SELECT panduck_version();" 2>/dev/null | tail -1)
+  # Manifests before panduck#40 have no panduck_version column; selecting it would
+  # fail the whole read. all_varchar because a commit sha that happens to be all
+  # digits would otherwise be inferred as a number and lose its leading zeros.
+  pcol="''"
+  head -1 "$PF/parsed/manifest.csv" | grep -q 'panduck_version' && pcol="coalesce(panduck_version,'')"
+  rows=$(duckdb -noheader -list -c "SELECT fixture||'|'||source||'|'||source_sha256||'|'||reader_extension||'|'||reader_version||'|'||$pcol FROM read_csv('$PF/parsed/manifest.csv', all_varchar=true);" 2>/dev/null)
   [[ -z $rows ]] && { fail=$((fail+1)); printf '  FAIL manifest.csv read produced no rows\n'; }
-  while IFS='|' read -r fx src sha ext ver; do
+  while IFS='|' read -r fx src sha ext ver pver; do
     [[ -n $fx ]] || continue
     srcpath="$PF/${src#test/fixtures/}"; [[ -f $srcpath ]] || srcpath="$PF/$src"
     pq="$PF/parsed/$fx.blocks.parquet"
@@ -405,18 +415,35 @@ print(str(len(b))+':'+','.join(str(x['attributes'].get('page_number','')) for x 
            + (SELECT count(*) FROM (SELECT * FROM stored EXCEPT SELECT * FROM live));" 2>/dev/null | tail -1)
     diffs=${diffs:-999}
     if [[ $inst == *"$ext=$ver"* ]]; then vmatch=1; else vmatch=; fi
+    iv=$(tr ' ' '\n' <<<"$inst" | sed -n "s/^$ext=//p")
+    # Three states for panduck, because an old manifest cannot answer the question:
+    #   same     fixture and installed panduck_version() agree
+    #   differs  they do not -- in EITHER direction; a fixture generated from a dev
+    #            build newer than any installable one is still a difference
+    #   unknown  the manifest predates the column
+    if [[ -z $pver ]]; then pstate=unknown
+    elif [[ $pver == "$pdv" ]]; then pstate=same
+    else pstate=differs; fi
+    moved=
+    [[ -z $vmatch ]]            && moved+=" $ext fixture $ver, installed ${iv:-none};"
+    [[ $pstate == differs ]]    && moved+=" panduck fixture $pver, installed ${pdv:-none};"
     if (( diffs == 0 )); then
       pass=$((pass+1))
-      if [[ -n $vmatch ]]; then printf '  ok   %s matches stored blocks\n' "$fx"
-      else printf '  ok   %s matches despite %s moving off %s (upgrade was benign)\n' "$fx" "$ext" "$ver"; fi
-    elif [[ -n $vmatch ]]; then
+      if [[ -z $moved ]]; then printf '  ok   %s matches stored blocks\n' "$fx"
+      else printf '  ok   %s matches despite version differences --%s benign\n' "$fx" "$moved"; fi
+    elif [[ -z $moved && $pstate == same ]]; then
+      # every producer on the path is at the version that made the fixture, and the
+      # output differs anyway: nothing else is left to blame
+      fail=$((fail+1))
+      printf '  FAIL %s: %s blocks differ with %s at %s and panduck at %s -- REGRESSION\n' "$fx" "$diffs" "$ext" "$ver" "$pver"
+    elif [[ -z $moved && $pstate == unknown ]]; then
       fail=$((fail+1))
       printf '  FAIL %s: %s blocks differ with %s still at %s\n' "$fx" "$diffs" "$ext" "$ver"
-      printf '       %s did not move, but the manifest records no panduck version, so panduck\n' "$ext"
-      printf '       (installed %s) is not excluded -- do not call this a %s regression\n' "${pdv:-unknown}" "$ext"
-      printf '       until panduck#40 lands a panduck_version column and it too is unchanged\n'
+      printf '       this manifest predates the panduck_version column, so panduck (installed\n'
+      printf '       %s) is not excluded -- do not call this a %s regression\n' "${pdv:-unknown}" "$ext"
     else
-      skip=$((skip+1)); printf '  skip %s: %s blocks differ, %s moved off %s -- expected drift, regenerate\n' "$fx" "$diffs" "$ext" "$ver"
+      skip=$((skip+1))
+      printf '  skip %s: %s blocks differ --%s expected drift, regenerate\n' "$fx" "$diffs" "$moved"
     fi
   done <<< "$rows"
 fi

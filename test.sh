@@ -958,7 +958,8 @@ cause=unattributed
 # panduck 0.5.0 could take .ipynb off pandoc(1) through expand_embedded: rendered
 # text and outline match pandoc's on a notebook with tables, lists, code and a
 # quote. But that path prints DuckDB's deprecated-lambda WARNING on STDOUT -- from
-# single-arrow lambdas in panduck's expand macro, reader_registry.cpp:1250/1254/1265
+# FOUR single-arrow lambdas in panduck's expand macro (the first, `(pd_e, pd_i) ->`,
+# escapes a `name ->` search), reader_registry.cpp:1202/1250/1254/1265
 # at 5a0331b -- and it would land inside every notebook's TOC and converted output.
 # FIXED here is the signal to switch the route.
 #
@@ -967,8 +968,17 @@ cause=unattributed
 # the absence of its subject is the failure it exists to catch.
 cause=panduck
 if duckdb -noheader -list -c "LOAD panduck; SELECT count(*) FROM duckdb_functions() WHERE function_name='panduck_expand_embedded';" 2>/dev/null | grep -qx 1; then
-  emits 'expand_embedded prints a deprecation warning on stdout' 'Deprecated lambda' bash -c \
-    "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD markdown; LOAD panduck; SELECT count(*) FROM read_panduck_doc('$TMP/nb.ipynb', expand_embedded := true);\" 2>/dev/null"
+  # FIXED requires the call to SUCCEED, return rows, AND print no warning. Grepping
+  # stdout for the warning alone is not enough: on DuckDB 2.0 single-arrow lambdas
+  # are a Binder Error rather than a warning (panduck, from DuckDB's binder source),
+  # so the failed call prints nothing on stdout and would read as fixed. Three
+  # states, only one of which is clean:
+  #   1.5.x   warns on stdout, succeeds       known
+  #   2.0     errors at bind time, exit 1     known
+  #   fixed   succeeds, no warning            FIXED
+  broken 'expand_embedded runs clean (no lambda warning, no lambda error)' 'EXPAND_CLEAN' bash -c \
+    "o=\$(duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD markdown; LOAD panduck; SELECT 'rows=' || count(*) FROM read_panduck_doc('$TMP/nb.ipynb', expand_embedded := true);\" 2>/dev/null); rc=\$?
+     [ \$rc -eq 0 ] && printf '%s\n' \"\$o\" | grep -q '^rows=[1-9]' && ! printf '%s' \"\$o\" | grep -q 'Deprecated lambda' && echo EXPAND_CLEAN"
 else
   skip=$((skip+1)); echo '  skip expand_embedded stdout warning (installed panduck predates expand_embedded)'
 fi

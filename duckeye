@@ -1173,18 +1173,25 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
     #
     #           Blocked on one thing: that path prints DuckDB's deprecated-lambda
     #           WARNING on STDOUT, from single-arrow lambdas in panduck's expand macro
-    #           (reader_registry.cpp:1250/1254/1265 at 5a0331b). It would land inside
+    #           (reader_registry.cpp:1202/1250/1254/1265 at 5a0331b; the first is `(pd_e, pd_i) ->`, which a `name ->` search misses). It would land inside
     #           every notebook's TOC and converted output. SET lambda_syntax=
     #           'ENABLE_SINGLE_ARROW' silences it, and is deliberately NOT used: it is
     #           the escape hatch removed from this script earlier, and DuckDB says
     #           single-arrow lambdas go away before its next release -- at which point
-    #           the hatch stops working and panduck's macro fails outright.
+    #           the hatch stops working and panduck's macro fails outright. Measured
+    #           rather than taken from the changelog: SET lambda_syntax=
+    #           'DISABLE_SINGLE_ARROW' -- DuckDB 2.0's effective default, per its binder
+    #           source -- turns the warning into a Binder Error with exit 1.
     #
     #           Do NOT gate the eventual switch on markdown resolving. Verified here:
     #           with markdown absent the opt-in path exits 1 with a named error --
     #           "panduck: expand_embedded needs the markdown extension (INSTALL
     #           markdown FROM community)" -- while the default call is unchanged. A
     #           probe would turn that loud, correct failure into a quiet one.
+    #           That message text was measured under 1.5.5's DEFAULT lambda setting.
+    #           Under DuckDB 2.0's rule the lambda Binder Error binds first and is what
+    #           you see (panduck, reproduced with DISABLE_SINGLE_ARROW). Both exit 1
+    #           and neither is quiet, so the conclusion holds; do not match on the text.
     #
     #   .rst    0.5.0 fixed the table-cell markup that used to keep this here. What
     #           remains: panduck's reader flattens an indented block quote to a plain

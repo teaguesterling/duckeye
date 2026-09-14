@@ -622,18 +622,16 @@ anything, or to convert an AST into blocks; three extensions still use it to
 
 | ext | why pandoc still reads it |
 |---|---|
-| `.ipynb` | panduck returns one `raw` block holding the whole markdown cell verbatim, so no headings are extracted and `-T`/`-S` find nothing ([panduck#39](https://github.com/teaguesterling/duckdb_panduck/issues/39)) |
-| `.rst` | reads correctly and headings work, but table cells keep literal inline markup — a `**bold**` cell stays asterisks ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)) |
+| `.ipynb` | panduck 0.5.0's `expand_embedded` reads notebooks with rendered text and outline identical to pandoc's, but prints a DuckDB deprecation WARNING on **stdout** that would land inside every TOC and converted document |
+| `.rst` | panduck 0.5.0 fixed table cells; its reader still flattens an indented block quote to a plain paragraph, so `-t md` would lose the `>` |
 | `.man`, `.N` | no extension in the stack reads roff — `panduck_can_read('a.man')` is false — so pandoc is the only route. Whether panduck intends to support it is not recorded either way |
 
 Everything else — `.docx .odt .epub .org .tex .rtf .textile .mediawiki`, plus
 `.md` and `.html` — is read natively, with no pandoc process.
 
-Closing [#38](https://github.com/teaguesterling/duckdb_panduck/issues/38) and
-[#39](https://github.com/teaguesterling/duckdb_panduck/issues/39) leaves roff as
-the only format needing pandoc — so those two issues are most of the remaining
-distance. Whether roff is ever read natively is an open question, not a settled
-one.
+Each of those is one upstream fix away, and `test.sh` carries a guard for each that
+reports `FIXED` when the route can move. That leaves roff as the only format needing
+pandoc; whether panduck ever reads roff is an open question, not a settled one.
 
 ## Formats
 
@@ -763,15 +761,11 @@ against the libraries, not duckeye:
   duckeye no longer hits this: `-t pandoc` uses duck_block_utils' builder, whose
   spec 1.2 struct carries `meta` and `blocks` as JSON *type*, so `to_json()` of it
   is the Pandoc document and the macro that used to reassemble one is gone.
-- **`.rst` and `.textile` keep literal table-cell markup.** A `**bold**` cell in
-  `.rst` stays asterisks. A `.textile` cell keeps its *alignment* modifiers — `<.`,
-  `>.`, `=.` survive into the content, where `_.` is consumed correctly:
-  `|_. Name|_. Value|` / `|<. left|>. right|` reads as headers `["Name","Value"]`
-  with a row `["<. left", ">. right"]`. Body text and headings are unaffected in
-  both formats
+- **`.textile` table cells kept their alignment modifiers** (`<.`, `>.`, `=.`) and `.rst`
+  cells kept literal inline markup. Both are fixed in panduck v0.5.0, served since
+  2026-09-14 and measured: `.textile` is read by panduck, so the fix reaches users
+  now; `.rst` still goes through pandoc for the reason in the table above
   ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)).
-  Both are fixed in panduck v0.5.0, which the community registry does not serve
-  yet — the served build is `c8aee8a` (v0.4.1), measured.
 - **YAML frontmatter renders as body prose in `-t text`.** The markdown reader emits
   it as `kind='block'` with `element_type='metadata'`, where the spec puts document
   metadata in `kind='value'`

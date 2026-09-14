@@ -128,6 +128,22 @@ EOF
 printf -- '- a\n- b\n' >"$TMP/tight.md"
 printf -- '- a\n\n- b\n' >"$TMP/loose.md"
 
+# A notebook whose markdown cell holds two headings, and an .rst block quote -- the
+# two shapes that still keep .ipynb and .rst on pandoc(1). See the guards below.
+cat >"$TMP/nb.ipynb" <<'EOF'
+{"cells":[{"cell_type":"markdown","metadata":{},"source":["# Top\n","\n","## Sub\n"]}],"metadata":{},"nbformat":4,"nbformat_minor":5}
+EOF
+cat >"$TMP/quote.rst" <<'EOF'
+Title
+=====
+
+Before the quote.
+
+   A quoted warning.
+
+After the quote.
+EOF
+
 # Frontmatter, for the metadata-leak guard below.
 printf -- '---\ntitle: Secret Title\nauthor: Jane\n---\n\n# Real Heading\n\nbody\n' >"$TMP/fm.md"
 
@@ -937,6 +953,31 @@ cause='duck_block_utils'
 emits 'duck_blocks_to_text renders metadata as body' 'title: Secret Title' bash -c \
   "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD markdown;
      SELECT duck_blocks_to_text(list(b)) FROM read_markdown_blocks('$TMP/fm.md') b;\" 2>/dev/null"
+cause=unattributed
+
+# panduck 0.5.0 could take .ipynb off pandoc(1) through expand_embedded: rendered
+# text and outline match pandoc's on a notebook with tables, lists, code and a
+# quote. But that path prints DuckDB's deprecated-lambda WARNING on STDOUT -- from
+# single-arrow lambdas in panduck's expand macro, reader_registry.cpp:1250/1254/1265
+# at 5a0331b -- and it would land inside every notebook's TOC and converted output.
+# FIXED here is the signal to switch the route.
+#
+# SKIPPED, not passed, where expand_embedded does not exist: an older panduck rejects
+# the parameter, prints no warning, and would read as FIXED. A guard that fires on
+# the absence of its subject is the failure it exists to catch.
+cause=panduck
+if duckdb -noheader -list -c "LOAD panduck; SELECT count(*) FROM duckdb_functions() WHERE function_name='panduck_expand_embedded';" 2>/dev/null | grep -qx 1; then
+  emits 'expand_embedded prints a deprecation warning on stdout' 'Deprecated lambda' bash -c \
+    "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD markdown; LOAD panduck; SELECT count(*) FROM read_panduck_doc('$TMP/nb.ipynb', expand_embedded := true);\" 2>/dev/null"
+else
+  skip=$((skip+1)); echo '  skip expand_embedded stdout warning (installed panduck predates expand_embedded)'
+fi
+# panduck's .rst reader flattens an indented block quote to a plain paragraph, where
+# pandoc emits blockquote > paragraph. -t md then loses the quote. duckeye still reads
+# .rst through pandoc, so users do not see this; it is the remaining thing holding
+# .rst there now that 0.5.0 fixed table cells. FIXED means the route can move.
+broken 'rst reader keeps blockquote structure' '"element_type":"blockquote"' bash -c \
+  "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT to_json(list(b)) FROM read_rst_blocks('$TMP/quote.rst') b;\" 2>/dev/null"
 cause=unattributed
 
 # duckeye's own output must be clean TODAY, whatever upstream does.

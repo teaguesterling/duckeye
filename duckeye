@@ -1161,27 +1161,35 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
       *.mediawiki) doc="SELECT list(b) AS blocks FROM read_mediawiki_blocks('$src') b" ;;
     esac ;;
   *.rst|*.ipynb|*.man|*.[1-9])
-    # Three formats stay on pandoc(1), each for a measured reason:
+    # Three formats stay on pandoc(1), each for a measured reason. Two of them are now
+    # one upstream fix away, and test.sh carries a guard for each that reports FIXED
+    # when the route can move.
     #
-    #   .ipynb  panduck's reader emits a markdown cell as ONE raw block holding the
-    #           cell source verbatim, so no headings are extracted: -T finds nothing
-    #           and -S finds no sections. pandoc parses cell markdown into blocks.
+    #   .ipynb  panduck 0.5.0 (5a0331b, served 2026-09-14) parses markdown cells through
+    #           read_panduck_doc(src, expand_embedded := true), and on a notebook with
+    #           tables, lists, code and a quote its rendered text and outline are
+    #           BYTE-IDENTICAL to pandoc's -- measured. The only rendered difference is
+    #           that pandoc also emits a `jupyter: nbformat` frontmatter block.
     #
-    #           ADOPTION PATH, when panduck v0.5.0 reaches the registry (#2688 open
-    #           as of 2026-09-12; served build is c8aee8a / v0.4.1, measured):
-    #           read_panduck_doc(src, expand_embedded := true) parses the cell and
-    #           this route can drop pandoc(1) entirely.
+    #           Blocked on one thing: that path prints DuckDB's deprecated-lambda
+    #           WARNING on STDOUT, from single-arrow lambdas in panduck's expand macro
+    #           (reader_registry.cpp:1250/1254/1265 at 5a0331b). It would land inside
+    #           every notebook's TOC and converted output. SET lambda_syntax=
+    #           'ENABLE_SINGLE_ARROW' silences it, and is deliberately NOT used: it is
+    #           the escape hatch removed from this script earlier, and DuckDB says
+    #           single-arrow lambdas go away before its next release -- at which point
+    #           the hatch stops working and panduck's macro fails outright.
     #
-    #           Do NOT gate that switch on the markdown extension resolving. It was
-    #           the obvious precaution and it is wrong: panduck reports the opt-in
-    #           path RAISES when markdown is absent -- a named error carrying the
-    #           install command, from an explicit guard added for their #25 -- rather
-    #           than silently falling back. A probe would only turn a loud, correct
-    #           failure into a quiet one. NOT VERIFIED HERE: v0.5.0 is not installable
-    #           yet, so this is panduck's measurement, not duckeye's. Re-run it before
-    #           switching.
-    #   .rst    panduck's reader keeps literal inline markup inside table cells --
-    #           a **plum** cell renders as **plum** rather than emphasised text.
+    #           Do NOT gate the eventual switch on markdown resolving. Verified here:
+    #           with markdown absent the opt-in path exits 1 with a named error --
+    #           "panduck: expand_embedded needs the markdown extension (INSTALL
+    #           markdown FROM community)" -- while the default call is unchanged. A
+    #           probe would turn that loud, correct failure into a quiet one.
+    #
+    #   .rst    0.5.0 fixed the table-cell markup that used to keep this here. What
+    #           remains: panduck's reader flattens an indented block quote to a plain
+    #           level-1 paragraph, where pandoc emits blockquote > paragraph. Rendered
+    #           text and outline are identical either way; -t md loses the `>`.
     #   .man    panduck_can_read('a.man') is false and no extension in the stack
     #           reads roff, so pandoc is the only route. WHY panduck does not read
     #           it is NOT RECORDED -- an earlier version of this comment asserted

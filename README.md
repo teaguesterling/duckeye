@@ -623,7 +623,7 @@ anything, or to convert an AST into blocks; three extensions still use it to
 | ext | why pandoc still reads it |
 |---|---|
 | `.ipynb` | panduck 0.5.0's `expand_embedded` reads notebooks with rendered text and outline identical to pandoc's, but prints a DuckDB deprecation WARNING on **stdout** that would land inside every TOC and converted document — and on DuckDB 2.0 the same lambdas are an outright error |
-| `.rst` | panduck 0.5.0 fixed table cells; its reader still flattens an indented block quote to a plain paragraph, so `-t md` would lose the `>` |
+| `.rst` | panduck 0.5.0 fixed table cells; its reader still flattens an indented block quote to a plain paragraph (so `-t md` loses the `>`), and drops a one-line footnote's body outright |
 | `.man`, `.N` | no extension in the stack reads roff — `panduck_can_read('a.man')` is false — so pandoc is the only route. Whether panduck intends to support it is not recorded either way |
 
 Everything else — `.docx .odt .epub .org .tex .rtf .textile .mediawiki`, plus

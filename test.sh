@@ -143,6 +143,16 @@ Before the quote.
 
 After the quote.
 EOF
+cat >"$TMP/footnote.rst" <<'EOF'
+Title
+=====
+
+Text with a note [1]_ and more.
+
+.. [1] The one line footnote body.
+
+Closing paragraph.
+EOF
 
 # Frontmatter, for the metadata-leak guard below.
 printf -- '---\ntitle: Secret Title\nauthor: Jane\n---\n\n# Real Heading\n\nbody\n' >"$TMP/fm.md"
@@ -985,9 +995,18 @@ fi
 # panduck's .rst reader flattens an indented block quote to a plain paragraph, where
 # pandoc emits blockquote > paragraph. -t md then loses the quote. duckeye still reads
 # .rst through pandoc, so users do not see this; it is the remaining thing holding
-# .rst there now that 0.5.0 fixed table cells. FIXED means the route can move.
+# .rst there now that 0.5.0 fixed table cells. FIXED here ALONE does not mean
+# the route can move -- see the footnote guard below.
 broken 'rst reader keeps blockquote structure' '"element_type":"blockquote"' bash -c \
   "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT to_json(list(b)) FROM read_rst_blocks('$TMP/quote.rst') b;\" 2>/dev/null"
+# The .rst reader also DROPS a one-line footnote's body (`.. [1] The body.`) and leaves
+# the reference in the paragraph as literal `[1]_`; pandoc keeps it as a note. That is
+# lost text, not formatting (panduck#67, reproduced on served 5a0331b). The .rst route
+# can move off pandoc only when BOTH rst guards report FIXED -- and panduck#68 also
+# reworks list ownership (an item owns lines at its TEXT column, the marker's width),
+# so re-run rst list parity before switching rather than trusting the guards alone.
+broken 'rst reader keeps a one-line footnote body' 'one line footnote body' bash -c \
+  "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT string_agg(coalesce(content,''), ' ') FROM read_rst_blocks('$TMP/footnote.rst');\" 2>/dev/null"
 cause=unattributed
 
 # duckeye's own output must be clean TODAY, whatever upstream does.

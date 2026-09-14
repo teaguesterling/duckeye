@@ -126,6 +126,7 @@ EOF
 
 # A TIGHT list, to watch the markdown reader's tight/loose fidelity.
 printf -- '- a\n- b\n' >"$TMP/tight.md"
+printf -- '- a\n\n- b\n' >"$TMP/loose.md"
 
 # Frontmatter, for the metadata-leak guard below.
 printf -- '---\ntitle: Secret Title\nauthor: Jane\n---\n\n# Real Heading\n\nbody\n' >"$TMP/fm.md"
@@ -883,22 +884,19 @@ has 'doc -Q li renders as html list' '<ul>'           $DUCKEYE -Q 'li' -t html "
 # Ancestors, not the whole document: the heading is outside the list's subtree.
 no_leak 'doc -Q li excludes the heading' 'Listing' $DUCKEYE -Q 'li' -t md "$TMP/list.md"
 
-# The markdown reader emits the LOOSE encoding for both `- a\n- b` and `- a\n\n- b`,
-# so tight/loose does not survive the read. duck_block_utils rules that list_item
-# WITH content is a tight item and list_item with a child paragraph is loose, and
-# pandoc agrees -- Plain,Plain vs Para,Para on those two inputs. The user-visible
-# symptom runs the OTHER way, and this comment said the reverse until markdown
-# measured it: duck_blocks_to_md collapses loose onto tight, so a TIGHT list
-# round-trips correctly by two errors cancelling, while a LOOSE list silently loses
-# its blank lines. Measured end to end -- both inputs give '- alpha\n- beta'.
-#
-# Gated on the PROPERTY duck_block_utils named, not on a version: content IS NOT
-# NULL on the first item of a known tight source. When the reader starts emitting
-# the tight shape this reports FIXED and the guard comes out.
-cause='markdown reader'
-emits 'tight list loses its tight shape' '"element_type":"list_item","content":null' \
+# Tight and loose lists round-trip distinctly. They did not until markdown 2ba1321:
+# the reader collapsed tight onto loose (list_item(NULL) plus a paragraph child for
+# both) and the loose encoding then read back tight, so a tight list survived by two
+# errors cancelling and a loose one lost its blank lines. markdown #60 fixed it and
+# the guard that watched for it reported FIXED on the first run after the update.
+# Asserted end to end in BOTH directions, since a round trip that only checks the
+# tight case is exactly the instrument that passed for the wrong reason before.
+has 'tight list item carries its content' '"element_type":"list_item","content":"a"' \
     $DUCKEYE -t blocks "$TMP/tight.md"
-cause=unattributed
+ok  'tight list writes tight' bash -c \
+    "[ \"\$($DUCKEYE -t md '$TMP/tight.md' 2>/dev/null | head -2)\" = \"\$(printf -- '- a\\n- b')\" ]"
+ok  'loose list keeps its blank line' bash -c \
+    "[ \"\$($DUCKEYE -t md '$TMP/loose.md' 2>/dev/null | head -3)\" = \"\$(printf -- '- a\\n\\n- b')\" ]"
 
 # duck_block_utils 6c1c2e5 / spec 1.2 fixed the fragment drop, so these replace the
 # availability guard that announced it. A fragment with no top-level Pandoc

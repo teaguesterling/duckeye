@@ -788,14 +788,6 @@ against the libraries, not duckeye:
   `<script type="application/vnd.frontmatter+yaml">` carrier. Those round-trip
   rather than leak, and duckeye deliberately does **not** filter them — doing so
   would destroy correct output.
-- **A loose markdown list is silently converted to a tight one.** Two defects in
-  opposite directions: the reader collapses tight onto loose (`- a\n- b` and
-  `- a\n\n- b` produce identical blocks), and `duck_blocks_to_md` collapses loose
-  back onto tight. They cancel for a tight list, which round-trips correctly *by
-  two errors agreeing*; a loose list loses its blank lines end to end. The
-  distinction is carried by the block shape — `list_item` with content is tight,
-  with a child paragraph is loose — and neither half implements it.
-  `test.sh` guards the reader half and will say `FIXED` when it changes.
 - **Fragments used to vanish from `-t pandoc`.** A `list_item` outside its list, or
   a bare inline, exported as `blocks: []` — silent content loss, not a formatting
   quirk. Fixed in duck_block_utils spec 1.2 (`6c1c2e5`), which makes a fragment

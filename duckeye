@@ -21,7 +21,13 @@ set -uo pipefail
 # --init only. Separate from the LOAD lists above because installing needs to
 # know which repository each extension comes from; LOAD does not.
 : "${DUCKEYE_OFFICIAL:=http aws excel}"
-: "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck}"
+# panduck MUST be here. Formats were routed through it in bf7ac1f without adding it,
+# so `duckeye --init` on a fresh machine installed no panduck and every docx, odt,
+# epub, org, tex, rtf, textile and mediawiki file failed -- along with rst, ipynb and
+# man, whose pandoc ASTs panduck reads. It went unnoticed for five days because the
+# machine it was developed on had panduck installed by hand, and CI, which starts
+# empty and was red the whole time, was not being read.
+: "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck panduck}"
 
 usage() {
   cat <<'EOF'
@@ -118,7 +124,8 @@ Env:
   DUCKEYE_OFFICIAL   --init installs these from the core repo
   DUCKEYE_COMMUNITY  --init installs these from the community repo
                      (default: duck_block_utils markdown webbed zim pdf yaml
-                      toml read_lines duck_tails zipfs textplot sitting_duck)
+                      toml read_lines duck_tails zipfs textplot sitting_duck
+                      panduck)
 
 Examples:
   duckeye README.md                  # render to stdout, unpaged

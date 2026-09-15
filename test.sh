@@ -1029,11 +1029,50 @@ ok  'html keeps frontmatter out of the body' bash -c \
 no_leak 'ansi omits metadata'          'title: Secret Title' $DUCKEYE -t ansi "$TMP/fm.md"
 has     'ansi still renders the body'  'body'                $DUCKEYE -t ansi "$TMP/fm.md"
 cause='markdown reader'
-# ...and the control that makes the guard meaningful: conformant value-kind metadata
-# is already skipped, so a FIXED here means something upstream changed, not that
-# duckeye started filtering.
-no_leak 'value-kind metadata stays out of the body' '2026-' \
-    $DUCKEYE -t text "$TMP/doc.md"
+# Document metadata must stay out of RENDERER output. The control that stood here
+# checked doc.md, which has no value-kind rows at all, so it could not fail.
+#
+# The case that matters: docx/odt/epub carry metadata TEXT as kind='inline' children
+# under a kind='value' row. A PER-ROW filter drops the value row and keeps its
+# children -- and a list's structure is its row order plus levels, so those children
+# are then RE-PARENTED onto whatever block precedes them. After a paragraph that has
+# inline children of its own, they simply become more of that paragraph: measured,
+# `-t text` on a docx printed "body emphasis textMeta Author2026-...Meta Title".
+#
+# The first version of this control used a plain last paragraph, whose text lives in
+# `content` with no inline children to join, so it passed while the leak was live.
+# The formatted paragraph below is what makes it bite.
+#
+# Probed with strings that exist ONLY inside value subtrees. pandoc's epub writer puts
+# a title page into the BODY -- a real heading and author paragraph -- so an author
+# string is not a metadata probe for epub. The language code is.
+if command -v pandoc >/dev/null; then
+  printf '# Heading\n\nbody *emphasis* text\n' >"$TMP/meta.md"
+  pandoc "$TMP/meta.md" -M title='Meta Title' -M author='Meta Author' -o "$TMP/meta.docx" 2>/dev/null
+  pandoc "$TMP/meta.md" -M title='Meta Title' -M author='Meta Author' -M lang=xx-META -o "$TMP/meta.epub" 2>/dev/null
+  # the fixture must CARRY value metadata, or every absence below proves nothing
+  has 'docx fixture carries value metadata' '"kind":"value"' $DUCKEYE -t blocks "$TMP/meta.docx"
+  has 'epub fixture carries its language'   'xx-META'        $DUCKEYE -t blocks "$TMP/meta.epub"
+  for w in text ansi; do
+    no_leak "docx value metadata stays out of -t $w" 'Meta Author' $DUCKEYE -t $w "$TMP/meta.docx"
+    no_leak "epub value metadata stays out of -t $w" 'xx-META'     $DUCKEYE -t $w "$TMP/meta.epub"
+    has     "docx body still renders in -t $w"       'emphasis'    $DUCKEYE -t $w "$TMP/meta.docx"
+  done
+else
+  skipping 'value metadata stays out of renderers' 'needs pandoc'
+fi
+
+# The -t text filter removes metadata rows one at a time. That is only safe because no
+# producer gives a metadata row children: removing a parent re-parents them, which is
+# exactly how the filter before it leaked. So the premise is ASSERTED, not assumed --
+# and non-vacuously, since the fixture must contain a metadata row at all. markdown is
+# the only producer measured (yaml and toml frontmatter); panduck's .md delegates to it.
+ok 'metadata rows are childless (premise of the -t text filter)' bash -c \
+  "duckdb -noheader -list -c \"LOAD markdown;
+     WITH r AS (SELECT unnest(l) AS x, unnest(range(1, len(l)+1)) AS i FROM (SELECT list(b) AS l FROM read_markdown_blocks('$TMP/fm.md') b))
+     SELECT (count(*) FILTER (WHERE a.x.element_type='metadata') >= 1
+             AND count(*) FILTER (WHERE a.x.element_type='metadata' AND b.x.level > a.x.level) = 0)::VARCHAR
+     FROM r a LEFT JOIN r b ON b.i = a.i + 1;\" 2>/dev/null | grep -qx true"
 cause=unattributed
 
 has 'fragment inline exports to pandoc' '"t":"Plain"' \

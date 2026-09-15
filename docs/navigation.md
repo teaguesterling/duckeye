@@ -176,9 +176,10 @@ than answered wrongly: attributes are matched after the structural selector, so 
 condition on a context node cannot be honoured. Tracked upstream as
 [sitting_duck#117](https://github.com/teaguesterling/sitting_duck/issues/117).
 
-Selecting an inline type alone (`bold`, `text`, `link`) produces no output —
-inlines render only inside their containing block — and duckeye says so rather
-than exiting silently.
+Selecting an inline type alone (`bold`, `text`, `link`) renders it on its own:
+`duck_blocks_repair` gives a bare inline an implicit `plain` parent. It does not
+pull in the surrounding paragraph — `-Q strong` answers with the bold text, not
+the sentence it sits in.
 
 ## 6. Output Format Conversion (`-t`)
 

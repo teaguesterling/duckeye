@@ -1132,19 +1132,32 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     # contract applies -- reorder would sort on the colliding keys and group every
     # page marker ahead of every paragraph. duck_blocks_concat is the raw append
     # and does not touch order at all.
+    # The page_break marker is LEVEL 1, a top-level marker the way hr is. It used to be
+    # NULL, and duck_blocks_validate rejected every PDF duckeye produced: the spec
+    # allows no NULL level and no per-type exception. Nothing depended on the NULL --
+    # no other code here mentions page_break or tests for a NULL level.
+    #
+    # duck_blocks_repair runs after the fold for the ORDER, which merge cannot fix.
+    # Each page prepends a marker numbered 0 onto a parsed page that also starts at 0,
+    # so the two collide INSIDE one page; merge repairs order between the lists it
+    # joins and never sees that. Measured before: duplicate element_order on every
+    # PDF (two pages: 0 and 59, each shared with the next block). After: dense from 0,
+    # valid. Text, -P and -T output are byte-identical, and panduck's page_break
+    # contract on two_pages.pdf still agrees.
+    #
     # The page_break attributes map must never be empty: an untyped MAP{} infers
     # MAP("NULL","NULL") rather than MAP(VARCHAR,VARCHAR), and the ::duck_block cast
     # would then fail on every page. Non-emptiness is what makes the inference right
     # -- there is no cast on the map itself, only on the struct around it.
     doc="WITH __pg AS (
            SELECT page, list_prepend(
-                    {'kind':'block','element_type':'page_break','content':NULL,'level':NULL,
+                    {'kind':'block','element_type':'page_break','content':NULL,'level':1,
                      'encoding':'text','attributes':MAP{'page_number': page::VARCHAR},
                      'element_order':0}::duck_block,
                     parse_markdown_to_duck_blocks(coalesce(text, ''))) AS pb
            FROM read_pdf('$src'${p_args:+, $p_args}))
-         SELECT reduce(list(pb ORDER BY page),
-                       lambda acc, x: duck_blocks_merge(acc, x)) AS blocks
+         SELECT duck_blocks_repair(reduce(list(pb ORDER BY page),
+                       lambda acc, x: duck_blocks_merge(acc, x))) AS blocks
          FROM __pg" ;;
   *.json|.pandoc_ast)              # Pandoc AST
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;
@@ -1475,14 +1488,14 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
   # the attributes when the ancestors are known, repair covers what is left. Nothing
   # is double-wrapped and nothing is lost either way.
   #
-  # Gate any use of the new functions on the artifact, not the spec version:
-  #   SELECT count(*) FROM duckdb_functions() WHERE function_name='duck_blocks_repair'
-  # Measured 2026-09-10 on installed 9599650 / spec 6.5: absent.
-  #
-  # That probe is why the relabel above cost nothing here. A gate written against the
-  # version would have had to learn that 1.2 is NEWER than 6.5 -- a comparison that
-  # reads backwards and that no arithmetic gets right without being told.
-  doc="SELECT list(k.blk ORDER BY k.ord) AS blocks FROM __qb k
+  # WIRED: duck_blocks_repair now wraps the selection below, ON TOP of the ancestor
+  # chain -- it arrived with duck_block_utils 6c1c2e5 (spec 1.2). Measured against a
+  # copy without it, before switching: every output the ancestor chain supplies is
+  # unchanged (an ordered list keeps start="3" in md and html, docx lists, -S with -Q,
+  # code, headings, the no-match error). What repair adds is the case the ancestor
+  # chain deliberately leaves alone: a bare INLINE match. It gets an implicit `plain`
+  # parent, so `-Q a -t ansi` renders "link (https://example.com)" instead of failing.
+  doc="SELECT duck_blocks_repair(list(k.blk ORDER BY k.ord)) AS blocks FROM __qb k
        WHERE EXISTS (
          SELECT 1 FROM __qs s JOIN __qn n ON n.node_id = s.node_id
          WHERE k.ord >= n.ord
@@ -1602,10 +1615,7 @@ if ! grep -q '[^[:space:]]' "$out"; then
              # matching" there is simply false.
              [[ -n ${selector:-} ]] &&
                die "no output for '$selector' in $f
-       Either nothing matched, or every match was an inline type (bold, italic,
-       text, link), which renders only inside its containing block. Block-kind
-       matches carry their container, so -Q li works; -Q strong cannot, because
-       its container is the whole surrounding paragraph -- select that instead." ;;
+       Nothing matched, or what matched has no text to render." ;;
   esac
 fi
 

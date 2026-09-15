@@ -460,7 +460,6 @@ These are measured limits, not guesses:
 |---|---|
 | `-Q 'h2 code'` | refused — an attribute on a *context* node is unsupported, and `h2` is shorthand for one. Use `heading code`. |
 | `-Q 'code, blockquote'` | selector groups are not supported; run the two queries separately |
-| `-Q 'a'` with `-t ansi` | no output — the terminal renderer draws an inline as part of its containing block. Every other writer emits it as a fragment: `-t md` gives `[link](https://example.com)`. |
 | `-Q 'heading:contains(Install)'` | pseudo-class predicates are not supported; `-S Install` is the substring query |
 | a flag after FILE | not parsed — `duckeye -S X doc.md -t md` fails. Flags come before the file. |
 

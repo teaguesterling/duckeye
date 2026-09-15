@@ -17,7 +17,7 @@
 #
 #   ./integration.sh                 # everything available
 #   DUCKEYE=path ./integration.sh    # test a different build
-#   DUCKEYE_TEST_ZIM=archive.zim ./integration.sh
+#   DUCKEYE_TEST_ZIM=archive.zim ./integration.sh   # a different archive (default: fixtures/test.zim)
 #
 # ASSERTIONS READ STDOUT ONLY. duck_block_utils prints a deprecation notice to
 # stderr for pandoc_ast_to_blocks, and an early draft of this file merged the
@@ -300,6 +300,8 @@ echo 'schemes'
 # checkout -- the suite cds there at the top.
 no_out 'git:// toc'      $DUCKEYE -T 'git://README.md@HEAD'
 has    'git:// section'  'Install'  $DUCKEYE -S Install 'git://README.md@HEAD'
+# Default to the vendored archive; this used to skip unless DUCKEYE_TEST_ZIM was set.
+: "${DUCKEYE_TEST_ZIM:=fixtures/test.zim}"
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -f ${DUCKEYE_TEST_ZIM:-} ]]; then
   no_out 'zim toc' $DUCKEYE -T "$DUCKEYE_TEST_ZIM"
 else

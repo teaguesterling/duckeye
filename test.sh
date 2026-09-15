@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # duckeye test suite. Generates its own fixtures; needs duckdb, and pandoc for the
-# pandoc-routed formats. ZIM cases run only when DUCKEYE_TEST_ZIM names an archive.
+# pandoc-routed formats. ZIM cases use fixtures/test.zim unless DUCKEYE_TEST_ZIM names another.
 #
 #   ./test.sh                                  # everything available
-#   DUCKEYE_TEST_ZIM=~/wiki.zim ./test.sh      # including ZIM
+#   DUCKEYE_TEST_ZIM=~/wiki.zim ./test.sh      # against a different archive
 set -uo pipefail
 
 cd "$(dirname "$0")" || exit 1
@@ -655,6 +655,26 @@ no  'pdf invalid page range'                   $DUCKEYE -P abc "$TMP/doc.pdf"
 # have passed more often than not.
 ok  'pdf many pages renders'   $DUCKEYE -t text "$TMP/many.pdf"
 has 'pdf many pages last page' 'kumquat40' $DUCKEYE -t text "$TMP/many.pdf"
+
+# fixtures/multiline.pdf wraps one sentence across three lines with a HYPHENATED break
+# ("contin-" / "ues"). pdftotext keeps both the lines and the hyphen; duckeye must give
+# one paragraph with a space at the soft break and no hyphen at the hard one.
+has     'pdf joins a hyphenated line break'    'continues onto a third line' $DUCKEYE -t text fixtures/multiline.pdf
+has     'pdf joins wrapped lines with a space' 'over the lazy dog'           $DUCKEYE -t text fixtures/multiline.pdf
+no_leak 'pdf leaves no hyphen at the break'    'contin-'                     $DUCKEYE -t text fixtures/multiline.pdf
+
+# Every PDF duckeye produced used to FAIL duck_block_utils' own validator: the
+# page_break marker had a NULL level and shared its element_order with the next block.
+# Asserted on one page and on the generated two-page PDF, since the order collision
+# happens once per page and a one-page file shows it only once.
+blocks_valid() {  # FILE -> "true"/"false" from duck_blocks_validate over duckeye -t blocks
+  local j; j=$(mktemp)
+  $DUCKEYE -t blocks "$1" 2>/dev/null >"$j"
+  duckdb -noheader -list -c "LOAD duck_block_utils; SELECT (duck_blocks_validate(from_json(content, '[{\"kind\":\"VARCHAR\",\"element_type\":\"VARCHAR\",\"content\":\"VARCHAR\",\"level\":\"INTEGER\",\"encoding\":\"VARCHAR\",\"attributes\":\"MAP(VARCHAR,VARCHAR)\",\"element_order\":\"INTEGER\"}]'))).valid FROM read_text('$j');" 2>/dev/null
+  rm -f "$j"
+}
+has 'pdf blocks pass the spec validator (1 page)'  'true' blocks_valid fixtures/multiline.pdf
+has 'pdf blocks pass the spec validator (2 pages)' 'true' blocks_valid "$TMP/doc.pdf"
 f=0; for _ in 1 2 3 4 5; do $DUCKEYE -t text "$TMP/many.pdf" >/dev/null 2>&1 || f=$((f+1)); done
 if (( f == 0 )); then pass=$((pass+1)); echo '  ok   pdf many pages is stable over 5 runs'
 else fail=$((fail+1)); printf '  FAIL %s (%d/5 failed)\n' 'pdf many pages is stable over 5 runs' "$f"; fi
@@ -730,6 +750,9 @@ has 'code glob -Q'             'execute'        $DUCKEYE -Q '.func#execute' "$TM
 has 'code glob -f ast'         'execute'        $DUCKEYE -f ast -T "$TMP/test_code.*"
 
 echo 'zim'
+# Default to the vendored archive (fixtures/README.md has its provenance). These cases
+# used to run only when DUCKEYE_TEST_ZIM was set, and skipped silently otherwise.
+: "${DUCKEYE_TEST_ZIM:=fixtures/test.zim}"
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   Z=$DUCKEYE_TEST_ZIM
   ok  'zim info'                    $DUCKEYE "$Z"
@@ -892,13 +915,16 @@ has 'doc -Q p alias'               'alpha body' $DUCKEYE -Q 'p' "$TMP/doc.md"
 no_leak 'doc -Q h2 excludes h1'    'Title'   $DUCKEYE -Q 'h2' "$TMP/doc.md"
 # An empty -Q result used to exit 0 printing nothing. Inline types are the
 # non-obvious cause: they render only inside their containing block.
-no  'doc -Q empty result fails'    $DUCKEYE -Q 'strong' "$TMP/doc.md"
-has 'doc -Q empty explains inline' 'renders only inside' \
-    bash -c "$DUCKEYE -Q 'strong' '$TMP/doc.md' 2>&1 >/dev/null"
+no  'doc -Q empty result fails'    $DUCKEYE -Q 'nosuchtype' "$TMP/doc.md"
+has 'doc -Q no-match message'     'Nothing matched' \
+    bash -c "$DUCKEYE -Q 'nosuchtype' '$TMP/doc.md' 2>&1 >/dev/null"
+# A bare INLINE match used to render nothing in the terminal: an inline is drawn as
+# part of its containing block, and -Q deliberately does not carry an inline's
+# ancestors (that would answer -Q strong with the whole sentence). duck_blocks_repair
+# now gives it an implicit `plain` parent, so it renders on its own.
+has 'doc -Q bare inline renders'   'bold phrase' $DUCKEYE -Q 'strong' "$TMP/doc.md"
 # The message must NOT claim nothing matched -- it cannot tell the two apart, and
 # claiming the wrong one sent a real debugging session down the wrong path.
-no_leak 'doc -Q empty avoids false claim' 'no blocks matching' \
-    bash -c "$DUCKEYE -Q 'strong' '$TMP/doc.md' 2>&1 >/dev/null"
 
 # A block-kind match carries its ancestors, so the writers see a well-formed
 # container. Without this, a list_item alone converts to an empty Pandoc AST and
@@ -1182,7 +1208,7 @@ ok  'md writer needs no pandoc(1)' bash -c \
     "rm -f '$TMP/nopandoc/pandoc.called'
      PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -t md '$TMP/sel.md' | grep -q 'Guide' \
        && [ ! -e '$TMP/nopandoc/pandoc.called' ]"
-no  'README limit: inline -t ansi still cannot' $DUCKEYE -Q 'a' -t ansi "$TMP/sel.md"
+has 'inline -t ansi renders via repair' 'link' $DUCKEYE -Q 'a' -t ansi "$TMP/sel.md"
 
 echo 'v1 flags'
 # The README embeds its own copy of the option list, and copies drift: it documented

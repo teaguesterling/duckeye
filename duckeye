@@ -1330,8 +1330,22 @@ css_alias() {
 # document the selector runs against. Before this, -Q rewrote the document first and
 # -S then searched the selector's leftovers for a heading, which is why `-S Install
 # -Q code` reported "no section matching 'Install'" while plain `-S Install` worked.
+#
+# Both apply their spans to ROWS -- one per block, keeping its position -- rather than
+# handing doc.blocks to duck_blocks_slice once per span. That passed the whole list on
+# every call, ~60 ms each at 18,000 rows, so cost grew as spans x document: `-s`, with a
+# span per heading, ran past 120 s on a file a plain render reads in 0.2 s. Measured
+# identical output against the slice form before switching.
+#
+# Rows find their span by carrying it forward in a window, NOT by an ASOF join, which
+# is the obvious tool and was tried first. Inside these CTEs DuckDB estimates the span
+# list at 2 rows, under asof_loop_join_threshold (64), so it plans the ASOF as a nested
+# loop plus arg_max: 288 million joined rows for `-s` at 72,000 rows, 12 s. The same
+# query over temp tables, with real row counts, took 0.2 s -- a prototype that
+# benchmarks tables will not show this. The window form has no estimate to get wrong.
 section_span_doc() {
   printf '%s\n' "WITH doc AS MATERIALIZED ($1),
+     r AS (SELECT generate_subscripts(blocks, 1) AS i, unnest(blocks) AS b FROM doc),
      h AS (SELECT e.level AS lvl, e.title AS title, e.id AS id, e.element_order AS ord
            FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
      sec AS (SELECT h1.ord AS s, coalesce(min(h2.ord) - 1, 2147483647) AS e
@@ -1340,19 +1354,28 @@ section_span_doc() {
              GROUP BY h1.ord),
      -- A substring can match both a chapter and a section inside it. The chapter
      -- already carries the child, so keeping both printed it twice; drop any span
-     -- another span contains.
-     top AS (SELECT s, e FROM sec a
-             WHERE NOT EXISTS (SELECT 1 FROM sec b
-                               WHERE b.s <= a.s AND b.e >= a.e AND (b.s, b.e) <> (a.s, a.e)))
-     SELECT duck_blocks_reorder(flatten(list(duck_blocks_slice(doc.blocks, top.s, top.e)
-                                             ORDER BY top.s))) AS blocks
-     FROM doc, top HAVING count(*) > 0"
+     -- another span contains. Heading spans either nest or are disjoint, so in start
+     -- order a span is contained exactly when an earlier one reaches as far: a running
+     -- max, not a pairwise comparison.
+     top AS (SELECT s, e FROM sec
+             QUALIFY coalesce(max(e) OVER (ORDER BY s, e DESC
+                              ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), -1) < e),
+     -- What survives is disjoint, so a row can only be inside the latest span that
+     -- starts at or before it: carry each span forward from its first row.
+     t AS (SELECT i, b, s FROM (
+             SELECT r.i, r.b, last_value(top.s IGNORE NULLS) OVER w AS s,
+                    last_value(top.e IGNORE NULLS) OVER w AS e
+             FROM r LEFT JOIN top ON top.s = r.b.element_order
+             WINDOW w AS (ORDER BY r.b.element_order, r.i ROWS UNBOUNDED PRECEDING))
+           WHERE b.element_order <= e)
+     SELECT duck_blocks_reorder(list(b ORDER BY s, i)) AS blocks FROM t HAVING count(*) > 0"
 }
 
 # Spans here stop at the next heading of *any* level, so a hit reports the innermost
 # section that holds it rather than nesting parent inside child.
 search_span_doc() {
   printf '%s\n' "WITH doc AS MATERIALIZED ($1),
+     r AS (SELECT generate_subscripts(blocks, 1) AS i, unnest(blocks) AS b FROM doc),
      h AS (SELECT e.element_order AS ord
            FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
      span AS (SELECT ord AS s, coalesce(lead(ord) OVER (ORDER BY ord) - 1, 2147483647) AS e
@@ -1362,12 +1385,18 @@ search_span_doc() {
               SELECT 0 AS s, e FROM (SELECT coalesce((SELECT min(ord) - 1 FROM h),
                                                      2147483647)::INTEGER AS e)
               WHERE e >= 0),
-     hit AS (SELECT s, e FROM doc, span
-             WHERE duck_blocks_to_match_text(duck_blocks_slice(doc.blocks, span.s, span.e))
-                   ILIKE '%$pat%' ESCAPE '\\')
-     SELECT duck_blocks_reorder(flatten(list(duck_blocks_slice(doc.blocks, hit.s, hit.e)
-                                             ORDER BY hit.s))) AS blocks
-     FROM doc, hit HAVING count(*) > 0"
+     -- The spans tile the document, so each row belongs to the latest one starting at
+     -- or before it, and a span's text is one GROUP BY away.
+     t AS (SELECT i, b, s FROM (
+             SELECT r.i, r.b, last_value(span.s IGNORE NULLS) OVER w AS s,
+                    last_value(span.e IGNORE NULLS) OVER w AS e
+             FROM r LEFT JOIN span ON span.s = r.b.element_order
+             WINDOW w AS (ORDER BY r.b.element_order, r.i ROWS UNBOUNDED PRECEDING))
+           WHERE b.element_order <= e),
+     hit AS (SELECT s FROM t GROUP BY s
+             HAVING duck_blocks_to_match_text(list(b ORDER BY i)) ILIKE '%$pat%' ESCAPE '\\')
+     SELECT duck_blocks_reorder(list(b ORDER BY s, i)) AS blocks
+     FROM t WHERE s IN (SELECT s FROM hit) HAVING count(*) > 0"
 }
 
 # Narrow BEFORE selecting. mode is left alone: it still names what the user asked for,
@@ -1424,6 +1453,20 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
     CREATE OR REPLACE TEMP TABLE __qn AS
       SELECT 1 AS node_id, 0 AS ord, (SELECT min(lvl) FROM __qb) - 1 AS lvl, 'document' AS ty, '' AS nm
       UNION ALL SELECT ord + 1, ord, lvl, ty, nm FROM __qb;
+    -- Each node's parent (the last node before it at a lower level) and the end of its
+    -- span (the first node after it at the same level or above), from one windowed pass
+    -- per distinct level. These were correlated subqueries per node -- quadratic, 13 s
+    -- of the node table's build at 18,000 rows. Levels are few, so this stays linear.
+    CREATE OR REPLACE TEMP TABLE __qe AS
+      WITH lv AS (SELECT DISTINCT lvl AS l FROM __qn),
+           x AS (SELECT n.node_id, n.ord, n.lvl, lv.l,
+                   max(CASE WHEN n.lvl < lv.l THEN n.node_id END) OVER (PARTITION BY lv.l ORDER BY n.ord
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS parent_id,
+                   min(CASE WHEN n.lvl <= lv.l THEN n.ord END) OVER (PARTITION BY lv.l ORDER BY n.ord
+                       ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) AS nxt
+                 FROM __qn n, lv)
+      SELECT node_id, ord, lvl, parent_id, coalesce(nxt, (SELECT max(ord) + 1 FROM __qn)) AS e
+      FROM x WHERE l = lvl;
     CREATE OR REPLACE TEMP TABLE __qa AS
       SELECT a.node_id::BIGINT AS node_id, a.ty::VARCHAR AS type,
              (SELECT semantic_type FROM read_ast('$qself') WHERE false) AS semantic_type,
@@ -1434,19 +1477,20 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
              NULL::VARCHAR[] AS modifiers, NULL::VARCHAR AS annotations,
              '$src'::VARCHAR AS file_path, 'duck_block' AS language,
              NULL::UINTEGER AS start_line, NULL::UINTEGER AS end_line,
-             (SELECT max(p.node_id) FROM __qn p WHERE p.ord < a.ord AND p.lvl < a.lvl)::BIGINT AS parent_id,
+             e.parent_id::BIGINT AS parent_id,
              a.lvl::UINTEGER AS depth,
-             (row_number() OVER (PARTITION BY (SELECT max(p.node_id) FROM __qn p
-                WHERE p.ord < a.ord AND p.lvl < a.lvl) ORDER BY a.ord) - 1)::INTEGER AS sibling_index,
-             (SELECT count(*) FROM __qn c WHERE c.ord > a.ord AND c.lvl = a.lvl + 1
-                AND c.ord < coalesce((SELECT min(e.ord) FROM __qn e
-                     WHERE e.ord > a.ord AND e.lvl <= a.lvl), 2147483647))::UINTEGER AS children_count,
-             (SELECT count(*) FROM __qn d WHERE d.ord > a.ord
-                AND d.ord < coalesce((SELECT min(e.ord) FROM __qn e
-                     WHERE e.ord > a.ord AND e.lvl <= a.lvl), 2147483647))::UINTEGER AS descendant_count,
+             (row_number() OVER (PARTITION BY e.parent_id ORDER BY a.ord) - 1)::INTEGER AS sibling_index,
+             -- Children are the nodes one level down whose parent this is. The old
+             -- in-span count agreed with this on every node measured, including
+             -- level skips: a node two levels down names this parent but is no child.
+             coalesce(c.n, 0)::UINTEGER AS children_count,
+             (e.e - a.ord - 1)::UINTEGER AS descendant_count,
              (SELECT scope FROM read_ast('$qself') WHERE false) AS scope,
              a.nm::VARCHAR AS peek
-      FROM __qn a;
+      FROM __qn a JOIN __qe e ON e.node_id = a.node_id
+      LEFT JOIN (SELECT k.parent_id, count(*) AS n FROM __qe k JOIN __qe p ON p.node_id = k.parent_id
+                 WHERE k.lvl = p.lvl + 1 GROUP BY k.parent_id) c ON c.parent_id = a.node_id
+      ORDER BY a.node_id;
     CREATE OR REPLACE TEMP TABLE __qat AS
       SELECT ord + 1 AS node_id, unnest(map_keys(atr)) AS key, unnest(map_values(atr)) AS value
       FROM __qb WHERE atr IS NOT NULL AND len(map_keys(atr)) > 0;
@@ -1502,18 +1546,25 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
   # code, headings, the no-match error). What repair adds is the case the ancestor
   # chain deliberately leaves alone: a bare INLINE match. It gets an implicit `plain`
   # parent, so `-Q a -t ansi` renders "link (https://example.com)" instead of failing.
-  doc="SELECT duck_blocks_repair(list(k.blk ORDER BY k.ord)) AS blocks FROM __qb k
-       WHERE EXISTS (
-         SELECT 1 FROM __qs s JOIN __qn n ON n.node_id = s.node_id
-         WHERE k.ord >= n.ord
-           AND k.ord < coalesce((SELECT min(e.ord) FROM __qn e
-                 WHERE e.ord > n.ord AND e.lvl <= n.lvl), 2147483647))
-          OR EXISTS (
-         SELECT 1 FROM __qs s JOIN __qn n ON n.node_id = s.node_id
-         JOIN __qb m ON m.ord = n.ord
-         WHERE m.knd = 'block' AND k.ord < n.ord AND k.lvl < n.lvl
-           AND n.ord < coalesce((SELECT min(e.ord) FROM __qn e
-                 WHERE e.ord > k.ord AND e.lvl <= k.lvl), 2147483647))"
+  #
+  # Both halves come from __qe, not from EXISTS over the matches -- that was quadratic
+  # in the same way the node table was. Subtrees are a running-max cover (the technique
+  # panduck measured in their #76): walking in document order, a row is inside some
+  # match while the furthest span end seen so far lies beyond it. Ancestors walk the
+  # parent chain, which is the same set the old level-and-span test described.
+  doc="WITH RECURSIVE
+         m AS (SELECT e.ord, e.e FROM __qs s JOIN __qe e ON e.node_id = s.node_id),
+         cover AS (SELECT n.ord, max(m.e) OVER (ORDER BY n.ord ROWS UNBOUNDED PRECEDING) AS c
+                   FROM __qn n LEFT JOIN m ON m.ord = n.ord),
+         anc(node_id) AS (SELECT e.parent_id FROM m JOIN __qb b ON b.ord = m.ord
+                            JOIN __qe e ON e.ord = m.ord
+                          WHERE b.knd = 'block' AND e.parent_id IS NOT NULL
+                          UNION
+                          SELECT e.parent_id FROM anc JOIN __qe e ON e.node_id = anc.node_id
+                          WHERE e.parent_id IS NOT NULL)
+       SELECT duck_blocks_repair(list(k.blk ORDER BY k.ord)) AS blocks FROM __qb k
+       WHERE k.ord IN (SELECT ord FROM cover WHERE c > ord)
+          OR k.ord + 1 IN (SELECT node_id FROM anc)"
 fi
 
 cte="WITH doc AS MATERIALIZED ($doc)"

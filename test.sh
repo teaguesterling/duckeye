@@ -1182,6 +1182,23 @@ has 'plain -S miss keeps its message' "no section matching 'nosuchsection'" \
 no_leak 'plain -S miss mentions no selector' 'narrowed' \
     bash -c "$DUCKEYE -S nosuchsection '$TMP/doc.md' 2>&1 >/dev/null"
 
+# SCALE. Selection has to stay near-linear in the size of the document. -Q built its
+# node table with correlated subqueries, and -S/-s passed the whole block list to
+# duck_blocks_slice once per span -- both quadratic. Measured on this 72,000-row file,
+# every case below ran past 120 s while a plain render took 0.6 s; `-s` did so at
+# 18,000 rows. Fixed, each takes 1-1.5 s here. The bound leaves room for a slower CI
+# runner, but not much more: an intermediate fix that DuckDB planned as a nested loop
+# took 12-14 s for `-s` and `-S then -Q`, and a 20 s bound let it pass. `-S 'Section 7'`
+# rather than one exact section, because a single span never paid the per-span cost
+# -- it matches 1,111 headings.
+for n in $(seq 1 8000); do
+  printf '## Section %d\n\npara *%d* text\n\n- a%d\n- b%d\n- c%d\n\n' $n $n $n $n $n
+done >"$TMP/big.md"
+has 'scale: -Q on 72k rows'      'c7999' timeout 10 $DUCKEYE -Q li -t text "$TMP/big.md"
+has 'scale: -S many spans'       'c7999' timeout 10 $DUCKEYE -S 'Section 7' -t text "$TMP/big.md"
+has 'scale: -s one span/heading' 'c7777' timeout 10 $DUCKEYE -s b7777 -t text "$TMP/big.md"
+has 'scale: -S then -Q'          'c7999' timeout 10 $DUCKEYE -S Section -Q li -t text "$TMP/big.md"
+
 # README limits: pseudo-class predicates are not supported (-S is the substring query).
 no 'README limit: :contains unsupported' $DUCKEYE -Q 'heading:contains(Alpha)' "$TMP/doc.md"
 # A standalone inline renders in every writer that can emit a FRAGMENT. -t md joined

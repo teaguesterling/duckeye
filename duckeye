@@ -226,8 +226,14 @@ emit() {
     # removes a parent must remove its subtree. This one removes only rows measured to be
     # CHILDLESS -- markdown yaml and toml frontmatter are the only producers of metadata
     # rows, and none is ever followed by a deeper row -- and test.sh asserts that premise,
-    # so a producer that changes it fails loudly instead of leaking. A full span filter
-    # was also correct, and took over 120s on a 20k-row document; this takes 0.26s.
+    # so a producer that changes it fails loudly instead of leaking.
+    #
+    # Removing each metadata row WITH its subtree is also correct, and is not slow as a
+    # rule -- only as the correlated-subquery SQL tried here, which did not finish
+    # within 120s on a 20k-row document. duck_blocks_body does the same natively:
+    # duck_block_utils measured 0.094s on 20,001 rows on the 1.4 build (their
+    # measurement; not installable here yet). So where duckeye ever consumes ROWS
+    # itself, reach for duck_blocks_body rather than avoiding subtree removal.
     #
     # ONLY the renderers get this. -t md and -t html are FORMAT WRITERS that serialise
     # metadata into the format's own home (a --- fence, a non-rendering <script>

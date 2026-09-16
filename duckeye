@@ -163,7 +163,6 @@ update() {
   local rc=0
   printf 'updating duckdb extensions...\n'
   duckdb -dark-mode -c "UPDATE EXTENSIONS;" 2>&1 || true
-  init || rc=1
 
   local bin_path script_dir repo_root
   bin_path=$(readlink -f "$0" 2>/dev/null || echo "$0")
@@ -202,6 +201,15 @@ update() {
     fi
     rm -rf "$tmp_update"
   fi
+
+  # init runs LAST, from the script on disk NOW -- which is the new one, since both
+  # branches above have already replaced it. It used to run first, from the running
+  # script, so a release that needs a NEW extension installed none of it: the list
+  # consulted was the OLD version's. That is exactly how v0.19.0 shipped needing
+  # panduck while `duckeye --update` alone never installed it, and the release notes
+  # had to tell people to run `duckeye --init` by hand afterwards. A separate process
+  # is the point: this shell has the old list parsed into it and cannot see the new one.
+  "$bin_path" --init || rc=1
   return $rc
 }
 

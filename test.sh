@@ -1300,6 +1300,31 @@ ok  'de alias works'             "$TMP/de" -T "$TMP/doc.md"
 ok  'dep alias works'            "$TMP/dep" -T "$TMP/doc.md"
 ok  'der alias works'            "$TMP/der" "$TMP/test_code.py"
 has 'der raw output'             'function_definition' "$TMP/der" "$TMP/test_code.py"
+# `duckeye --update` must install extensions from the list in the version it just
+# INSTALLED, not the one it was running. It used to call init first, so a release that
+# needed a new extension installed none of it -- how v0.19.0 came to need panduck while
+# `--update` never installed it, leaving the release notes to ask for a manual --init.
+# The fake origin's newer duckeye prints a marker from init(); the marker can only reach
+# the output if init ran from the pulled script. HOME is thrown away because install.sh
+# symlinks into ~/.local/bin and looks for agent config dirs.
+up=$TMP/up; mkdir -p "$up/home"
+git init -q --bare "$up/origin.git"
+git clone -q "$up/origin.git" "$up/seed" 2>/dev/null
+cp "$DUCKEYE" "$up/seed/duckeye"; cp install.sh "$up/seed/install.sh"
+[[ -f skills/duckeye/SKILL.md ]] && { mkdir -p "$up/seed/skills/duckeye"
+  cp skills/duckeye/SKILL.md "$up/seed/skills/duckeye/SKILL.md"; }
+git -C "$up/seed" -c user.email=t@example.com -c user.name=t add -A >/dev/null 2>&1
+git -C "$up/seed" -c user.email=t@example.com -c user.name=t commit -qm seed >/dev/null 2>&1
+git -C "$up/seed" push -q origin HEAD:refs/heads/main >/dev/null 2>&1
+git clone -q -b main "$up/origin.git" "$up/local" 2>/dev/null
+# the NEWER version, which only the pulled script can be
+sed -i 's/^init() {/init() {\n  printf "NEW-INIT-MARKER\\n"/' "$up/seed/duckeye"
+git -C "$up/seed" -c user.email=t@example.com -c user.name=t commit -qam newer >/dev/null 2>&1
+git -C "$up/seed" push -q origin HEAD:refs/heads/main >/dev/null 2>&1
+# json for both lists so init makes two quick INSTALL calls instead of fetching the
+# real set; the assertion is the marker, not init's exit code.
+has 'update inits from the NEW script' 'NEW-INIT-MARKER' \
+    env HOME="$up/home" DUCKEYE_OFFICIAL=json DUCKEYE_COMMUNITY=json "$up/local/duckeye" --update
 ok  'git uri toc'                $DUCKEYE -T 'git://README.md@HEAD'
 has 'git uri section'            'Install' $DUCKEYE -S Install 'git://README.md@HEAD'
 ok  'git uri code ast toc'       $DUCKEYE -T 'git://test.sh@HEAD'

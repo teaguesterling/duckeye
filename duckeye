@@ -256,8 +256,7 @@ emit() {
     # ansi and pandoc already omit it. At duck_block_utils 3.3.0 unfiltered to_text
     # handles frontmatter too, and this filter should be DELETED rather than swapped for
     # duck_blocks_body. The guard on duck_blocks_to_text reports FIXED when that lands.
-    text)      printf 'duck_blocks_to_text(list_filter(%s, lambda b: NOT (b.kind = %s AND b.element_type = %s)))' \
-                      "$1" "'block'" "'metadata'" ;;
+    text)      printf 'duck_blocks_to_text(%s)' "$1" ;;
     html)      printf 'duck_blocks_to_html(%s)' "$1" ;;
     blocks)    printf 'to_json(%s)' "$1" ;;
     md)        printf 'duck_blocks_to_md(%s)' "$1" ;;
@@ -1189,8 +1188,8 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
     else
       doc="SELECT flatten(list(blocks)) AS blocks FROM ast_to_blocks_list('$src')"
     fi ;;
-  *.docx|*.odt|*.epub|*.org|*.tex|*.rtf|*.textile|*.mediawiki)
-    # panduck reads all ten natively: no pandoc(1) process, no AST round-trip through
+  *.docx|*.odt|*.epub|*.org|*.tex|*.rtf|*.textile|*.mediawiki|*.ipynb)
+    # panduck reads these natively: no pandoc(1) process, no AST round-trip through
     # a pipe, and no dependency on duck_block_utils' deprecated pandoc_ast_to_blocks.
     # The readers return duck_block rows directly, so they compose with the same
     # pipeline every other format uses.
@@ -1204,49 +1203,43 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
       *.rtf)       doc="SELECT list(b) AS blocks FROM read_rtf_blocks('$src') b" ;;
       *.textile)   doc="SELECT list(b) AS blocks FROM read_textile_blocks('$src') b" ;;
       *.mediawiki) doc="SELECT list(b) AS blocks FROM read_mediawiki_blocks('$src') b" ;;
+      # A notebook's markdown cells are parsed by the MARKDOWN extension, through
+      # panduck's expand_embedded, so markdown joins the load list for this format
+      # alone. With markdown absent panduck raises a named error naming the install
+      # command, which is why nothing here probes for it first -- a probe would turn
+      # a loud, correct failure into a quiet one.
+      #
+      # Measured on served 0.5.1 (cfbdfb9) against the pandoc(1) route it replaces, on
+      # a notebook carrying a table, list, quote, code cell and execution output:
+      # -t text and -T are BYTE-IDENTICAL, with nothing on stderr and no lambda
+      # deprecation warning on stdout. That warning (panduck#65) is what kept .ipynb
+      # on pandoc until 0.5.1; on DuckDB 2.0 the same lambdas were a Binder Error.
+      #
+      # The STRUCTURED writers differ, and that is the cost of the move, recorded
+      # rather than discovered later:
+      #   -t md     loses the `jupyter:` kernelspec frontmatter pandoc emitted;
+      #             panduck keeps the kernel language as a value block instead
+      #   -t html   loses pandoc's cell class names (`cell markdown`, `cell code`,
+      #             `output stream stdout`); the divs remain, unclassed
+      #   -t blocks carries panduck's own attributes -- source_type=markdown/code/
+      #             stream on the divs -- rather than pandoc's div classes, and a
+      #             table has no pandoc_ast attribute
+      # Prose, headings, lists, quotes, code and outputs are all present either way.
+      *.ipynb)     exts="panduck markdown"
+                   doc="SELECT list(b) AS blocks FROM read_panduck_doc('$src', expand_embedded := true) b" ;;
     esac ;;
-  *.rst|*.ipynb|*.man|*.[1-9])
-    # Three formats stay on pandoc(1), each for a measured reason. Two of them are now
-    # one upstream fix away, and test.sh carries a guard for each that reports FIXED
-    # when the route can move.
+  *.rst|*.man|*.[1-9])
+    # Two formats stay on pandoc(1), each for a measured reason. .ipynb left this list
+    # when panduck 0.5.1 fixed the lambda warning (#65) -- it now reads through panduck
+    # above -- and test.sh still carries a guard for .rst that reports FIXED when that
+    # route can move too.
     #
-    #   .ipynb  panduck 0.5.0 (5a0331b, served 2026-09-14) parses markdown cells through
-    #           read_panduck_doc(src, expand_embedded := true), and on a notebook with
-    #           tables, lists, code and a quote its rendered text and outline are
-    #           BYTE-IDENTICAL to pandoc's -- measured. The only rendered difference is
-    #           that pandoc also emits a `jupyter: nbformat` frontmatter block.
-    #
-    #           Blocked on one thing: that path prints DuckDB's deprecated-lambda
-    #           WARNING on STDOUT, from single-arrow lambdas in panduck's expand macro
-    #           (reader_registry.cpp:1202/1250/1254/1265 at 5a0331b; the first is `(pd_e, pd_i) ->`, which a `name ->` search misses). It would land inside
-    #           every notebook's TOC and converted output. SET lambda_syntax=
-    #           'ENABLE_SINGLE_ARROW' silences it, and is deliberately NOT used: it is
-    #           the escape hatch removed from this script earlier, and DuckDB says
-    #           single-arrow lambdas go away before its next release -- at which point
-    #           the hatch stops working and panduck's macro fails outright. Measured
-    #           rather than taken from the changelog: SET lambda_syntax=
-    #           'DISABLE_SINGLE_ARROW' -- DuckDB 2.0's effective default, per its binder
-    #           source -- turns the warning into a Binder Error with exit 1.
-    #
-    #           Do NOT gate the eventual switch on markdown resolving. Verified here:
-    #           with markdown absent the opt-in path exits 1 with a named error --
-    #           "panduck: expand_embedded needs the markdown extension (INSTALL
-    #           markdown FROM community)" -- while the default call is unchanged. A
-    #           probe would turn that loud, correct failure into a quiet one.
-    #           That message text was measured under 1.5.5's DEFAULT lambda setting.
-    #           Under DuckDB 2.0's rule the lambda Binder Error binds first and is what
-    #           you see (panduck, reproduced with DISABLE_SINGLE_ARROW). Both exit 1
-    #           and neither is quiet, so the conclusion holds; do not match on the text.
-    #
-    #   .rst    0.5.0 fixed the table-cell markup that used to keep this here. Two
-    #           defects remain, both measured on served 5a0331b:
-    #             - an indented block quote flattens to a plain level-1 paragraph,
-    #               where pandoc emits blockquote > paragraph; -t md loses the `>`
-    #               (panduck#64, fix up as #68)
-    #             - a one-line footnote's BODY is dropped and its reference stays in the
-    #               paragraph as literal `[1]_`; pandoc keeps a note. Lost text, not
-    #               formatting (panduck#67, open)
-    #           Move only when both test.sh rst guards report FIXED, and re-run list
+    #   .rst    0.5.1 (cfbdfb9) fixed the table-cell markup AND the block-quote nesting
+    #           that used to keep this here. One defect remains, measured on that served
+    #           build: a one-line footnote's BODY is dropped and its reference stays in
+    #           the paragraph as literal `[1]_`; pandoc keeps a note. Lost text, not
+    #           formatting (panduck#67, fix building upstream).
+    #           Move only when test.sh's footnote guard reports FIXED, and re-run list
     #           parity first: #68 also changes which lines a list item owns.
     #   .man    panduck_can_read('a.man') is false and no extension in the stack
     #           reads roff, so pandoc is the only route. WHY panduck does not read
@@ -1262,7 +1255,6 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
     # sections, defeat inference.
     case "$key" in
       *.rst)         from=rst ;;
-      *.ipynb)       from=ipynb ;;
       *.man|*.[1-9]) from=man ;;
     esac
     via_pandoc=1

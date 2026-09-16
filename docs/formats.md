@@ -16,7 +16,7 @@
 | **LaTeX** | `.tex`, `.latex` | `pandoc` | Mathematical equations, sections, cross-references |
 | **reStructuredText**| `.rst` | `pandoc` | Python docstrings, Sphinx manuals, section hierarchies |
 | **Org-Mode** | `.org` | `pandoc` | Emacs outlines, task lists, code snippets |
-| **Jupyter Notebook**| `.ipynb` | `pandoc` | Markdown cells and executed code cells |
+| **Jupyter Notebook**| `.ipynb` | `panduck` | Markdown cells and executed code cells |
 | **MediaWiki** | `.mediawiki` | `pandoc` | Wikipedia markup, templates, section headers |
 | **Man Pages** | `.man`, `.1`–`.9` | `pandoc` | Unix roff manual pages with direct section jumping |
 | **Source Code ASTs**| `.py`, `.rs`, `.go`, `.c`, `.cpp`, `.js`, `.ts`, `.java`, `.kt`, `.cs`, `.swift`, `.rb`, `.php`, `.lua`, `.r`, `.sh`, `.zig`, `.dart`, `.sql`, `.gql`, `.tf`, `.css` (27 languages) | `sitting_duck` DuckDB extension | Tree-sitter AST parsing, class/function hierarchies, definition outlines, doc conversion |

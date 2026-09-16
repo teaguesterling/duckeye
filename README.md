@@ -218,7 +218,7 @@ does apply to `-S` on an archive, which opens a document.
 **`-t md` does not shell out.** It calls `duck_blocks_to_md`, one of the
 duck_blocks writers, so *writing* markdown needs no `pandoc` binary and takes no
 round trip through a Pandoc AST. `-t pandoc` is the only format that builds one.
-(Reading `.rst`, `.ipynb` and `.man` still runs `pandoc` — see below.)
+(Reading `.rst` and `.man` still runs `pandoc` — see below.)
 
 That matters for more than a dependency. A Pandoc AST has no representation for a
 block that cannot stand at the top level, and `duck_blocks_to_pandoc_ast` drops
@@ -621,8 +621,7 @@ anything, or to convert an AST into blocks; three extensions still use it to
 
 | ext | why pandoc still reads it |
 |---|---|
-| `.ipynb` | panduck 0.5.0's `expand_embedded` reads notebooks with rendered text and outline identical to pandoc's, but prints a DuckDB deprecation WARNING on **stdout** that would land inside every TOC and converted document — and on DuckDB 2.0 the same lambdas are an outright error |
-| `.rst` | panduck 0.5.0 fixed table cells; its reader still flattens an indented block quote to a plain paragraph (so `-t md` loses the `>`), and drops a one-line footnote's body outright |
+| `.rst` | panduck 0.5.1 fixed table cells and block-quote nesting; its reader still drops a one-line footnote's body outright (panduck#67), which is lost text rather than lost formatting |
 | `.man`, `.N` | no extension in the stack reads roff — `panduck_can_read('a.man')` is false — so pandoc is the only route. Whether panduck intends to support it is not recorded either way |
 
 Everything else — `.docx .odt .epub .org .tex .rtf .textile .mediawiki`, plus
@@ -642,8 +641,8 @@ pandoc; whether panduck ever reads roff is an open question, not a settled one.
 | `.json` | Pandoc AST |
 | `.zim`, `zim://…` | [`zim`](https://github.com/teaguesterling/duckdb_zim) (handles HTML, markdown, and embedded PDFs) |
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | [`sitting_duck`](https://github.com/teaguesterling/duckdb_sitting_duck) (Tree-sitter AST to duck_blocks) |
-| `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` | `panduck` extension — read natively, no `pandoc(1)` |
-| `.rst` `.ipynb` | `pandoc(1)` — panduck reads both, but drops table-cell markup (`.rst`) and notebook cell structure (`.ipynb`) |
+| `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` `.ipynb` | `panduck` extension — read natively, no `pandoc(1)`; `.ipynb` expands its markdown cells through `markdown`, and marks cells with `source_type` rather than pandoc's `cell markdown` class names |
+| `.rst` | `pandoc(1)` — panduck reads it, but drops a one-line footnote's body (panduck#67) |
 | `.man`, `.1`–`.9` | `pandoc(1)` — man page source |
 | anything DuckDB reads, under `-d` | parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, … |
 | standard input | sniffed (magic bytes, doctypes, shebangs), or named with `-f` |

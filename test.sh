@@ -978,59 +978,50 @@ ok  'loose list keeps its blank line' bash -c \
 #   -t text  title: ...\n\nHeading                  the blob AS body prose: a LEAK
 #
 # An earlier version of this greped every writer for the string and called three of
-# them broken. Two were correct serialisations. Only to_text renders it as body, and
-# duck_block_utils spec 1.3 fixes that one.
-# duckeye now filters non-body blocks before the text renderer, so ITS output is
-# clean. The guard therefore probes the UPSTREAM function directly -- otherwise it
-# would report FIXED because of duckeye's own workaround and the filter would never
-# be removed. Ask duck_blocks_to_text what it does with a metadata block, not what
-# duckeye prints.
-cause='duck_block_utils'
-emits 'duck_blocks_to_text renders metadata as body' 'title: Secret Title' bash -c \
-  "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD markdown;
-     SELECT duck_blocks_to_text(list(b)) FROM read_markdown_blocks('$TMP/fm.md') b;\" 2>/dev/null"
-cause=unattributed
+# them broken. Two were correct serialisations. Only to_text rendered it as body.
+# duck_block_utils 3.3.0 (95a84e6, spec 1.4) fixed that, and body became a SUBTREE
+# property: to_text omits a metadata block AND the value children under it. duckeye's
+# own filter -- which removed metadata rows one at a time, and rested on a premise
+# about those rows having no children -- is deleted with it, along with the guard that
+# probed to_text directly. What remains below measures duckeye's output, which is now
+# clean because upstream is, not because duckeye works around it.
 
-# panduck 0.5.0 could take .ipynb off pandoc(1) through expand_embedded: rendered
-# text and outline match pandoc's on a notebook with tables, lists, code and a
-# quote. But that path prints DuckDB's deprecated-lambda WARNING on STDOUT -- from
-# FOUR single-arrow lambdas in panduck's expand macro (the first, `(pd_e, pd_i) ->`,
-# escapes a `name ->` search), reader_registry.cpp:1202/1250/1254/1265
-# at 5a0331b -- and it would land inside every notebook's TOC and converted output.
-# FIXED here is the signal to switch the route.
-#
-# SKIPPED, not passed, where expand_embedded does not exist: an older panduck rejects
-# the parameter, prints no warning, and would read as FIXED. A guard that fires on
-# the absence of its subject is the failure it exists to catch.
+# .ipynb reads through panduck now: 0.5.1 replaced the single-arrow lambdas whose
+# deprecation WARNING landed on STDOUT, inside every notebook's TOC and converted
+# output (panduck#65) -- and which DuckDB 2.0 turned into an outright Binder Error.
+# These assert what the old guard was waiting for, through duckeye rather than around
+# it: the notebook renders, and nothing about lambdas reaches the output.
+has     'ipynb renders through panduck'  'Top'  $DUCKEYE "$TMP/nb.ipynb"
+has     'ipynb toc through panduck'      'Sub'  $DUCKEYE -T "$TMP/nb.ipynb"
+no_leak 'ipynb output carries no lambda warning' 'Deprecated lambda' \
+        bash -c "$DUCKEYE '$TMP/nb.ipynb' 2>&1"
+# ...and the route really is panduck, not pandoc: with a pandoc(1) on PATH that fails
+# and records the fact if it is called, the render must still succeed and the marker
+# must not appear. A stub rather than an empty PATH, because duckeye's pandoc branch
+# tests `command -v pandoc` and would simply report it missing -- which is a different
+# outcome from never reaching for it.
+mkdir -p "$TMP/stub"
+printf '#!/bin/sh\ntouch "%s/pandoc_was_called"\nexit 1\n' "$TMP" >"$TMP/stub/pandoc"
+chmod +x "$TMP/stub/pandoc"
+rm -f "$TMP/pandoc_was_called"
+ok 'ipynb never shells out to pandoc' bash -c \
+  "PATH='$TMP/stub:$PATH' $DUCKEYE '$TMP/nb.ipynb' >/dev/null 2>&1 && [ ! -e '$TMP/pandoc_was_called' ]"
+# The structured writers changed shape with the route, and that is recorded rather
+# than left to be discovered: panduck marks a cell with source_type where pandoc used
+# a `cell markdown` class. -t text and -T are byte-identical to the old route; this
+# pins the part that is not, so a change upstream is a failure here and not a silent
+# difference in every notebook duckeye converts.
+has     'ipynb cells carry source_type'        'source_type' $DUCKEYE -t blocks "$TMP/nb.ipynb"
+no_leak 'ipynb no longer carries pandoc cell classes' 'cell markdown' \
+        $DUCKEYE -t blocks "$TMP/nb.ipynb"
+# panduck 0.5.1 fixed .rst block-quote nesting (#64), so that guard is gone. ONE defect
+# still keeps .rst on pandoc(1): the reader DROPS a one-line footnote's body
+# (`.. [1] The body.`) and leaves the reference in the paragraph as literal `[1]_`,
+# where pandoc keeps it as a note. That is lost text, not formatting (panduck#67, fix
+# building upstream). When this flips, re-run rst list parity BEFORE switching the
+# route rather than trusting the guard alone: panduck#68 also reworks list ownership
+# (an item owns lines at its TEXT column, the marker's width).
 cause=panduck
-if duckdb -noheader -list -c "LOAD panduck; SELECT count(*) FROM duckdb_functions() WHERE function_name='panduck_expand_embedded';" 2>/dev/null | grep -qx 1; then
-  # FIXED requires the call to SUCCEED, return rows, AND print no warning. Grepping
-  # stdout for the warning alone is not enough: on DuckDB 2.0 single-arrow lambdas
-  # are a Binder Error rather than a warning (panduck, from DuckDB's binder source),
-  # so the failed call prints nothing on stdout and would read as fixed. Three
-  # states, only one of which is clean:
-  #   1.5.x   warns on stdout, succeeds       known
-  #   2.0     errors at bind time, exit 1     known
-  #   fixed   succeeds, no warning            FIXED
-  broken 'expand_embedded runs clean (no lambda warning, no lambda error)' 'EXPAND_CLEAN' bash -c \
-    "o=\$(duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD markdown; LOAD panduck; SELECT 'rows=' || count(*) FROM read_panduck_doc('$TMP/nb.ipynb', expand_embedded := true);\" 2>/dev/null); rc=\$?
-     [ \$rc -eq 0 ] && printf '%s\n' \"\$o\" | grep -q '^rows=[1-9]' && ! printf '%s' \"\$o\" | grep -q 'Deprecated lambda' && echo EXPAND_CLEAN"
-else
-  skip=$((skip+1)); echo '  skip expand_embedded stdout warning (installed panduck predates expand_embedded)'
-fi
-# panduck's .rst reader flattens an indented block quote to a plain paragraph, where
-# pandoc emits blockquote > paragraph. -t md then loses the quote. duckeye still reads
-# .rst through pandoc, so users do not see this; it is the remaining thing holding
-# .rst there now that 0.5.0 fixed table cells. FIXED here ALONE does not mean
-# the route can move -- see the footnote guard below.
-broken 'rst reader keeps blockquote structure' '"element_type":"blockquote"' bash -c \
-  "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT to_json(list(b)) FROM read_rst_blocks('$TMP/quote.rst') b;\" 2>/dev/null"
-# The .rst reader also DROPS a one-line footnote's body (`.. [1] The body.`) and leaves
-# the reference in the paragraph as literal `[1]_`; pandoc keeps it as a note. That is
-# lost text, not formatting (panduck#67, reproduced on served 5a0331b). The .rst route
-# can move off pandoc only when BOTH rst guards report FIXED -- and panduck#68 also
-# reworks list ownership (an item owns lines at its TEXT column, the marker's width),
-# so re-run rst list parity before switching rather than trusting the guards alone.
 broken 'rst reader keeps a one-line footnote body' 'one line footnote body' bash -c \
   "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT string_agg(coalesce(content,''), ' ') FROM read_rst_blocks('$TMP/footnote.rst');\" 2>/dev/null"
 cause=unattributed
@@ -1087,19 +1078,6 @@ if command -v pandoc >/dev/null; then
 else
   skipping 'value metadata stays out of renderers' 'needs pandoc'
 fi
-
-# The -t text filter removes metadata rows one at a time. That is only safe because no
-# producer gives a metadata row children: removing a parent re-parents them, which is
-# exactly how the filter before it leaked. So the premise is ASSERTED, not assumed --
-# and non-vacuously, since the fixture must contain a metadata row at all. markdown is
-# the only producer measured (yaml and toml frontmatter); panduck's .md delegates to it.
-ok 'metadata rows are childless (premise of the -t text filter)' bash -c \
-  "duckdb -noheader -list -c \"LOAD markdown;
-     WITH r AS (SELECT unnest(l) AS x, unnest(range(1, len(l)+1)) AS i FROM (SELECT list(b) AS l FROM read_markdown_blocks('$TMP/fm.md') b))
-     SELECT (count(*) FILTER (WHERE a.x.element_type='metadata') >= 1
-             AND count(*) FILTER (WHERE a.x.element_type='metadata' AND b.x.level > a.x.level) = 0)::VARCHAR
-     FROM r a LEFT JOIN r b ON b.i = a.i + 1;\" 2>/dev/null | grep -qx true"
-cause=unattributed
 
 has 'fragment inline exports to pandoc' '"t":"Plain"' \
     $DUCKEYE -Q 'a' -t pandoc "$TMP/sel.md"

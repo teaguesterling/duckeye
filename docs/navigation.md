@@ -233,3 +233,48 @@ $ duckeye -Q '.func' 'src/**/*.rs'
 $ duckeye -d 'data/*.parquet'
 $ duckeye -Z 'data/*.parquet'
 ```
+
+---
+
+## 8. Code & Document Intelligence (Natural Language & Semantic Re-ranking)
+
+`duckeye` incorporates decoupled local intelligence for semantic discovery, structural pruning, and discriminative re-ranking:
+
+### Natural Language Discovery (`-F, --find`)
+Translates natural language descriptions (with no mandatory prefixes) into ASTCSS or document CSS selectors via a local compiler model (`qwen3.5-0.8b-astcss`):
+
+```console
+# Code AST queries (27 languages)
+$ duckeye -F "async websocket handlers" src/server.rs
+$ duckeye -F "execute method" src/worker.py
+$ duckeye -F "WorkerService class" src/service.py
+
+# Document structure queries
+$ duckeye -F "major section headings" docs/architecture.md
+$ duckeye -F "bash command snippets" README.md
+```
+
+### Semantic Re-ranking (`-R, --rank`)
+Re-ranks candidate code blocks or document sections with a local cross-encoder (`Qwen3-Reranker-0.6B`), scoring candidates and dropping noise:
+
+```console
+# Combined coarse structural discovery + fine semantic re-ranking
+$ duckeye -F "task handlers" -R "runs background execution" src/worker.py
+
+# Structural slice + re-ranking
+$ duckeye -Q '.func' -R "handles token validation and auth headers" src/auth.py
+
+# Document semantic section search with top-k limit
+$ duckeye -R "security requirements and rate limits" docs/api_spec.md --top-k 3
+```
+
+### Machine-Readable Structured JSON (`--json`)
+Serializes outlines, candidate matches, or document blocks for AI agent consumption:
+
+```console
+# Re-ranked candidate blocks with scores and line numbers
+$ duckeye -F "allocator functions" -R "optimizes memory usage" --json src/alloc.c
+
+# Table of contents as JSON array
+$ duckeye -T --json docs/architecture.md
+```

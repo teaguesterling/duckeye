@@ -24,6 +24,12 @@ usage: duckeye [OPTION]... [FILE]
 | `-S` | `--section NAME`| Print only the section whose heading matches NAME |
 | `-s` | `--search TEXT` | Search and print only innermost sections matching TEXT |
 | `-Q` | `--select SEL` | Query by CSS selector — code (`.func`, `.class#Name`) or documents (`heading`, `h2`, `li`, `code[language=sh]`) |
+| `-F` | `--find QUERY` | Natural language query compiled to ASTCSS or document selector |
+| `-R` | `--rank EXPR` | Re-rank matching sections or code blocks with a cross-encoder |
+| | `--threshold SCORE` | Minimum acceptable rank score cutoff (default: `0.0` with `--top-k`, else `0.70`) |
+| | `--top-k N` | Limit output to top N highest-scoring results |
+| | `--dialect LANG` | Dialect hint for ASTCSS compilation (`auto`, `python`, `rust`, `cpp`, `bash`, etc.) |
+| | `--json` | Emit machine-readable JSON array |
 | `-d` | `--data` | Read file as a data table (auto for parquet, csv, json, yaml, toml, xlsx, ...). Piped, emits JSONL |
 | `-D` | `--document` | Undo an earlier `-d`. Data files still route to data — use `-f` to name a document reader |
 | `-r` | `--raw` | Deprecated alias for `-d`; warns on stderr |
@@ -52,6 +58,10 @@ usage: duckeye [OPTION]... [FILE]
 | `DUCKEYE_OFFICIAL` | `http aws excel` | Official extensions installed by `--init` |
 | `DUCKEYE_COMMUNITY` | `duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck` | Community extensions installed by `--init` |
 | `DUCKEYE_THEME` | `auto` (`dark` / `light`) | Overrides terminal color scheme (default: probes OSC 11 with 50ms timeout) |
+| `DUCKEYE_LLM_SOCKET` | `/tmp/woollama.sock` | Unix domain socket path for ASTCSS compiler daemon |
+| `DUCKEYE_LLM_ENDPOINT` | `http://localhost:11434` | HTTP endpoint URL for ASTCSS compiler daemon |
+| `DUCKEYE_RERANK_SOCKET` | `/tmp/reranker.sock` | Unix domain socket path for cross-encoder reranker daemon |
+| `DUCKEYE_RERANK_ENDPOINT` | `http://localhost:8001` | HTTP endpoint URL for cross-encoder reranker daemon |
 | `COLUMNS` | `auto` (from `tput cols`) | Overrides terminal column width for table rendering and profiling |
 | `NO_COLOR` | `""` | Standard convention: when set, disables ANSI color output |
 

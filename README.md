@@ -484,11 +484,11 @@ Inference is decoupled and communicates with local daemons via Unix domain socke
 
 ### 1. Code Intelligence (Tree-sitter ASTs via `sitting_duck`)
 
-**Natural language code discovery (`--find`):**
-Translate natural language queries into ASTCSS selectors automatically:
+**Natural language code discovery (`-F, --find`):**
+Translate natural language queries (no `"find"` prefix required) into ASTCSS selectors automatically:
 
 ```console
-$ duckeye --find "find background task execution method" worker.py
+$ duckeye -F "execute method" worker.py
 ▍ execute(self, task_name: str, payload: dict) -> bool
 
 ┃ python
@@ -500,7 +500,18 @@ $ duckeye --find "find background task execution method" worker.py
 Pass language hints with `--dialect` (e.g. `python`, `rust`, `cpp`, `go`, `bash`):
 
 ```console
-$ duckeye --find "find async websocket handlers" --dialect rust src/server.rs
+$ duckeye -F "async websocket handlers" --dialect rust src/server.rs
+```
+
+**Coarse discovery + fine semantic re-ranking (`-F` with `-R`):**
+Combine natural language structural slicing with cross-encoder semantic scoring:
+
+```console
+$ duckeye -F "task handlers" -R "runs background tasks" worker.py
+─── [0.95] worker.py:4 (function_definition: execute) ───
+def execute(self, task_name: str, payload: dict) -> bool:
+        """Run the given background task."""
+        return True
 ```
 
 **Structural pruning + semantic re-ranking (`-Q` with `-R`):**
@@ -518,17 +529,17 @@ def execute(self, task_name: str, payload: dict) -> bool:
 Emit candidates with line ranges, AST types, identifiers, relevance scores, and code blocks:
 
 ```console
-$ duckeye -Q '.func' -R "handles task execution" --json worker.py
-[{"file_path":"worker.py","type":"function_definition","name":"execute","start_line":4,"end_line":6,"score":0.94,"content":"def execute(self, task_name: str, payload: dict) -> bool:\n        \"\"\"Run the given background task.\"\"\"\n        return True"}]
+$ duckeye -F "task handlers" -R "runs background tasks" --json worker.py
+[{"file_path":"worker.py","type":"function_definition","name":"execute","start_line":4,"end_line":6,"score":0.95,"content":"def execute(self, task_name: str, payload: dict) -> bool:\n        \"\"\"Run the given background task.\"\"\"\n        return True"}]
 ```
 
 ### 2. Document Intelligence (Markdown, DOCX, HTML, PDF, etc.)
 
-**Natural language section and block discovery (`--find`):**
+**Natural language section and block discovery (`-F, --find`):**
 Compile natural language queries directly into document element selectors:
 
 ```console
-$ duckeye --find "find top level sections" architecture.md
+$ duckeye -F "major section headings" architecture.md
 ▍ Ingestion Pipeline
 
 ▍ Code AST Engine

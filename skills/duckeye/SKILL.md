@@ -123,19 +123,23 @@ duckeye -Q '.func#process' -t md src/worker.rs
 ### Code & Document Intelligence (Natural Language & Cross-Encoder Reranking)
 
 ```sh
-# Natural language code query (compiles to ASTCSS via local compiler daemon)
-duckeye -F "find async websocket handlers" src/server.rs
-duckeye --find "find authentication middleware" --dialect python src/app.py
+# Natural language code discovery (no "find" prefix needed)
+duckeye -F "async websocket handlers" src/server.rs
+duckeye -F "execute method" src/worker.py
+duckeye --find "authentication middleware" --dialect python src/app.py
 
 # Combine discovery with semantic cross-encoder re-ranking (-F + -R)
-duckeye -F "find request handlers" -R "handles token validation and auth headers" src/auth.py
+duckeye -F "request handlers" -R "handles token validation and auth headers" src/auth.py
 
 # Semantic cross-encoder re-ranking on structural slices or documents
 duckeye -Q '.func' -R "handles token validation and auth headers" src/auth.py
 duckeye -R "security requirements and rate limits" docs/api_spec.md --top-k 3
 
+# Document structure discovery
+duckeye -F "major section headings" docs/architecture.md
+
 # Agent / MCP integration via structured JSON
-duckeye -F "find allocator functions" -R "optimizes memory usage" src/alloc.c --json
+duckeye -F "allocator functions" -R "optimizes memory usage" src/alloc.c --json
 duckeye -T --json docs/architecture.md
 ```
 

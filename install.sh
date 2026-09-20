@@ -129,20 +129,44 @@ case $bin_mode in
   none)   ;;
 esac
 
-declare -A skill_targets=()
-[[ $agy     == yes ]] && skill_targets[agy]=$HOME/.gemini/config/skills/duckeye
-[[ $claude  == yes ]] && skill_targets[claude]=$HOME/.claude/commands/duckeye.md
-[[ $opencode == yes ]] && skill_targets[opencode]=$HOME/.config/opencode/instructions/duckeye.md
+skill_labels=()
+skill_paths=()
+add_skill_target() {
+  skill_labels+=("$1")
+  skill_paths+=("$2")
+}
+[[ $agy      == yes ]] && add_skill_target agy "$HOME/.gemini/config/skills/duckeye"
+[[ $claude   == yes ]] && add_skill_target claude "$HOME/.claude/commands/duckeye.md"
+[[ $opencode == yes ]] && add_skill_target opencode "$HOME/.config/opencode/instructions/duckeye.md"
 
 # ---------------------------------------------------------------- helpers
 installed=0
 
+canonical_path() {
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$1" 2>/dev/null
+  elif readlink -f "$1" >/dev/null 2>&1; then
+    readlink -f "$1" 2>/dev/null
+  else
+    local target="$1"
+    while [[ -L "$target" ]]; do
+      local link; link=$(readlink "$target" 2>/dev/null) || break
+      if [[ "$link" = /* ]]; then
+        target="$link"
+      else
+        target="$(dirname "$target")/$link"
+      fi
+    done
+    (cd "$(dirname "$target")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$target")")
+  fi
+}
+
 link() {
   local src=$1 dst=$2 label=$3
   if [[ -L $dst ]]; then
-    local current; current=$(readlink -f "$dst" 2>/dev/null)
-    local want; want=$(readlink -f "$src" 2>/dev/null)
-    if [[ $current == "$want" ]]; then
+    local current; current=$(canonical_path "$dst")
+    local want; want=$(canonical_path "$src")
+    if [[ -n $current && $current == "$want" ]]; then
       printf '  %-10s %s (already installed)\n' "$label" "$dst"
       return 0
     fi
@@ -186,8 +210,8 @@ if [[ -n $uninstall ]]; then
   for alias_dst in "${alias_dsts[@]}"; do
     unlink "$alias_dst" alias
   done
-  for label in "${!skill_targets[@]}"; do
-    unlink "${skill_targets[$label]}" "$label"
+  for i in "${!skill_labels[@]}"; do
+    unlink "${skill_paths[i]}" "${skill_labels[i]}"
   done
   echo 'done'
   exit 0
@@ -238,8 +262,9 @@ if [[ -n $bin_dst ]]; then
   fi
 fi
 
-for label in "${!skill_targets[@]}"; do
-  dst=${skill_targets[$label]}
+for i in "${!skill_labels[@]}"; do
+  label="${skill_labels[i]}"
+  dst="${skill_paths[i]}"
   if [[ $is_remote == yes ]]; then
     if [[ $label == agy ]]; then
       copy_file "$skill_md" "$dst/SKILL.md" "$label"
@@ -256,7 +281,7 @@ for label in "${!skill_targets[@]}"; do
   fi
 done
 
-if (( ${#skill_targets[@]} == 0 )); then
+if (( ${#skill_labels[@]} == 0 )); then
   echo '  (no agent configs detected; use --agy, --claude, or --opencode to force)'
 fi
 

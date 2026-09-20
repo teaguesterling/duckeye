@@ -17,8 +17,43 @@ pass=0 fail=0 skip=0 known=0 fixed=0
 # Known-broken guards are grouped by WHAT UNBLOCKS THEM, not just counted. A single
 # total misleads: it reads as one body of outstanding work when the causes are
 # independent and land at different times. $cause is set before each guard group.
-declare -A known_by; cause=unattributed
-strip() { sed 's/\x1b\[[0-9;]*m//g'; }
+known_causes=()
+known_counts=()
+record_known() {
+  local c=$1 i found=
+  for i in "${!known_causes[@]}"; do
+    if [[ "${known_causes[i]}" == "$c" ]]; then
+      known_counts[i]=$(( known_counts[i] + 1 ))
+      found=1
+      break
+    fi
+  done
+  if [[ -z $found ]]; then
+    known_causes+=("$c")
+    known_counts+=(1)
+  fi
+}
+cause=unattributed
+strip() { sed $'s/\x1b\\[[0-9;]*m//g'; }
+
+canonical_path() {
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$1" 2>/dev/null
+  elif readlink -f "$1" >/dev/null 2>&1; then
+    readlink -f "$1" 2>/dev/null
+  else
+    local target="$1"
+    while [[ -L "$target" ]]; do
+      local link; link=$(readlink "$target" 2>/dev/null) || break
+      if [[ "$link" = /* ]]; then
+        target="$link"
+      else
+        target="$(dirname "$target")/$link"
+      fi
+    done
+    (cd "$(dirname "$target")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$target")")
+  fi
+}
 
 # bash runs command_not_found_handle in a SUBSHELL, so a counter incremented here is
 # discarded -- measured. The marker file is what survives, and the summary turns it
@@ -71,11 +106,11 @@ broken() { local n=$1 pat=$2; shift 2
   local out; out=$("$@" 2>/dev/null </dev/null | strip)
   if [[ $out == *"$pat"* ]]; then fixed=$((fixed+1))
     printf '  FIXED %s — upstream now emits "%s"; drop this guard\n' "$n" "$pat"
-  else known=$((known+1)); known_by[$cause]=$(( ${known_by[$cause]:-0} + 1 ))
+  else known=$((known+1)); record_known "$cause"
     printf '  known %s\n' "$n"; fi; }
 emits() { local n=$1 pat=$2; shift 2
   local out; out=$("$@" 2>/dev/null </dev/null | strip)
-  if [[ $out == *"$pat"* ]]; then known=$((known+1)); known_by[$cause]=$(( ${known_by[$cause]:-0} + 1 ))
+  if [[ $out == *"$pat"* ]]; then known=$((known+1)); record_known "$cause"
     printf '  known %s\n' "$n"
   else fixed=$((fixed+1))
     printf '  FIXED %s — "%s" no longer leaks; drop this guard\n' "$n" "$pat"; fi; }
@@ -892,37 +927,16 @@ no_leak 'doc -Q li excludes the heading' 'Listing' $DUCKEYE -Q 'li' -t md "$TMP/
 # round-trips correctly by two errors cancelling, while a LOOSE list silently loses
 # its blank lines. Measured end to end -- both inputs give '- alpha\n- beta'.
 #
-# Gated on the PROPERTY duck_block_utils named, not on a version: content IS NOT
-# NULL on the first item of a known tight source. When the reader starts emitting
-# the tight shape this reports FIXED and the guard comes out.
-cause='markdown reader'
-emits 'tight list loses its tight shape' '"element_type":"list_item","content":null' \
+no_leak 'tight list maintains tight shape' '"element_type":"list_item","content":null' \
     $DUCKEYE -t blocks "$TMP/tight.md"
-cause=unattributed
 
-# duck_block_utils 6c1c2e5 / spec 1.2 fixed the fragment drop, so these replace the
-# availability guard that announced it. A fragment with no top-level Pandoc
-# representation used to export as blocks:[] -- silent content loss, and the reason
-# -Q li -t md printed nothing on a .docx. Both halves are asserted because they wrap
-# differently: a container child gets its container, a bare inline gets Plain.
-# The markdown reader emits YAML frontmatter as kind='block', element_type='metadata',
-# so it renders as body prose: `-t text` on a document with frontmatter prints
-# "title: Secret Title" above the first heading. The spec puts document metadata in
-# kind='value' -- and duckeye is already correct for that: a .docx's kind='value'
-# metadata does NOT reach -t text, measured. So this needs no workaround here and
-# MUST NOT get one; the output fixes itself when the reader sets the right kind.
-# markdown#57 is merged to their main; duck_block_utils is adding the rule as spec
-# 1.3 (duck_block_is_body(kind, element_type), and to_text no longer rendering
-# block/metadata), which is also unserved -- so either half landing clears this.
-cause='markdown reader'
-emits 'frontmatter leaks into the body' 'title: Secret Title' \
+# duck_block_utils 1.3/1.4 fixed the frontmatter leak (IsBody excludes metadata blocks)
+no_leak 'frontmatter does not leak into body' 'title: Secret Title' \
     $DUCKEYE -t text "$TMP/fm.md"
-# ...and the control that makes the guard meaningful: conformant value-kind metadata
-# is already skipped, so a FIXED here means something upstream changed, not that
-# duckeye started filtering.
+# ...and the control that makes the assertion meaningful: conformant value-kind metadata
+# is already skipped
 no_leak 'value-kind metadata stays out of the body' '2026-' \
     $DUCKEYE -t text "$TMP/doc.md"
-cause=unattributed
 
 has 'fragment inline exports to pandoc' '"t":"Plain"' \
     $DUCKEYE -Q 'a' -t pandoc "$TMP/sel.md"
@@ -1085,7 +1099,7 @@ ok  'help'                       $DUCKEYE -h
 # user's real ~/.claude skill files on every run.
 mkdir -p "$TMP/home"
 ok  'init'                       env HOME="$TMP/home" $DUCKEYE --init
-cp "$(readlink -f "$DUCKEYE")" "$TMP/upd" && chmod +x "$TMP/upd"
+cp "$(canonical_path "$DUCKEYE")" "$TMP/upd" && chmod +x "$TMP/upd"
 ok  'update'                     env HOME="$TMP/home" "$TMP/upd" --update
 no  'mode exclusivity'           $DUCKEYE -r -t "$TMP/d.parquet"
 no  'limit validates'            $DUCKEYE -n abc "$TMP/d.parquet"
@@ -1099,9 +1113,9 @@ ok  'parquet defaults to raw'    $DUCKEYE "$TMP/d.parquet"
 ok  'csv defaults to raw'        $DUCKEYE "$TMP/d.csv"
 ok  'json defaults to raw'       $DUCKEYE "$TMP/data.json"
 has 'json data table output'     'item_1' $DUCKEYE "$TMP/data.json"
-ln -sf "$(readlink -f "$DUCKEYE")" "$TMP/de"
-ln -sf "$(readlink -f "$DUCKEYE")" "$TMP/dep"
-ln -sf "$(readlink -f "$DUCKEYE")" "$TMP/der"
+ln -sf "$(canonical_path "$DUCKEYE")" "$TMP/de"
+ln -sf "$(canonical_path "$DUCKEYE")" "$TMP/dep"
+ln -sf "$(canonical_path "$DUCKEYE")" "$TMP/der"
 ok  'de alias works'             "$TMP/de" -T "$TMP/doc.md"
 ok  'dep alias works'            "$TMP/dep" -T "$TMP/doc.md"
 ok  'der alias works'            "$TMP/der" "$TMP/test_code.py"
@@ -1114,7 +1128,10 @@ printf '\n%d passed, %d failed, %d skipped' "$pass" "$fail" "$skip"
 if (( known )); then
   printf ', %d known-broken upstream' "$known"
   sep=' ('
-  for c in "${!known_by[@]}"; do printf '%s%d %s' "$sep" "${known_by[$c]}" "$c"; sep=', '; done
+  for i in "${!known_causes[@]}"; do
+    printf '%s%d %s' "$sep" "${known_counts[i]}" "${known_causes[i]}"
+    sep=', '
+  done
   printf ')'
 fi
 (( fixed )) && printf ', %d NOW FIXED (remove guards)' "$fixed"

@@ -50,7 +50,7 @@ no_out() { local n=$1; shift
 # absence is the only way to catch a flag that is silently ignored, since output that
 # is too BROAD still contains everything a `has` looks for.
 no_leak() { local n=$1 pat=$2; shift 2
-  local out; out=$("$@" 2>/dev/null </dev/null | sed 's/\x1b\[[0-9;]*m//g')
+  local out; out=$("$@" 2>/dev/null </dev/null | sed $'s/\x1b\\[[0-9;]*m//g')
   if [[ $out == *"$pat"* ]]; then fail=$((fail+1)); printf '  FAIL %s (leaked %q)\n' "$n" "$pat"
   else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
 skipping() { skip=$((skip+1)); printf '  skip %s (%s)\n' "$1" "$2"; }
@@ -442,6 +442,41 @@ for f in canary.docx canary.md; do
     pass=$((pass+1)); printf '  ok   %s toc: stdout free of extension notices\n' "$f"
   fi
 done
+
+# --------------------------------------------------------------- 1.3 body predicate
+# duck_block_utils 1.3's IsBody keeps a document's metadata (YAML frontmatter, docx
+# core properties) OUT of the rendered body: the metadata blob is kind='block' but is
+# not prose, so a renderer that filters on kind alone prints frontmatter ABOVE the
+# first heading. duckeye delegates rendering ENTIRELY to duck_block_utils' writers, so
+# this asserts the property through the real dispatch path -- the leak, and its fix,
+# live in the installed extension, not in duckeye. Gated on the spec version because
+# the fix reaches the community registry after the source does: on a pre-1.3 build the
+# frontmatter genuinely leaks, and that is a stale extension to update (dbu_body_floor
+# reports it at --init), not a duckeye regression to score red here.
+echo 'duck_block_utils 1.3 body predicate (frontmatter never renders as body)'
+FM_CANARY=zzfrontmattercanaryzz
+cat >"$TMP/frontmatter.md" <<MD
+---
+title: $FM_CANARY
+author: nobody
+---
+
+# Real Heading
+
+Body prose containing $CANARY survives.
+MD
+dbu_spec=$(duckdb -noheader -list -s "LOAD duck_block_utils; SELECT duck_block_spec_version();" 2>/dev/null | tail -1)
+dbu_major=${dbu_spec%%.*}; dbu_minor=${dbu_spec#*.}; dbu_minor=${dbu_minor%%.*}
+if [[ $dbu_major == 1 && $dbu_minor =~ ^[0-9]+$ && $dbu_minor -ge 3 ]]; then
+  # Content still renders (IsBody removes metadata, never body)...
+  has     'frontmatter: body still renders'            "$CANARY"    $DUCKEYE -t text "$TMP/frontmatter.md"
+  # ...but the frontmatter values are absent from the rendered body, both formats.
+  no_leak 'frontmatter: title out of body (text)'      "$FM_CANARY" $DUCKEYE -t text "$TMP/frontmatter.md"
+  no_leak 'frontmatter: title out of body (ansi)'      "$FM_CANARY" $DUCKEYE          "$TMP/frontmatter.md"
+else
+  skipping 'frontmatter body-predicate (IsBody)' \
+    "duck_block_utils spec ${dbu_spec:-<pre-1.3, no duck_block_spec_version()>} < 1.3; leak not yet fixed in the installed build"
+fi
 
 # A skip that hides a non-run is the failure this suite is most likely to have, so
 # assert that work actually happened rather than only that nothing broke. Measured:

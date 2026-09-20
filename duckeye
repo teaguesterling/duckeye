@@ -21,7 +21,7 @@ set -uo pipefail
 # --init only. Separate from the LOAD lists above because installing needs to
 # know which repository each extension comes from; LOAD does not.
 : "${DUCKEYE_OFFICIAL:=http aws excel}"
-: "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck}"
+: "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck panduck}"
 
 usage() {
   cat <<'EOF'
@@ -118,7 +118,7 @@ Env:
   DUCKEYE_OFFICIAL   --init installs these from the core repo
   DUCKEYE_COMMUNITY  --init installs these from the community repo
                      (default: duck_block_utils markdown webbed zim pdf yaml
-                      toml read_lines duck_tails zipfs textplot sitting_duck)
+                      toml read_lines duck_tails zipfs textplot sitting_duck panduck)
 
 Examples:
   duckeye README.md                  # render to stdout, unpaged
@@ -130,6 +130,27 @@ EOF
 }
 
 die() { printf 'duckeye: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+# duck_block_utils >= 1.3 is where a document's BODY stops including its metadata
+# blob: the IsBody predicate (kind IN (block,inline) AND element_type <> 'metadata')
+# keeps frontmatter/tailmatter out of what the renderers emit. On an older build the
+# metadata blob is kind='block', so `duck_blocks_to_text`/`_render_ansi` print a
+# markdown file's frontmatter ABOVE its first heading. duckeye only delegates to those
+# renderers, so this is purely a "which duck_block_utils is installed" question —
+# reported here at install/update time (never per render). Advisory, not fatal: the
+# fix reaches the community registry after the source does, so a pre-1.3 build is a
+# warning to update, not a reason to fail --init for everyone.
+dbu_body_floor() {
+  printf '%-20s %-10s ' duck_block_utils body-fix
+  local v major minor
+  v=$(duckdb -noheader -list -s "LOAD duck_block_utils; SELECT duck_block_spec_version();" 2>/dev/null | tail -1)
+  major=${v%%.*}; minor=${v#*.}; minor=${minor%%.*}
+  if [[ $major == 1 && $minor =~ ^[0-9]+$ && $minor -ge 3 ]]; then
+    echo "spec $v (IsBody present — frontmatter stays out of the body)"
+  else
+    echo "spec ${v:-<pre-1.3, no duck_block_spec_version()>} — frontmatter WILL render as body; update duck_block_utils to >= 1.3 (duckeye --update)"
+  fi
+}
 
 # Each extension is named alongside the repository it comes from, so a failure
 # reports DuckDB's own reason instead of being masked by a guess at the other repo.
@@ -149,6 +170,7 @@ init() {
   if command -v pandoc >/dev/null; then echo found
   else echo 'missing — .rst/.ipynb/.man will not render; the rest use panduck'
   fi
+  dbu_body_floor
   return $rc
 }
 
@@ -159,7 +181,7 @@ update() {
   init || rc=1
 
   local bin_path script_dir repo_root
-  bin_path=$(readlink -f "$0" 2>/dev/null || echo "$0")
+  bin_path=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")
   script_dir=$(dirname "$bin_path")
 
   if git -C "$script_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -548,7 +570,7 @@ if [[ -n $norm && $norm != auto && $f != *\** && $f != *\?* && $f != zim://* && 
     if [[ -n ${from_stdin:-} ]]; then
       mv "$f" "$f.$norm" && f=$f.$norm
     else
-      target_path=$(readlink -f "$f" 2>/dev/null || realpath "$f" 2>/dev/null || echo "$PWD/$f")
+      target_path=$(realpath "$f" 2>/dev/null || readlink -f "$f" 2>/dev/null || echo "$PWD/$f")
       link_name="$tmp/$base.$norm"
       ln -sf "$target_path" "$link_name" && f=$link_name
     fi
@@ -1330,7 +1352,7 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
   # SEMANTIC_TYPE is not in duckdb_types(), so typed NULLs must be borrowed from a
   # zero-row read_ast() of a real source file. duckeye itself is one, and is always
   # present. sitting_duck#117 ask 2 would remove this.
-  qself=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+  qself=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || printf '%s' "$0")
   qsel=$(q "$(css_alias "$selector")")
   premacro+="CREATE OR REPLACE TEMP TABLE __qb AS
       SELECT row_number() OVER () AS ord, b.level AS lvl, b.element_type AS ty,
@@ -1550,9 +1572,9 @@ fi
 # -o FILE bypasses the pager and the colour decision entirely: a file is not a
 # terminal, so escapes are stripped regardless of what want_color says about stdout.
 if [[ -n $out_file ]]; then
-  sed 's/\x1b\[[0-9;]*m//g' "$out" > "$out_file" || die "cannot write $out_file" 1
+  sed $'s/\x1b\\[[0-9;]*m//g' "$out" > "$out_file" || die "cannot write $out_file" 1
 elif want_color; then
   "${page[@]}" <"$out"
 else
-  sed 's/\x1b\[[0-9;]*m//g' "$out" | "${page[@]}"
+  sed $'s/\x1b\\[[0-9;]*m//g' "$out" | "${page[@]}"
 fi

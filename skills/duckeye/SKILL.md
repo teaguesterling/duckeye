@@ -124,14 +124,19 @@ duckeye -Q '.func#process' -t md src/worker.rs
 
 ```sh
 # Natural language code query (compiles to ASTCSS via local compiler daemon)
-duckeye --find "find async websocket handlers" src/server.rs
+duckeye -F "find async websocket handlers" src/server.rs
+duckeye --find "find authentication middleware" --dialect python src/app.py
 
-# Semantic cross-encoder re-ranking
+# Combine discovery with semantic cross-encoder re-ranking (-F + -R)
+duckeye -F "find request handlers" -R "handles token validation and auth headers" src/auth.py
+
+# Semantic cross-encoder re-ranking on structural slices or documents
 duckeye -Q '.func' -R "handles token validation and auth headers" src/auth.py
 duckeye -R "security requirements and rate limits" docs/api_spec.md --top-k 3
 
 # Agent / MCP integration via structured JSON
-duckeye -Q '.func' -R "optimizes memory usage" src/alloc.c --json
+duckeye -F "find allocator functions" -R "optimizes memory usage" src/alloc.c --json
+duckeye -T --json docs/architecture.md
 ```
 
 ---

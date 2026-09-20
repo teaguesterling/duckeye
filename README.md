@@ -473,6 +473,86 @@ A *writer* can also flatten structure the selector needs: pandoc's RTF writer
 turns lists into bullet-prefixed paragraphs, so an `.rtf` produced that way holds
 no `list_item` for `-Q li` to find. That is a property of the file, not the query.
 
+## Code & Document Intelligence (Natural Language & Semantic Re-ranking)
+
+`duckeye` provides local, decoupled machine learning capabilities for semantic code and document discovery:
+1. **Natural language AST and selector compilation (`--find`)** via lightweight local compiler models (`qwen3.5-0.8b-astcss`).
+2. **Local cross-encoder semantic re-ranking (`-R, --rank`)** via `Qwen3-Reranker-0.6B`, scoring matching candidates and filtering noise with score thresholds (`--threshold`) and top-k limits (`--top-k`).
+3. **Machine-readable structured JSON serialization (`--json`)** for AI agent workflows and MCP servers.
+
+Inference is decoupled and communicates with local daemons via Unix domain sockets (`/tmp/woollama.sock`, `/tmp/reranker.sock`) or HTTP endpoints (`http://localhost:11434`, `http://localhost:8001`, or `$DUCKEYE_LLM_ENDPOINT` / `$DUCKEYE_RERANK_ENDPOINT`), ensuring zero cold-start latency when running standard queries.
+
+### 1. Code Intelligence (Tree-sitter ASTs via `sitting_duck`)
+
+**Natural language code discovery (`--find`):**
+Translate natural language queries into ASTCSS selectors automatically:
+
+```console
+$ duckeye --find "find background task execution method" worker.py
+▍ execute(self, task_name: str, payload: dict) -> bool
+
+┃ python
+┃ def execute(self, task_name: str, payload: dict) -> bool:
+┃         """Run the given background task."""
+┃         return True
+```
+
+Pass language hints with `--dialect` (e.g. `python`, `rust`, `cpp`, `go`, `bash`):
+
+```console
+$ duckeye --find "find async websocket handlers" --dialect rust src/server.rs
+```
+
+**Structural pruning + semantic re-ranking (`-Q` with `-R`):**
+Filter code blocks structurally, score each candidate with the cross-encoder, and drop irrelevant blocks below `--threshold` (default `0.70` or `0.0` with `--top-k`):
+
+```console
+$ duckeye -Q '.func' -R "handles task execution and processing" worker.py
+─── [0.94] worker.py:4 (function_definition: execute) ───
+def execute(self, task_name: str, payload: dict) -> bool:
+        """Run the given background task."""
+        return True
+```
+
+**Structured JSON export for LLMs / Agents (`--json`):**
+Emit candidates with line ranges, AST types, identifiers, relevance scores, and code blocks:
+
+```console
+$ duckeye -Q '.func' -R "handles task execution" --json worker.py
+[{"file_path":"worker.py","type":"function_definition","name":"execute","start_line":4,"end_line":6,"score":0.94,"content":"def execute(self, task_name: str, payload: dict) -> bool:\n        \"\"\"Run the given background task.\"\"\"\n        return True"}]
+```
+
+### 2. Document Intelligence (Markdown, DOCX, HTML, PDF, etc.)
+
+**Natural language section and block discovery (`--find`):**
+Compile natural language queries directly into document element selectors:
+
+```console
+$ duckeye --find "find top level sections" architecture.md
+▍ Ingestion Pipeline
+
+▍ Code AST Engine
+
+▍ Local Semantic Re-ranking
+```
+
+**Semantic section and block re-ranking (`-R`):**
+Score document sections against procedural or semantic criteria:
+
+```console
+$ duckeye -R "cross-encoder inference and socket daemon" architecture.md
+─── [0.96] architecture.md:7 (paragraph: Leverages local cross-encoders over Unix sockets to re-rank structural candidate slices.) ───
+Leverages local cross-encoders over Unix sockets to re-rank structural candidate slices.
+```
+
+**Structured outlines (`-T --json`):**
+Emit hierarchical table of contents as a JSON array with heading levels, indents, and order indices:
+
+```console
+$ duckeye -T --json architecture.md
+[{"title":"Duckeye System Architecture","level":1,"indent":0,"element_order":0},{"title":"Ingestion Pipeline","level":2,"indent":1,"element_order":1},{"title":"Code AST Engine","level":2,"indent":1,"element_order":3},{"title":"Local Semantic Re-ranking","level":2,"indent":1,"element_order":5}]
+```
+
 ## Colour
 
 Colour is on when a terminal will actually see it: stdout is a tty, or `-p` is handing
@@ -669,7 +749,12 @@ it to `DUCKEYE_EXTS`.
 -Q, --select SEL       query by CSS selector. Code: .func, .class#Name,
                        .func:async. Documents: heading, li, h2, code[language=sh],
                        list > list_item -- HTML type names are accepted as aliases
+-F, --find QUERY       natural language query compiled to ASTCSS or document selector
 -R, --rank EXPR        re-rank matching sections or code blocks with a cross-encoder
+    --threshold SCORE  minimum acceptable rank score cutoff (default: 0.0 with --top-k, else 0.70)
+    --top-k N          limit output to top N highest-scoring results
+    --dialect LANG     dialect hint for ASTCSS compilation (auto, python, rust, cpp, etc.)
+    --json             emit machine-readable JSON array
 -d, --data             read as data: SELECT * FROM FILE (reads AST on code files)
 -D, --document         undo an earlier -d (data files still route to data)
 -z, --summary          native column summary (DuckDB SUMMARIZE)
@@ -699,6 +784,10 @@ it to `DUCKEYE_EXTS`.
 | `DUCKEYE_OFFICIAL` | `--init` installs these from the core repo |
 | `DUCKEYE_COMMUNITY` | `--init` installs these from the community repo |
 | `DUCKEYE_THEME` | `dark` or `light` theme override (default: auto-detected with 50ms probe) |
+| `DUCKEYE_LLM_SOCKET` | Unix socket path for ASTCSS compiler daemon (default `/tmp/woollama.sock`) |
+| `DUCKEYE_LLM_ENDPOINT` | HTTP endpoint URL for ASTCSS compiler (e.g. `http://localhost:11434`) |
+| `DUCKEYE_RERANK_SOCKET` | Unix socket path for cross-encoder reranker daemon (default `/tmp/reranker.sock`) |
+| `DUCKEYE_RERANK_ENDPOINT` | HTTP endpoint URL for cross-encoder reranker (e.g. `http://localhost:8001`) |
 | `COLUMNS` | overrides terminal column width for table rendering and profiling |
 
 ## Tests

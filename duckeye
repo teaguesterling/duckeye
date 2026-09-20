@@ -45,8 +45,8 @@ Options:
   -Q, --select SEL       query by CSS selector. Code: .func, .class#Name,
                          .func:async. Documents: heading, li, h2, code[language=sh],
                          list > list_item -- HTML type names are accepted as aliases
+  -F, --find QUERY       natural language query compiled to ASTCSS or document selector
   -R, --rank EXPR        re-rank matching sections or code blocks with a cross-encoder
-      --find QUERY       natural language query compiled to ASTCSS or document selector
       --threshold SCORE  minimum acceptable rank score cutoff (default: 0.0 with --top-k, else 0.70)
       --top-k N          limit output to top N highest-scoring results
       --dialect LANG     dialect hint for ASTCSS compilation (auto, python, rust, cpp, etc.)
@@ -442,9 +442,10 @@ while (( $# )); do
     -s|--search)   [[ $# -ge 2 ]] || die '-s needs search text' 64; setmode search; arg=$2; shift ;;
     -Q|--select)   [[ $# -ge 2 ]] || die '-Q/--select needs a CSS selector' 64; selector=$2; shift ;;
     --select=*)    selector=${1#--select=} ;;
-    --find)        [[ $# -ge 2 ]] || die '--find needs a natural language query' 64
+    -F|--find)     [[ $# -ge 2 ]] || die '-F/--find needs a natural language query' 64
                    find_query=$2; shift ;;
     --find=*)      find_query=${1#--find=} ;;
+    -F=*)          find_query=${1#-F=} ;;
     -R|--rank)     [[ $# -ge 2 ]] || die '-R/--rank needs a ranking proposition' 64
                    rank_criterion=$2; shift ;;
     --rank=*)      rank_criterion=${1#--rank=} ;;

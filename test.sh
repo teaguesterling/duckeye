@@ -739,9 +739,11 @@ has 'code glob -f ast'         'execute'        $DUCKEYE -f ast -T "$TMP/test_co
 
 echo 'code & document intelligence'
 has 'find ASTCSS mock'            'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE --find "find execute function" "$TMP/test_code.py"
+has 'find -F short flag'          'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE -F "find execute function" "$TMP/test_code.py"
 has 'find with dialect'           'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE --find "find execute function" --dialect python "$TMP/test_code.py"
 no  'find offline fails'          env -u DUCKEYE_MOCK_ASTCSS DUCKEYE_LLM_SOCKET=/nonexistent.sock DUCKEYE_LLM_ENDPOINT=http://127.0.0.1:59999 $DUCKEYE --find "find something" "$TMP/test_code.py"
 has 'find on document'            'Alpha'          env DUCKEYE_MOCK_ASTCSS='h2' $DUCKEYE --find "find h2 headings" "$TMP/doc.md"
+has 'find combined with rank'     'execute'        env DUCKEYE_MOCK_ASTCSS='.func' DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -F "find all functions" -R "executes task" "$TMP/test_code.py"
 has 'rank filters candidates'     'execute'        env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" "$TMP/test_code.py"
 no_leak 'rank threshold drops low scores' 'cancel' env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" "$TMP/test_code.py"
 has 'rank threshold override'     'cancel'         env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" --threshold 0.20 "$TMP/test_code.py"

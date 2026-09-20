@@ -737,6 +737,20 @@ has 'code glob toc'            'execute'        $DUCKEYE -T "$TMP/*.py"
 has 'code glob -Q'             'execute'        $DUCKEYE -Q '.func#execute' "$TMP/*.py"
 has 'code glob -f ast'         'execute'        $DUCKEYE -f ast -T "$TMP/test_code.*"
 
+echo 'code & document intelligence'
+has 'find ASTCSS mock'            'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE --find "find execute function" "$TMP/test_code.py"
+has 'find with dialect'           'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE --find "find execute function" --dialect python "$TMP/test_code.py"
+no  'find offline fails'          env -u DUCKEYE_MOCK_ASTCSS DUCKEYE_LLM_SOCKET=/nonexistent.sock DUCKEYE_LLM_ENDPOINT=http://127.0.0.1:59999 $DUCKEYE --find "find something" "$TMP/test_code.py"
+has 'find on document'            'Alpha'          env DUCKEYE_MOCK_ASTCSS='h2' $DUCKEYE --find "find h2 headings" "$TMP/doc.md"
+has 'rank filters candidates'     'execute'        env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" "$TMP/test_code.py"
+no_leak 'rank threshold drops low scores' 'cancel' env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" "$TMP/test_code.py"
+has 'rank threshold override'     'cancel'         env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" --threshold 0.20 "$TMP/test_code.py"
+has 'rank top-k limits'           'execute'        env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.85}]' $DUCKEYE -Q '.func' -R "executes task" --top-k 1 "$TMP/test_code.py"
+has 'rank --json output'          '"score":0.95'   env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" --json "$TMP/test_code.py"
+has 'rank document prose'         'Alpha'          env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.20}, {"index": 2, "relevance_score": 0.92}]' $DUCKEYE -R "alpha details" "$TMP/doc.md"
+has 'outline --json'              '"title":"Alpha"' $DUCKEYE -T --json "$TMP/doc.md"
+has 'section --json'              '"element_type":"heading"' $DUCKEYE -S Alpha --json "$TMP/doc.md"
+
 echo 'zim'
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   Z=$DUCKEYE_TEST_ZIM

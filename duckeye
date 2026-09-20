@@ -45,6 +45,12 @@ Options:
   -Q, --select SEL       query by CSS selector. Code: .func, .class#Name,
                          .func:async. Documents: heading, li, h2, code[language=sh],
                          list > list_item -- HTML type names are accepted as aliases
+  -R, --rank EXPR        re-rank matching sections or code blocks with a cross-encoder
+      --find QUERY       natural language query compiled to ASTCSS or document selector
+      --threshold SCORE  minimum acceptable rank score cutoff (default: 0.0 with --top-k, else 0.70)
+      --top-k N          limit output to top N highest-scoring results
+      --dialect LANG     dialect hint for ASTCSS compilation (auto, python, rust, cpp, etc.)
+      --json             emit machine-readable JSON array
   -d, --data             read FILE as data, not prose: SELECT * FROM FILE
                          (parquet, csv, json, xlsx, ...). Piped, it emits JSONL
   -D, --document         undo an earlier -d and read FILE as prose. Data files
@@ -220,6 +226,8 @@ update() {
   return $rc
 }
 
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
 # SQL single-quoted literal: double the quotes.
 q() { printf '%s' "${1//\'/\'\'}"; }
 
@@ -228,6 +236,67 @@ q() { printf '%s' "${1//\'/\'\'}"; }
 [[ $(basename "$0") == der ]] && mode=raw || mode=full
 arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 in_file= out_file=
+find_query= rank_criterion= rank_threshold= top_k= dialect= json_out=
+
+# ---------------------------------------------------------------- intelligence layer
+compile_astcss() {
+  local query=$1 dialect=${2:-auto}
+  local socket=${DUCKEYE_LLM_SOCKET:-/tmp/woollama.sock}
+  local endpoint=${DUCKEYE_LLM_ENDPOINT:-}
+  local payload resp compiled
+
+  if [[ -n ${DUCKEYE_MOCK_ASTCSS:-} ]]; then
+    printf '%s' "$DUCKEYE_MOCK_ASTCSS"
+    return 0
+  fi
+
+  payload=$(printf '{"model":"qwen3.5-0.8b-astcss","prompt":"<|im_start|>system\\nYou are an ASTCSS compiler for sitting_duck. Convert the user natural language request into a single CSS selector for source code ASTs. Emit only the selector.\\nLanguage: %s\\n<|im_end|>\\n<|im_start|>user\\n%s\\n<|im_end|>\\n<|im_start|>assistant\\n","stream":false}' "$dialect" "$query")
+
+  if [[ -S "$socket" ]]; then
+    resp=$(curl -s --unix-socket "$socket" -H "Content-Type: application/json" -d "$payload" "http://localhost/api/generate" 2>/dev/null || true)
+  elif [[ -n "$endpoint" ]]; then
+    resp=$(curl -s -H "Content-Type: application/json" -d "$payload" "$endpoint/api/generate" 2>/dev/null || true)
+  elif curl -s --connect-timeout 0.3 "http://localhost:11434/api/tags" >/dev/null 2>&1; then
+    resp=$(curl -s -H "Content-Type: application/json" -d "$payload" "http://localhost:11434/api/generate" 2>/dev/null || true)
+  fi
+
+  if [[ -n "$resp" ]]; then
+    compiled=$(printf '%s' "$resp" | sed -n 's/.*"response":"\([^"]*\)".*/\1/p' | tr -d '\n\r' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s/\\n//g')
+  fi
+
+  if [[ -z "$compiled" ]]; then
+    die "could not connect to LLM daemon for --find ($query). Set DUCKEYE_LLM_SOCKET or DUCKEYE_LLM_ENDPOINT." 1
+  fi
+  printf '%s' "$compiled"
+}
+
+rerank_candidates() {
+  local query=$1 threshold=$2 topk=$3 cand_file=$4
+  local socket=${DUCKEYE_RERANK_SOCKET:-/tmp/reranker.sock}
+  local endpoint=${DUCKEYE_RERANK_ENDPOINT:-}
+  local payload_file=$tmp/rerank_payload.json resp_file=$tmp/scored.json
+
+  if [[ -n ${DUCKEYE_MOCK_RERANK:-} ]]; then
+    printf '%s' "$DUCKEYE_MOCK_RERANK" >"$resp_file"
+    return 0
+  fi
+
+  printf '{"model":"Qwen3-Reranker-0.6B","query":"%s","documents":' "$(q "$query")" >"$payload_file"
+  cat "$cand_file" >>"$payload_file"
+  printf '}' >>"$payload_file"
+
+  if [[ -S "$socket" ]]; then
+    curl -s --unix-socket "$socket" -H "Content-Type: application/json" --data-binary @"$payload_file" "http://localhost/v1/rerank" >"$resp_file" 2>/dev/null || true
+  elif [[ -n "$endpoint" ]]; then
+    curl -s -H "Content-Type: application/json" --data-binary @"$payload_file" "$endpoint/v1/rerank" >"$resp_file" 2>/dev/null || true
+  elif curl -s --connect-timeout 0.3 "http://localhost:8001/v1/rerank" >/dev/null 2>&1; then
+    curl -s -H "Content-Type: application/json" --data-binary @"$payload_file" "http://localhost:8001/v1/rerank" >"$resp_file" 2>/dev/null || true
+  fi
+
+  if [[ ! -s "$resp_file" ]]; then
+    die "could not connect to reranker daemon for -R/--rank ($query). Set DUCKEYE_RERANK_SOCKET or DUCKEYE_RERANK_ENDPOINT." 1
+  fi
+}
 
 # Wrap an expression yielding LIST(duck_block) in whichever serializer -t asked for.
 # These are the duck_blocks pipeline's own writers, which is the whole point: they run
@@ -263,7 +332,7 @@ want_color() {
 # to avoid DuckDB's 5-second blocking background-color timeout in non-interactive shells.
 duckdb_color_mode() {
   if [[ -n ${DUCKEYE_THEME:-} ]]; then
-    case "${DUCKEYE_THEME,,}" in
+    case "$(lower "$DUCKEYE_THEME")" in
       light) echo "-light-mode"; return ;;
       dark)  echo "-dark-mode"; return ;;
     esac
@@ -373,8 +442,27 @@ while (( $# )); do
     -s|--search)   [[ $# -ge 2 ]] || die '-s needs search text' 64; setmode search; arg=$2; shift ;;
     -Q|--select)   [[ $# -ge 2 ]] || die '-Q/--select needs a CSS selector' 64; selector=$2; shift ;;
     --select=*)    selector=${1#--select=} ;;
-    -f|--from|--format) [[ $# -ge 2 ]] || die '-f needs an input format' 64; fmt=${2,,}; shift ;;
-    -t|--to)       [[ $# -ge 2 ]] || die '-t needs an output format' 64; out_fmt=${2,,}; shift ;;
+    --find)        [[ $# -ge 2 ]] || die '--find needs a natural language query' 64
+                   find_query=$2; shift ;;
+    --find=*)      find_query=${1#--find=} ;;
+    -R|--rank)     [[ $# -ge 2 ]] || die '-R/--rank needs a ranking proposition' 64
+                   rank_criterion=$2; shift ;;
+    --rank=*)      rank_criterion=${1#--rank=} ;;
+    --threshold)   [[ $# -ge 2 ]] || die '--threshold needs a float value (e.g. 0.75)' 64
+                   rank_threshold=$2; shift ;;
+    --threshold=*) rank_threshold=${1#--threshold=} ;;
+    --top-k|--topk) [[ $# -ge 2 ]] || die '--top-k needs an integer limit' 64
+                   [[ $2 =~ ^[0-9]+$ ]] || die "--top-k needs a non-negative integer, got '$2'" 64
+                   top_k=$2; shift ;;
+    --top-k=*|--topk=*)
+                   top_k=${1#*=}
+                   [[ $top_k =~ ^[0-9]+$ ]] || die "--top-k needs a non-negative integer, got '$top_k'" 64 ;;
+    --dialect)     [[ $# -ge 2 ]] || die '--dialect needs a language name (e.g. rust, python, cpp)' 64
+                   dialect=$2; shift ;;
+    --dialect=*)   dialect=${1#--dialect=} ;;
+    --json)        json_out=1 ;;
+    -f|--from|--format) [[ $# -ge 2 ]] || die '-f needs an input format' 64; fmt=$(lower "$2"); shift ;;
+    -t|--to)       [[ $# -ge 2 ]] || die '-t needs an output format' 64; out_fmt=$(lower "$2"); shift ;;
     -i|--input)    [[ $# -ge 2 ]] || die '-i needs a FILE' 64; in_file=$2; shift ;;
     # -o is the output FILE, per pandoc, gcc, curl and ld. Under duckeye's previous
     # meaning it named a FORMAT, and that spelling stays syntactically valid here --
@@ -382,14 +470,14 @@ while (( $# )); do
     # format-shaped value converts the worst migration break into a teaching error;
     # ./html escapes the guard for anyone who genuinely means it.
     -o|--output)   [[ $# -ge 2 ]] || die '-o needs an output FILE' 64
-                   case ${2,,} in
+                   case $(lower "$2") in
                      ansi|text|md|markdown|html|pandoc|blocks|box|csv|tsv|tabs|json|jsonl|jsonlines|latex|line|list|ascii|column|insert|quote|duckbox)
                        die "-o now names an output FILE, not a format; did you mean -t $2 ?" 64 ;;
                    esac
                    out_file=$2; shift ;;
     --color)       [[ $# -ge 2 ]] || die '--color needs auto, always or never' 64
-                   color=${2,,}; shift ;;
-    --color=*)     color=${1#--color=}; color=${color,,} ;;
+                   color=$(lower "$2"); shift ;;
+    --color=*)     color=$(lower "${1#--color=}") ;;
     -w|--where)    [[ $# -ge 2 ]] || die '-w needs a WHERE expression' 64
                    [[ $mode == full ]] && setmode raw
                    where=$2; shift ;;
@@ -403,6 +491,16 @@ while (( $# )); do
   esac
   shift
 done
+
+if [[ -n $rank_criterion ]]; then
+  if [[ -z $rank_threshold ]]; then
+    if [[ -n $top_k ]]; then
+      rank_threshold="0.0"
+    else
+      rank_threshold="0.70"
+    fi
+  fi
+fi
 
 p_first= p_last=
 if [[ -n $pages ]]; then
@@ -522,7 +620,7 @@ if [[ $f != *\** && $f != *\?* ]]; then
 fi
 
 f_no_ref="${f%@*}"
-key=${f_no_ref,,}
+key=$(lower "$f_no_ref")
 [[ -n $norm ]] && key=".$norm"
 
 # Sniff json to distinguish Pandoc AST from structured data
@@ -1147,11 +1245,43 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
   *.sql|*.gql|*.graphql|*.tf|*.tfvars|*.hcl|*.css|.auto)
     exts="sitting_duck"
     code_src=1     # this reader applies -Q itself; see the -Q block's guard
+    if [[ -n $find_query && -z ${selector:-} ]]; then
+      lang_hint=${dialect:-auto}
+      if [[ $lang_hint == auto ]]; then
+        case "$key" in
+          *.py|*.pyi|*.pyw) lang_hint=python ;;
+          *.rs) lang_hint=rust ;;
+          *.go) lang_hint=go ;;
+          *.js|*.jsx|*.mjs|*.cjs) lang_hint=javascript ;;
+          *.ts|*.tsx) lang_hint=typescript ;;
+          *.c|*.h) lang_hint=c ;;
+          *.cpp|*.hpp|*.cc|*.cxx|*.c++|*.hh|*.hxx) lang_hint=cpp ;;
+          *.java) lang_hint=java ;;
+          *.kt|*.kts) lang_hint=kotlin ;;
+          *.cs) lang_hint=csharp ;;
+          *.swift) lang_hint=swift ;;
+          *.rb|*.ruby) lang_hint=ruby ;;
+          *.php|*.php3|*.php4|*.php5|*.phtml) lang_hint=php ;;
+          *.lua) lang_hint=lua ;;
+          *.sh|*.bash|*.zsh) lang_hint=bash ;;
+          *.zig) lang_hint=zig ;;
+          *.dart) lang_hint=dart ;;
+          *.sql|*.gql|*.graphql) lang_hint=sql ;;
+          *.tf|*.tfvars|*.hcl) lang_hint=terraform ;;
+          *.css) lang_hint=css ;;
+          *.html|*.htm) lang_hint=html ;;
+          *) lang_hint=auto ;;
+        esac
+      fi
+      selector=$(compile_astcss "$find_query" "$lang_hint") || exit $?
+    fi
     if [[ -n ${selector:-} ]]; then
       premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');
 CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(q "$selector")'); "
       doc="SELECT list(block) AS blocks FROM ast_to_blocks_from('__sel')"
     else
+      premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');
+CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
       doc="SELECT flatten(list(blocks)) AS blocks FROM ast_to_blocks_list('$src')"
     fi ;;
   *.docx|*.odt|*.epub|*.org|*.tex|*.rtf|*.textile|*.mediawiki)
@@ -1337,6 +1467,10 @@ esac
 # pandoc-routed format (.rst, .ipynb, .man) matched the exclusion and had its -Q
 # silently ignored. Measured: `-Q code -t text doc.rst` rendered the whole document.
 # Silent ignore is the exact failure this block was added to end.
+if [[ -n $find_query && -z ${selector:-} && -z ${code_src:-} ]]; then
+  selector=$(compile_astcss "$find_query" "document") || exit $?
+fi
+
 if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
       && $mode != raw && $mode != summary && $mode != profile ]]; then
   # An attribute on a CONTEXT node cannot work here. Attributes are matched after
@@ -1459,31 +1593,43 @@ cte="WITH doc AS MATERIALIZED ($doc)"
 # A section runs to the block before the next heading. INT_MAX stands in for
 # "to the end of the document" — db_blocks_slice takes an inclusive order range,
 # and inline children share the block's order span, so they slice along with it.
-case $mode in
-  full|section|search)
-    # section and search share this: their span SQL already ran, above, as part of
-    # building $doc. One emit path for all three is the point of that refactor.
-    # WHERE blocks IS NOT NULL, because an aggregate with no GROUP BY still returns
-    # one row when nothing matched, and list() over zero rows is SQL NULL. Measured:
-    # `-Q nosuchtype` printed the four characters NULL on stdout and exited 0 -- on
-    # documents AND on source code -- while -t md and -t html got the error right,
-    # because their extra conversion step turned that row into genuinely empty
-    # output and tripped the guard below. Dropping the row makes every writer agree.
-    sql="$cte SELECT $(emit 'blocks') FROM doc WHERE blocks IS NOT NULL;" ;;
-  toc)
-    # duck_blocks_toc_rows, not duck_blocks_toc. Both return the same five columns
-    # today, but toc_rows is the row-shaped accessor BY RULING -- a table of contents
-    # is an index, not an extract, so it stays metadata-only -- while duck_blocks_toc
-    # is slated to return blocks. When that lands, `e.indent` and `e.title` stop
-    # existing and this fails to BIND, which is the loud failure and still a failure.
-    #
-    # It is a table MACRO, so it takes a column. That distinction is the whole reason
-    # this migration is possible: a table FUNCTION rejects `doc.blocks` outright, which
-    # is how parse_html_blocks silently broke -S on ZIM archives for weeks.
-    sql="$cte, t AS (SELECT r.* FROM doc, duck_blocks_toc_rows(doc.blocks) r)
-         SELECT string_agg(repeat('  ', t.indent) || t.title, chr(10) ORDER BY t.element_order)
-         FROM t HAVING count(*) > 0;" ;;
-esac
+if [[ -n $json_out && -z $rank_criterion ]]; then
+  case $mode in
+    toc)
+      sql="$cte, t AS (SELECT r.* FROM doc, duck_blocks_toc_rows(doc.blocks) r)
+           SELECT to_json(list(struct_pack(title := t.title, level := t.level, indent := t.indent, element_order := t.element_order)))
+           FROM t HAVING count(*) > 0;" ;;
+    full|section|search)
+      out_fmt=blocks
+      sql="$cte SELECT $(emit 'blocks') FROM doc WHERE blocks IS NOT NULL;" ;;
+  esac
+else
+  case $mode in
+    full|section|search)
+      # section and search share this: their span SQL already ran, above, as part of
+      # building $doc. One emit path for all three is the point of that refactor.
+      # WHERE blocks IS NOT NULL, because an aggregate with no GROUP BY still returns
+      # one row when nothing matched, and list() over zero rows is SQL NULL. Measured:
+      # `-Q nosuchtype` printed the four characters NULL on stdout and exited 0 -- on
+      # documents AND on source code -- while -t md and -t html got the error right,
+      # because their extra conversion step turned that row into genuinely empty
+      # output and tripped the guard below. Dropping the row makes every writer agree.
+      sql="$cte SELECT $(emit 'blocks') FROM doc WHERE blocks IS NOT NULL;" ;;
+    toc)
+      # duck_blocks_toc_rows, not duck_blocks_toc. Both return the same five columns
+      # today, but toc_rows is the row-shaped accessor BY RULING -- a table of contents
+      # is an index, not an extract, so it stays metadata-only -- while duck_blocks_toc
+      # is slated to return blocks. When that lands, `e.indent` and `e.title` stop
+      # existing and this fails to BIND, which is the loud failure and still a failure.
+      #
+      # It is a table MACRO, so it takes a column. That distinction is the whole reason
+      # this migration is possible: a table FUNCTION rejects `doc.blocks` outright, which
+      # is how parse_html_blocks silently broke -S on ZIM archives for weeks.
+      sql="$cte, t AS (SELECT r.* FROM doc, duck_blocks_toc_rows(doc.blocks) r)
+           SELECT string_agg(repeat('  ', t.indent) || t.title, chr(10) ORDER BY t.element_order)
+           FROM t HAVING count(*) > 0;" ;;
+  esac
+fi
 
 [[ $out_fmt == html ]] && exts+=" webbed"     # duck_blocks_to_html lives there
 [[ $out_fmt == md   ]] && exts+=" markdown"   # duck_blocks_to_md lives there
@@ -1522,7 +1668,69 @@ page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
 # Buffered so an empty result can be reported instead of printed as silence.
 out=$tmp/out
 
-if [[ -n $via_pandoc ]]; then
+if [[ -n $rank_criterion ]]; then
+  if [[ -n ${code_src:-} ]]; then
+    c_sql="SELECT to_json(list(struct_pack(node_id := node_id, type := type, name := coalesce(name, ''), file_path := file_path, start_line := start_line, end_line := end_line, text := coalesce(peek, '')))) FROM (SELECT * FROM __sel WHERE peek IS NOT NULL AND trim(peek) <> '');"
+  else
+    c_sql="$cte, raw_b AS (SELECT row_number() OVER () AS ord, b.* FROM (SELECT unnest(blocks) AS b FROM doc) WHERE b.content IS NOT NULL AND trim(b.content) <> '') SELECT to_json(list(struct_pack(node_id := ord, type := element_type, name := coalesce(content, ''), file_path := '$src', start_line := ord, end_line := ord, text := coalesce(content, '')))) FROM raw_b;"
+  fi
+
+  c_duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")
+  [[ -n $premacro ]] && c_duck+=(-s "$premacro")
+  c_duck+=(-s "$c_sql")
+
+  cand_file=$tmp/candidates.json
+  if [[ -n $via_pandoc ]]; then
+    pandoc -f "$from" "$f" -t json | "${c_duck[@]}" >"$cand_file" 2>/dev/null
+  else
+    "${c_duck[@]}" >"$cand_file" 2>/dev/null
+  fi
+
+  if [[ ! -s $cand_file ]] || grep -qE '^([[:space:]]*\[[[:space:]]*\]|[[:space:]]*null|[[:space:]]*)$' "$cand_file"; then
+    if [[ -n $json_out ]]; then
+      echo "[]" >"$out"
+    else
+      die "no candidates available to rank in $f"
+    fi
+  else
+    rerank_candidates "$rank_criterion" "$rank_threshold" "$top_k" "$cand_file"
+    if grep -q '"results"' "$tmp/scored.json"; then
+      duckdb $(duckdb_color_mode) -list -noheader -c "
+        SELECT to_json(results) FROM read_json('$tmp/scored.json', columns={'results': 'STRUCT(index INTEGER, relevance_score DOUBLE, score DOUBLE)[]'});
+      " >"$tmp/scored_clean.json" 2>/dev/null && mv "$tmp/scored_clean.json" "$tmp/scored.json"
+    fi
+
+    rank_sql_file=$tmp/rank_query.sql
+    if [[ -n $json_out ]]; then
+      cat <<SQL >"$rank_sql_file"
+WITH c_raw AS (SELECT * FROM read_json('$cand_file', columns={'node_id': 'BIGINT', 'type': 'VARCHAR', 'name': 'VARCHAR', 'file_path': 'VARCHAR', 'start_line': 'BIGINT', 'end_line': 'BIGINT', 'text': 'VARCHAR'})),
+     c AS (SELECT c_raw AS item, row_number() OVER () - 1 AS idx FROM c_raw),
+     r_raw AS (SELECT * FROM read_json('$tmp/scored.json', columns={'index': 'INTEGER', 'relevance_score': 'DOUBLE', 'score': 'DOUBLE'})),
+     r AS (SELECT r_raw AS res, coalesce(r_raw.index, (row_number() OVER () - 1)::INTEGER) AS idx FROM r_raw),
+     joined AS (SELECT c.item.file_path AS file_path, c.item.type AS type, c.item.name AS name, c.item.start_line AS start_line, c.item.end_line AS end_line, c.item.text AS text, round(coalesce(r.res.relevance_score, r.res.score, 0.0), 3) AS score FROM c JOIN r ON c.idx = r.idx WHERE coalesce(r.res.relevance_score, r.res.score, 0.0) >= $rank_threshold ORDER BY score DESC ${top_k:+LIMIT $top_k})
+SELECT coalesce(to_json(list(struct_pack(file_path := file_path, type := type, name := name, start_line := start_line, end_line := end_line, score := score, content := text))), '[]') FROM joined;
+SQL
+    else
+      cat <<SQL >"$rank_sql_file"
+WITH c_raw AS (SELECT * FROM read_json('$cand_file', columns={'node_id': 'BIGINT', 'type': 'VARCHAR', 'name': 'VARCHAR', 'file_path': 'VARCHAR', 'start_line': 'BIGINT', 'end_line': 'BIGINT', 'text': 'VARCHAR'})),
+     c AS (SELECT c_raw AS item, row_number() OVER () - 1 AS idx FROM c_raw),
+     r_raw AS (SELECT * FROM read_json('$tmp/scored.json', columns={'index': 'INTEGER', 'relevance_score': 'DOUBLE', 'score': 'DOUBLE'})),
+     r AS (SELECT r_raw AS res, coalesce(r_raw.index, (row_number() OVER () - 1)::INTEGER) AS idx FROM r_raw),
+     joined AS (SELECT c.item.file_path AS file_path, c.item.type AS type, c.item.name AS name, c.item.start_line AS start_line, c.item.end_line AS end_line, c.item.text AS text, round(coalesce(r.res.relevance_score, r.res.score, 0.0), 3) AS score FROM c JOIN r ON c.idx = r.idx WHERE coalesce(r.res.relevance_score, r.res.score, 0.0) >= $rank_threshold ORDER BY score DESC ${top_k:+LIMIT $top_k})
+SELECT string_agg(chr(27) || '[1;36m─── [' || printf('%.2f', score) || '] ' || file_path || CASE WHEN start_line IS NOT NULL THEN ':' || start_line::VARCHAR ELSE '' END || ' (' || type || CASE WHEN name <> '' THEN ': ' || name ELSE '' END || ') ───' || chr(27) || '[0m' || chr(10) || text, chr(10) || chr(10)) FROM joined;
+SQL
+    fi
+
+    duckdb $(duckdb_color_mode) -list -noheader < "$rank_sql_file" >"$out" || exit $?
+    if ! grep -q '[^[:space:]]' "$out"; then
+      if [[ -n $json_out ]]; then
+        echo "[]" >"$out"
+      else
+        die "no candidates scored at or above threshold $rank_threshold for '$rank_criterion'"
+      fi
+    fi
+  fi
+elif [[ -n $via_pandoc ]]; then
   pandoc -f "$from" "$f" -t json | "${duck[@]}" >"$out"
   st=("${PIPESTATUS[@]}")
   (( st[0] )) && die "pandoc failed on $f" "${st[0]}"

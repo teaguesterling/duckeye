@@ -669,6 +669,7 @@ it to `DUCKEYE_EXTS`.
 -Q, --select SEL       query by CSS selector. Code: .func, .class#Name,
                        .func:async. Documents: heading, li, h2, code[language=sh],
                        list > list_item -- HTML type names are accepted as aliases
+-R, --rank EXPR        re-rank matching sections or code blocks with a cross-encoder
 -d, --data             read as data: SELECT * FROM FILE (reads AST on code files)
 -D, --document         undo an earlier -d (data files still route to data)
 -z, --summary          native column summary (DuckDB SUMMARIZE)

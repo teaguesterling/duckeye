@@ -120,6 +120,20 @@ duckeye -S Results -t md paper.docx > results.md
 duckeye -Q '.func#process' -t md src/worker.rs
 ```
 
+### Code & Document Intelligence (Natural Language & Cross-Encoder Reranking)
+
+```sh
+# Natural language code query (compiles to ASTCSS via local compiler daemon)
+duckeye --find "find async websocket handlers" src/server.rs
+
+# Semantic cross-encoder re-ranking
+duckeye -Q '.func' -R "handles token validation and auth headers" src/auth.py
+duckeye -R "security requirements and rate limits" docs/api_spec.md --top-k 3
+
+# Agent / MCP integration via structured JSON
+duckeye -Q '.func' -R "optimizes memory usage" src/alloc.c --json
+```
+
 ---
 
 ## Agent Usage Guidelines

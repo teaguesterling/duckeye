@@ -27,3 +27,50 @@ jobs:
 
       - name: Run tests
         run: ./test.sh
+
+      # integration.sh had never run in CI. 127 assertions -- every format end to
+      # end, the README's published commands executed verbatim, cross-format
+      # invariants and stream hygiene -- existed and were dark, which is the same
+      # shape as an assertion that never executes.
+      #
+      # It is a separate step rather than appended to the one above so a failure
+      # names which suite failed, and so a red integration run cannot be mistaken
+      # for a unit regression.
+      - name: Run integration tests
+        run: ./integration.sh
+
+      # DuckDB 2.0 makes single-arrow lambdas (`x -> ...`) a Binder Error; 1.5.x only
+      # warns. CI installs releases/latest, so 2.0 would reach this workflow on its
+      # release day with no warning. This runs both suites under 2.0's lambda rule now,
+      # reproduced on the current CLI with lambda_syntax='DISABLE_SINGLE_ARROW'.
+      #
+      # The setting goes in a .duckdbrc under a throwaway HOME, which the CLI reads for
+      # every duckdb invocation duckeye makes. extension_directory keeps pointing at the
+      # real one --init filled, and .gitconfig comes along for the git:// cases.
+      #
+      # The activation check is not decoration: if the CLI ever stopped reading
+      # .duckdbrc, both suites would run under the DEFAULT rule and pass, measuring
+      # nothing. So the step first proves the rule is live, and fails if it is not.
+      - name: Run tests under DuckDB 2.0's lambda rule
+        run: |
+          H=$(mktemp -d)
+          printf "SET extension_directory='%s/.duckdb/extensions';\nSET lambda_syntax='DISABLE_SINGLE_ARROW';\n" "$HOME" > "$H/.duckdbrc"
+          cp "$HOME/.gitconfig" "$H/" 2>/dev/null || true
+          HOME="$H" duckdb -list -noheader -c "SELECT current_setting('lambda_syntax')" | grep -q DISABLE_SINGLE_ARROW \
+            || { echo "lambda rule NOT active -- .duckdbrc was not read"; exit 1; }
+          HOME="$H" ./test.sh
+          HOME="$H" ./integration.sh
+
+      # Every extension function duckeye calls -- 54 of them across fourteen
+      # extensions, including sitting_duck's AST family and every read_*_blocks --
+      # must exist in the INSTALLED binary. duckeye has no build step and no
+      # vendored header, so this is the only thing between a renamed upstream
+      # function and a Catalog Error in a user's terminal.
+      #
+      # Wired only after checking two things, in this order: that it can still FAIL
+      # (missing function exits 1, absent duckdb exits 2 -- a check that skips and
+      # returns 0 reproduces the defect it exists to catch), and that it EXISTS in a
+      # checkout. It did not: scripts/ is gitignored for operator tools and this had
+      # been swept in with them.
+      - name: Check every extension call resolves
+        run: ./scripts/check_block_functions.sh

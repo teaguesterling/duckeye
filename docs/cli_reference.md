@@ -56,7 +56,7 @@ usage: duckeye [OPTION]... [FILE]
 | `DUCKEYE_EXTS` | `""` | Extra DuckDB extensions to `LOAD` on startup |
 | `DUCKEYE_PAGER`| `less -R` | Pager binary executed when `-p` is active |
 | `DUCKEYE_OFFICIAL` | `http aws excel` | Official extensions installed by `--init` |
-| `DUCKEYE_COMMUNITY` | `duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck` | Community extensions installed by `--init` |
+| `DUCKEYE_COMMUNITY` | `duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck panduck` | Community extensions installed by `--init` |
 | `DUCKEYE_THEME` | `auto` (`dark` / `light`) | Overrides terminal color scheme (default: probes OSC 11 with 50ms timeout) |
 | `DUCKEYE_LLM_SOCKET` | `/tmp/woollama.sock` | Unix domain socket path for ASTCSS compiler daemon |
 | `DUCKEYE_LLM_ENDPOINT` | `http://localhost:11434` | HTTP endpoint URL for ASTCSS compiler daemon |

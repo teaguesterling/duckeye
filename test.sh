@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # duckeye test suite. Generates its own fixtures; needs duckdb, and pandoc for the
-# pandoc-routed formats. ZIM cases run only when DUCKEYE_TEST_ZIM names an archive.
+# pandoc-routed formats. ZIM cases use fixtures/test.zim unless DUCKEYE_TEST_ZIM names another.
 #
 #   ./test.sh                                  # everything available
-#   DUCKEYE_TEST_ZIM=~/wiki.zim ./test.sh      # including ZIM
+#   DUCKEYE_TEST_ZIM=~/wiki.zim ./test.sh      # against a different archive
 set -uo pipefail
 
 cd "$(dirname "$0")" || exit 1
@@ -161,6 +161,33 @@ EOF
 
 # A TIGHT list, to watch the markdown reader's tight/loose fidelity.
 printf -- '- a\n- b\n' >"$TMP/tight.md"
+printf -- '- a\n\n- b\n' >"$TMP/loose.md"
+
+# A notebook whose markdown cell holds two headings, and an .rst block quote -- the
+# two shapes that still keep .ipynb and .rst on pandoc(1). See the guards below.
+cat >"$TMP/nb.ipynb" <<'EOF'
+{"cells":[{"cell_type":"markdown","metadata":{},"source":["# Top\n","\n","## Sub\n"]}],"metadata":{},"nbformat":4,"nbformat_minor":5}
+EOF
+cat >"$TMP/quote.rst" <<'EOF'
+Title
+=====
+
+Before the quote.
+
+   A quoted warning.
+
+After the quote.
+EOF
+cat >"$TMP/footnote.rst" <<'EOF'
+Title
+=====
+
+Text with a note [1]_ and more.
+
+.. [1] The one line footnote body.
+
+Closing paragraph.
+EOF
 
 # Frontmatter, for the metadata-leak guard below.
 printf -- '---\ntitle: Secret Title\nauthor: Jane\n---\n\n# Real Heading\n\nbody\n' >"$TMP/fm.md"
@@ -663,6 +690,26 @@ no  'pdf invalid page range'                   $DUCKEYE -P abc "$TMP/doc.pdf"
 # have passed more often than not.
 ok  'pdf many pages renders'   $DUCKEYE -t text "$TMP/many.pdf"
 has 'pdf many pages last page' 'kumquat40' $DUCKEYE -t text "$TMP/many.pdf"
+
+# fixtures/multiline.pdf wraps one sentence across three lines with a HYPHENATED break
+# ("contin-" / "ues"). pdftotext keeps both the lines and the hyphen; duckeye must give
+# one paragraph with a space at the soft break and no hyphen at the hard one.
+has     'pdf joins a hyphenated line break'    'continues onto a third line' $DUCKEYE -t text fixtures/multiline.pdf
+has     'pdf joins wrapped lines with a space' 'over the lazy dog'           $DUCKEYE -t text fixtures/multiline.pdf
+no_leak 'pdf leaves no hyphen at the break'    'contin-'                     $DUCKEYE -t text fixtures/multiline.pdf
+
+# Every PDF duckeye produced used to FAIL duck_block_utils' own validator: the
+# page_break marker had a NULL level and shared its element_order with the next block.
+# Asserted on one page and on the generated two-page PDF, since the order collision
+# happens once per page and a one-page file shows it only once.
+blocks_valid() {  # FILE -> "true"/"false" from duck_blocks_validate over duckeye -t blocks
+  local j; j=$(mktemp)
+  $DUCKEYE -t blocks "$1" 2>/dev/null >"$j"
+  duckdb -noheader -list -c "LOAD duck_block_utils; SELECT (duck_blocks_validate(from_json(content, '[{\"kind\":\"VARCHAR\",\"element_type\":\"VARCHAR\",\"content\":\"VARCHAR\",\"level\":\"INTEGER\",\"encoding\":\"VARCHAR\",\"attributes\":\"MAP(VARCHAR,VARCHAR)\",\"element_order\":\"INTEGER\"}]'))).valid FROM read_text('$j');" 2>/dev/null
+  rm -f "$j"
+}
+has 'pdf blocks pass the spec validator (1 page)'  'true' blocks_valid fixtures/multiline.pdf
+has 'pdf blocks pass the spec validator (2 pages)' 'true' blocks_valid "$TMP/doc.pdf"
 f=0; for _ in 1 2 3 4 5; do $DUCKEYE -t text "$TMP/many.pdf" >/dev/null 2>&1 || f=$((f+1)); done
 if (( f == 0 )); then pass=$((pass+1)); echo '  ok   pdf many pages is stable over 5 runs'
 else fail=$((fail+1)); printf '  FAIL %s (%d/5 failed)\n' 'pdf many pages is stable over 5 runs' "$f"; fi
@@ -754,6 +801,9 @@ has 'outline --json'              '"title":"Alpha"' $DUCKEYE -T --json "$TMP/doc
 has 'section --json'              '"element_type":"heading"' $DUCKEYE -S Alpha --json "$TMP/doc.md"
 
 echo 'zim'
+# Default to the vendored archive (fixtures/README.md has its provenance). These cases
+# used to run only when DUCKEYE_TEST_ZIM was set, and skipped silently otherwise.
+: "${DUCKEYE_TEST_ZIM:=fixtures/test.zim}"
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   Z=$DUCKEYE_TEST_ZIM
   ok  'zim info'                    $DUCKEYE "$Z"
@@ -916,13 +966,16 @@ has 'doc -Q p alias'               'alpha body' $DUCKEYE -Q 'p' "$TMP/doc.md"
 no_leak 'doc -Q h2 excludes h1'    'Title'   $DUCKEYE -Q 'h2' "$TMP/doc.md"
 # An empty -Q result used to exit 0 printing nothing. Inline types are the
 # non-obvious cause: they render only inside their containing block.
-no  'doc -Q empty result fails'    $DUCKEYE -Q 'strong' "$TMP/doc.md"
-has 'doc -Q empty explains inline' 'renders only inside' \
-    bash -c "$DUCKEYE -Q 'strong' '$TMP/doc.md' 2>&1 >/dev/null"
+no  'doc -Q empty result fails'    $DUCKEYE -Q 'nosuchtype' "$TMP/doc.md"
+has 'doc -Q no-match message'     'Nothing matched' \
+    bash -c "$DUCKEYE -Q 'nosuchtype' '$TMP/doc.md' 2>&1 >/dev/null"
+# A bare INLINE match used to render nothing in the terminal: an inline is drawn as
+# part of its containing block, and -Q deliberately does not carry an inline's
+# ancestors (that would answer -Q strong with the whole sentence). duck_blocks_repair
+# now gives it an implicit `plain` parent, so it renders on its own.
+has 'doc -Q bare inline renders'   'bold phrase' $DUCKEYE -Q 'strong' "$TMP/doc.md"
 # The message must NOT claim nothing matched -- it cannot tell the two apart, and
 # claiming the wrong one sent a real debugging session down the wrong path.
-no_leak 'doc -Q empty avoids false claim' 'no blocks matching' \
-    bash -c "$DUCKEYE -Q 'strong' '$TMP/doc.md' 2>&1 >/dev/null"
 
 # A block-kind match carries its ancestors, so the writers see a well-formed
 # container. Without this, a list_item alone converts to an empty Pandoc AST and
@@ -934,25 +987,148 @@ has 'doc -Q li renders as html list' '<ul>'           $DUCKEYE -Q 'li' -t html "
 # Ancestors, not the whole document: the heading is outside the list's subtree.
 no_leak 'doc -Q li excludes the heading' 'Listing' $DUCKEYE -Q 'li' -t md "$TMP/list.md"
 
-# The markdown reader emits the LOOSE encoding for both `- a\n- b` and `- a\n\n- b`,
-# so tight/loose does not survive the read. duck_block_utils rules that list_item
-# WITH content is a tight item and list_item with a child paragraph is loose, and
-# pandoc agrees -- Plain,Plain vs Para,Para on those two inputs. The user-visible
-# symptom runs the OTHER way, and this comment said the reverse until markdown
-# measured it: duck_blocks_to_md collapses loose onto tight, so a TIGHT list
-# round-trips correctly by two errors cancelling, while a LOOSE list silently loses
-# its blank lines. Measured end to end -- both inputs give '- alpha\n- beta'.
-#
-no_leak 'tight list maintains tight shape' '"element_type":"list_item","content":null' \
+# Tight and loose lists round-trip distinctly. They did not until markdown 2ba1321:
+# the reader collapsed tight onto loose (list_item(NULL) plus a paragraph child for
+# both) and the loose encoding then read back tight, so a tight list survived by two
+# errors cancelling and a loose one lost its blank lines. markdown #60 fixed it and
+# the guard that watched for it reported FIXED on the first run after the update.
+# Asserted end to end in BOTH directions, since a round trip that only checks the
+# tight case is exactly the instrument that passed for the wrong reason before.
+has 'tight list item carries its content' '"element_type":"list_item","content":"a"' \
     $DUCKEYE -t blocks "$TMP/tight.md"
+ok  'tight list writes tight' bash -c \
+    "[ \"\$($DUCKEYE -t md '$TMP/tight.md' 2>/dev/null | head -2)\" = \"\$(printf -- '- a\\n- b')\" ]"
+ok  'loose list keeps its blank line' bash -c \
+    "[ \"\$($DUCKEYE -t md '$TMP/loose.md' 2>/dev/null | head -3)\" = \"\$(printf -- '- a\\n\\n- b')\" ]"
 
-# duck_block_utils 1.3/1.4 fixed the frontmatter leak (IsBody excludes metadata blocks)
-no_leak 'frontmatter does not leak into body' 'title: Secret Title' \
-    $DUCKEYE -t text "$TMP/fm.md"
-# ...and the control that makes the assertion meaningful: conformant value-kind metadata
-# is already skipped
-no_leak 'value-kind metadata stays out of the body' '2026-' \
-    $DUCKEYE -t text "$TMP/doc.md"
+# duck_block_utils 6c1c2e5 / spec 1.2 fixed the fragment drop, so these replace the
+# availability guard that announced it. A fragment with no top-level Pandoc
+# representation used to export as blocks:[] -- silent content loss, and the reason
+# -Q li -t md printed nothing on a .docx. Both halves are asserted because they wrap
+# differently: a container child gets its container, a bare inline gets Plain.
+# The markdown reader emits YAML frontmatter as kind='block', element_type='metadata',
+# so it renders as body prose: `-t text` on a document with frontmatter prints
+# "title: Secret Title" above the first heading. The spec puts document metadata in
+# kind='value' -- and duckeye is already correct for that: a .docx's kind='value'
+# metadata does NOT reach -t text, measured. So this needs no workaround here and
+# MUST NOT get one; the output fixes itself when the reader sets the right kind.
+# markdown#57 is merged to their main; duck_block_utils is adding the rule as spec
+# 1.3 (duck_block_is_body(kind, element_type), and to_text no longer rendering
+# block/metadata), which is also unserved -- so either half landing clears this.
+# The rule has TWO halves, and a guard that ignores the split measures nothing:
+#
+#   RENDERERS      (text, ansi, an indexer) OMIT anything that is not body.
+#   FORMAT WRITERS (md, html, pandoc) SERIALISE metadata into the format's own
+#                  metadata home, and never into body position.
+#
+# So presence of the blob in an output is not a leak. Measured verbatim rather than
+# grepped, which is what corrected this:
+#
+#   -t md    ---\ntitle: ...\n---\n\n# Heading     frontmatter fence: a round trip
+#   -t html  <script type=...frontmatter+yaml>...</script><h1>  non-rendering carrier
+#   -t text  title: ...\n\nHeading                  the blob AS body prose: a LEAK
+#
+# An earlier version of this greped every writer for the string and called three of
+# them broken. Two were correct serialisations. Only to_text rendered it as body.
+# duck_block_utils 3.3.0 (95a84e6, spec 1.4) fixed that, and body became a SUBTREE
+# property: to_text omits a metadata block AND the value children under it. duckeye's
+# own filter -- which removed metadata rows one at a time, and rested on a premise
+# about those rows having no children -- is deleted with it, along with the guard that
+# probed to_text directly. What remains below measures duckeye's output, which is now
+# clean because upstream is, not because duckeye works around it.
+
+# .ipynb reads through panduck now: 0.5.1 replaced the single-arrow lambdas whose
+# deprecation WARNING landed on STDOUT, inside every notebook's TOC and converted
+# output (panduck#65) -- and which DuckDB 2.0 turned into an outright Binder Error.
+# These assert what the old guard was waiting for, through duckeye rather than around
+# it: the notebook renders, and nothing about lambdas reaches the output.
+has     'ipynb renders through panduck'  'Top'  $DUCKEYE "$TMP/nb.ipynb"
+has     'ipynb toc through panduck'      'Sub'  $DUCKEYE -T "$TMP/nb.ipynb"
+no_leak 'ipynb output carries no lambda warning' 'Deprecated lambda' \
+        bash -c "$DUCKEYE '$TMP/nb.ipynb' 2>&1"
+# ...and the route really is panduck, not pandoc: with a pandoc(1) on PATH that fails
+# and records the fact if it is called, the render must still succeed and the marker
+# must not appear. A stub rather than an empty PATH, because duckeye's pandoc branch
+# tests `command -v pandoc` and would simply report it missing -- which is a different
+# outcome from never reaching for it.
+mkdir -p "$TMP/stub"
+printf '#!/bin/sh\ntouch "%s/pandoc_was_called"\nexit 1\n' "$TMP" >"$TMP/stub/pandoc"
+chmod +x "$TMP/stub/pandoc"
+rm -f "$TMP/pandoc_was_called"
+ok 'ipynb never shells out to pandoc' bash -c \
+  "PATH='$TMP/stub:$PATH' $DUCKEYE '$TMP/nb.ipynb' >/dev/null 2>&1 && [ ! -e '$TMP/pandoc_was_called' ]"
+# The structured writers changed shape with the route, and that is recorded rather
+# than left to be discovered: panduck marks a cell with source_type where pandoc used
+# a `cell markdown` class. -t text and -T are byte-identical to the old route; this
+# pins the part that is not, so a change upstream is a failure here and not a silent
+# difference in every notebook duckeye converts.
+has     'ipynb cells carry source_type'        'source_type' $DUCKEYE -t blocks "$TMP/nb.ipynb"
+no_leak 'ipynb no longer carries pandoc cell classes' 'cell markdown' \
+        $DUCKEYE -t blocks "$TMP/nb.ipynb"
+# panduck 0.5.1 fixed .rst block-quote nesting (#64), so that guard is gone. ONE defect
+# still keeps .rst on pandoc(1): the reader DROPS a one-line footnote's body
+# (`.. [1] The body.`) and leaves the reference in the paragraph as literal `[1]_`,
+# where pandoc keeps it as a note. That is lost text, not formatting (panduck#67, fix
+# building upstream). When this flips, re-run rst list parity BEFORE switching the
+# route rather than trusting the guard alone: panduck#68 also reworks list ownership
+# (an item owns lines at its TEXT column, the marker's width).
+cause=panduck
+broken 'rst reader keeps a one-line footnote body' 'one line footnote body' bash -c \
+  "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT string_agg(coalesce(content,''), ' ') FROM read_rst_blocks('$TMP/footnote.rst');\" 2>/dev/null"
+cause=unattributed
+
+# duckeye's own output must be clean TODAY, whatever upstream does.
+no_leak 'duckeye -t text omits metadata' 'title: Secret Title' $DUCKEYE -t text "$TMP/fm.md"
+has     'duckeye -t text keeps the body' 'body'                $DUCKEYE -t text "$TMP/fm.md"
+# ...and the filter must not reach the FORMAT WRITERS, whose carriers are correct.
+has 'md keeps its frontmatter fence'  'title: Secret Title' $DUCKEYE -t md   "$TMP/fm.md"
+has 'html keeps its metadata carrier' 'frontmatter+yaml'    $DUCKEYE -t html "$TMP/fm.md"
+
+# The format writers are CONTROLS -- green today, and they catch the regression that
+# would matter: metadata escaping its carrier into body position.
+ok  'md keeps frontmatter inside the fence' bash -c \
+    "$DUCKEYE -t md '$TMP/fm.md' 2>/dev/null | sed '1{/^---$/!q1}; 1,/^---$/d' \
+     | grep -qv 'Secret Title'"
+ok  'html keeps frontmatter out of the body' bash -c \
+    "$DUCKEYE -t html '$TMP/fm.md' 2>/dev/null \
+     | perl -0pe 's{<script.*?</script>}{}gs' | grep -qv 'Secret Title'"
+# ansi omits it entirely, being a renderer rather than a writer -- paired with a
+# body assertion, since 'renders nothing' would also satisfy a no_leak.
+no_leak 'ansi omits metadata'          'title: Secret Title' $DUCKEYE -t ansi "$TMP/fm.md"
+has     'ansi still renders the body'  'body'                $DUCKEYE -t ansi "$TMP/fm.md"
+cause='markdown reader'
+# Document metadata must stay out of RENDERER output. The control that stood here
+# checked doc.md, which has no value-kind rows at all, so it could not fail.
+#
+# The case that matters: docx/odt/epub carry metadata TEXT as kind='inline' children
+# under a kind='value' row. A PER-ROW filter drops the value row and keeps its
+# children -- and a list's structure is its row order plus levels, so those children
+# are then RE-PARENTED onto whatever block precedes them. After a paragraph that has
+# inline children of its own, they simply become more of that paragraph: measured,
+# `-t text` on a docx printed "body emphasis textMeta Author2026-...Meta Title".
+#
+# The first version of this control used a plain last paragraph, whose text lives in
+# `content` with no inline children to join, so it passed while the leak was live.
+# The formatted paragraph below is what makes it bite.
+#
+# Probed with strings that exist ONLY inside value subtrees. pandoc's epub writer puts
+# a title page into the BODY -- a real heading and author paragraph -- so an author
+# string is not a metadata probe for epub. The language code is.
+if command -v pandoc >/dev/null; then
+  printf '# Heading\n\nbody *emphasis* text\n' >"$TMP/meta.md"
+  pandoc "$TMP/meta.md" -M title='Meta Title' -M author='Meta Author' -o "$TMP/meta.docx" 2>/dev/null
+  pandoc "$TMP/meta.md" -M title='Meta Title' -M author='Meta Author' -M lang=xx-META -o "$TMP/meta.epub" 2>/dev/null
+  # the fixture must CARRY value metadata, or every absence below proves nothing
+  has 'docx fixture carries value metadata' '"kind":"value"' $DUCKEYE -t blocks "$TMP/meta.docx"
+  has 'epub fixture carries its language'   'xx-META'        $DUCKEYE -t blocks "$TMP/meta.epub"
+  for w in text ansi; do
+    no_leak "docx value metadata stays out of -t $w" 'Meta Author' $DUCKEYE -t $w "$TMP/meta.docx"
+    no_leak "epub value metadata stays out of -t $w" 'xx-META'     $DUCKEYE -t $w "$TMP/meta.epub"
+    has     "docx body still renders in -t $w"       'emphasis'    $DUCKEYE -t $w "$TMP/meta.docx"
+  done
+else
+  skipping 'value metadata stays out of renderers' 'needs pandoc'
+fi
 
 has 'fragment inline exports to pandoc' '"t":"Plain"' \
     $DUCKEYE -Q 'a' -t pandoc "$TMP/sel.md"
@@ -1035,6 +1211,23 @@ has 'plain -S miss keeps its message' "no section matching 'nosuchsection'" \
 no_leak 'plain -S miss mentions no selector' 'narrowed' \
     bash -c "$DUCKEYE -S nosuchsection '$TMP/doc.md' 2>&1 >/dev/null"
 
+# SCALE. Selection has to stay near-linear in the size of the document. -Q built its
+# node table with correlated subqueries, and -S/-s passed the whole block list to
+# duck_blocks_slice once per span -- both quadratic. Measured on this 72,000-row file,
+# every case below ran past 120 s while a plain render took 0.6 s; `-s` did so at
+# 18,000 rows. Fixed, each takes 1-1.5 s here. The bound leaves room for a slower CI
+# runner, but not much more: an intermediate fix that DuckDB planned as a nested loop
+# took 12-14 s for `-s` and `-S then -Q`, and a 20 s bound let it pass. `-S 'Section 7'`
+# rather than one exact section, because a single span never paid the per-span cost
+# -- it matches 1,111 headings.
+for n in $(seq 1 8000); do
+  printf '## Section %d\n\npara *%d* text\n\n- a%d\n- b%d\n- c%d\n\n' $n $n $n $n $n
+done >"$TMP/big.md"
+has 'scale: -Q on 72k rows'      'c7999' timeout 20 $DUCKEYE -Q li -t text "$TMP/big.md"
+has 'scale: -S many spans'       'c7999' timeout 20 $DUCKEYE -S 'Section 7' -t text "$TMP/big.md"
+has 'scale: -s one span/heading' 'c7777' timeout 20 $DUCKEYE -s b7777 -t text "$TMP/big.md"
+has 'scale: -S then -Q'          'c7999' timeout 20 $DUCKEYE -S Section -Q li -t text "$TMP/big.md"
+
 # README limits: pseudo-class predicates are not supported (-S is the substring query).
 no 'README limit: :contains unsupported' $DUCKEYE -Q 'heading:contains(Alpha)' "$TMP/doc.md"
 # A standalone inline renders in every writer that can emit a FRAGMENT. -t md joined
@@ -1061,7 +1254,7 @@ ok  'md writer needs no pandoc(1)' bash -c \
     "rm -f '$TMP/nopandoc/pandoc.called'
      PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -t md '$TMP/sel.md' | grep -q 'Guide' \
        && [ ! -e '$TMP/nopandoc/pandoc.called' ]"
-no  'README limit: inline -t ansi still cannot' $DUCKEYE -Q 'a' -t ansi "$TMP/sel.md"
+has 'inline -t ansi renders via repair' 'link' $DUCKEYE -Q 'a' -t ansi "$TMP/sel.md"
 
 echo 'v1 flags'
 # The README embeds its own copy of the option list, and copies drift: it documented
@@ -1136,6 +1329,31 @@ ok  'de alias works'             "$TMP/de" -T "$TMP/doc.md"
 ok  'dep alias works'            "$TMP/dep" -T "$TMP/doc.md"
 ok  'der alias works'            "$TMP/der" "$TMP/test_code.py"
 has 'der raw output'             'function_definition' "$TMP/der" "$TMP/test_code.py"
+# `duckeye --update` must install extensions from the list in the version it just
+# INSTALLED, not the one it was running. It used to call init first, so a release that
+# needed a new extension installed none of it -- how v0.19.0 came to need panduck while
+# `--update` never installed it, leaving the release notes to ask for a manual --init.
+# The fake origin's newer duckeye prints a marker from init(); the marker can only reach
+# the output if init ran from the pulled script. HOME is thrown away because install.sh
+# symlinks into ~/.local/bin and looks for agent config dirs.
+up=$TMP/up; mkdir -p "$up/home"
+git init -q --bare "$up/origin.git"
+git clone -q "$up/origin.git" "$up/seed" 2>/dev/null
+cp "$DUCKEYE" "$up/seed/duckeye"; cp install.sh "$up/seed/install.sh"
+[[ -f skills/duckeye/SKILL.md ]] && { mkdir -p "$up/seed/skills/duckeye"
+  cp skills/duckeye/SKILL.md "$up/seed/skills/duckeye/SKILL.md"; }
+git -C "$up/seed" -c user.email=t@example.com -c user.name=t add -A >/dev/null 2>&1
+git -C "$up/seed" -c user.email=t@example.com -c user.name=t commit -qm seed >/dev/null 2>&1
+git -C "$up/seed" push -q origin HEAD:refs/heads/main >/dev/null 2>&1
+git clone -q -b main "$up/origin.git" "$up/local" 2>/dev/null
+# the NEWER version, which only the pulled script can be
+sed -i 's/^init() {/init() {\n  printf "NEW-INIT-MARKER\\n"/' "$up/seed/duckeye"
+git -C "$up/seed" -c user.email=t@example.com -c user.name=t commit -qam newer >/dev/null 2>&1
+git -C "$up/seed" push -q origin HEAD:refs/heads/main >/dev/null 2>&1
+# json for both lists so init makes two quick INSTALL calls instead of fetching the
+# real set; the assertion is the marker, not init's exit code.
+has 'update inits from the NEW script' 'NEW-INIT-MARKER' \
+    env HOME="$up/home" DUCKEYE_OFFICIAL=json DUCKEYE_COMMUNITY=json "$up/local/duckeye" --update
 ok  'git uri toc'                $DUCKEYE -T 'git://README.md@HEAD'
 has 'git uri section'            'Install' $DUCKEYE -S Install 'git://README.md@HEAD'
 ok  'git uri code ast toc'       $DUCKEYE -T 'git://test.sh@HEAD'

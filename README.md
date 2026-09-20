@@ -218,7 +218,7 @@ does apply to `-S` on an archive, which opens a document.
 **`-t md` does not shell out.** It calls `duck_blocks_to_md`, one of the
 duck_blocks writers, so *writing* markdown needs no `pandoc` binary and takes no
 round trip through a Pandoc AST. `-t pandoc` is the only format that builds one.
-(Reading `.rst`, `.ipynb` and `.man` still runs `pandoc` — see below.)
+(Reading `.rst` and `.man` still runs `pandoc` — see below.)
 
 That matters for more than a dependency. A Pandoc AST has no representation for a
 block that cannot stand at the top level, and `duck_blocks_to_pandoc_ast` drops
@@ -460,7 +460,6 @@ These are measured limits, not guesses:
 |---|---|
 | `-Q 'h2 code'` | refused — an attribute on a *context* node is unsupported, and `h2` is shorthand for one. Use `heading code`. |
 | `-Q 'code, blockquote'` | selector groups are not supported; run the two queries separately |
-| `-Q 'a'` with `-t ansi` | no output — the terminal renderer draws an inline as part of its containing block. Every other writer emits it as a fragment: `-t md` gives `[link](https://example.com)`. |
 | `-Q 'heading:contains(Install)'` | pseudo-class predicates are not supported; `-S Install` is the substring query |
 | a flag after FILE | not parsed — `duckeye -S X doc.md -t md` fails. Flags come before the file. |
 
@@ -713,18 +712,15 @@ anything, or to convert an AST into blocks; three extensions still use it to
 
 | ext | why pandoc still reads it |
 |---|---|
-| `.ipynb` | panduck returns one `raw` block holding the whole markdown cell verbatim, so no headings are extracted and `-T`/`-S` find nothing ([panduck#39](https://github.com/teaguesterling/duckdb_panduck/issues/39)) |
-| `.rst` | reads correctly and headings work, but table cells keep literal inline markup — a `**bold**` cell stays asterisks ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)) |
+| `.rst` | panduck 0.5.1 fixed table cells and block-quote nesting; its reader still drops a one-line footnote's body outright (panduck#67), which is lost text rather than lost formatting |
 | `.man`, `.N` | no extension in the stack reads roff — `panduck_can_read('a.man')` is false — so pandoc is the only route. Whether panduck intends to support it is not recorded either way |
 
 Everything else — `.docx .odt .epub .org .tex .rtf .textile .mediawiki`, plus
 `.md` and `.html` — is read natively, with no pandoc process.
 
-Closing [#38](https://github.com/teaguesterling/duckdb_panduck/issues/38) and
-[#39](https://github.com/teaguesterling/duckdb_panduck/issues/39) leaves roff as
-the only format needing pandoc — so those two issues are most of the remaining
-distance. Whether roff is ever read natively is an open question, not a settled
-one.
+Each of those is one upstream fix away, and `test.sh` carries a guard for each that
+reports `FIXED` when the route can move. That leaves roff as the only format needing
+pandoc; whether panduck ever reads roff is an open question, not a settled one.
 
 ## Formats
 
@@ -736,8 +732,8 @@ one.
 | `.json` | Pandoc AST |
 | `.zim`, `zim://…` | [`zim`](https://github.com/teaguesterling/duckdb_zim) (handles HTML, markdown, and embedded PDFs) |
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | [`sitting_duck`](https://github.com/teaguesterling/duckdb_sitting_duck) (Tree-sitter AST to duck_blocks) |
-| `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` | `panduck` extension — read natively, no `pandoc(1)` |
-| `.rst` `.ipynb` | `pandoc(1)` — panduck reads both, but drops table-cell markup (`.rst`) and notebook cell structure (`.ipynb`) |
+| `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` `.ipynb` | `panduck` extension — read natively, no `pandoc(1)`; `.ipynb` expands its markdown cells through `markdown`, and marks cells with `source_type` rather than pandoc's `cell markdown` class names |
+| `.rst` | `pandoc(1)` — panduck reads it, but drops a one-line footnote's body (panduck#67) |
 | `.man`, `.1`–`.9` | `pandoc(1)` — man page source |
 | anything DuckDB reads, under `-d` | parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, … |
 | standard input | sniffed (magic bytes, doctypes, shebangs), or named with `-f` |
@@ -864,27 +860,27 @@ against the libraries, not duckeye:
   duckeye no longer hits this: `-t pandoc` uses duck_block_utils' builder, whose
   spec 1.2 struct carries `meta` and `blocks` as JSON *type*, so `to_json()` of it
   is the Pandoc document and the macro that used to reassemble one is gone.
-- **`.rst` and `.textile` keep literal table-cell markup.** A `**bold**` cell in
-  `.rst` stays asterisks; a `.textile` cell keeps its alignment markers (`<.`,
-  `>.`, `=.`) and `_.` can promote the wrong row to headers. Measured: panduck
-  reads `|<. a|>. 1|` / `|_. b|=. 2|` as headers `["b","=. 2"]`, where pandoc
-  gives cells `a, 1, b, 2`. Body text and headings are unaffected in both formats
+- **`.textile` table cells kept their alignment modifiers** (`<.`, `>.`, `=.`) and `.rst`
+  cells kept literal inline markup. Both are fixed in panduck v0.5.0, served since
+  2026-09-14 and measured: `.textile` is read by panduck, so the fix reaches users
+  now; `.rst` still goes through pandoc for the reason in the table above
   ([panduck#38](https://github.com/teaguesterling/duckdb_panduck/issues/38)).
-- **YAML frontmatter renders as body text.** `-t text` on a document with
-  frontmatter prints `title: ...` above the first heading. The markdown reader
-  emits it as `kind='block'` with `element_type='metadata'`, where the spec puts
-  document metadata in `kind='value'`. duckeye needs no change: a `.docx`'s
-  `value`-kind metadata is already skipped, measured, so the output corrects itself
-  when the reader sets the right kind. `-T` is unaffected — an outline only lists
-  headings ([markdown#57](https://github.com/teaguesterling/duckdb_markdown/issues/57)).
-- **A loose markdown list is silently converted to a tight one.** Two defects in
-  opposite directions: the reader collapses tight onto loose (`- a\n- b` and
-  `- a\n\n- b` produce identical blocks), and `duck_blocks_to_md` collapses loose
-  back onto tight. They cancel for a tight list, which round-trips correctly *by
-  two errors agreeing*; a loose list loses its blank lines end to end. The
-  distinction is carried by the block shape — `list_item` with content is tight,
-  with a child paragraph is loose — and neither half implements it.
-  `test.sh` guards the reader half and will say `FIXED` when it changes.
+- **YAML frontmatter renders as body prose in `-t text`.** The markdown reader emits
+  it as `kind='block'` with `element_type='metadata'`, where the spec puts document
+  metadata in `kind='value'`
+  ([markdown#57](https://github.com/teaguesterling/duckdb_markdown/issues/57));
+  duck_block_utils spec 1.3 stops `duck_blocks_to_text` rendering it. **duckeye
+  filters it out of `-t text` in the meantime**, so the leak is not user-visible
+  here; the filter is the same predicate a layer out and becomes a no-op once 1.3
+  serves.
+
+  Only that one writer was affected, and the reason is worth knowing — the rule has
+  two halves. **Renderers** (`text`, `ansi`) omit anything that is not body.
+  **Format writers** serialise metadata into the format's own metadata home: `-t md`
+  writes a `---` frontmatter fence, `-t html` a non-rendering
+  `<script type="application/vnd.frontmatter+yaml">` carrier. Those round-trip
+  rather than leak, and duckeye deliberately does **not** filter them — doing so
+  would destroy correct output.
 - **Fragments used to vanish from `-t pandoc`.** A `list_item` outside its list, or
   a bare inline, exported as `blocks: []` — silent content loss, not a formatting
   quirk. Fixed in duck_block_utils spec 1.2 (`6c1c2e5`), which makes a fragment

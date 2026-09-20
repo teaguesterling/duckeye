@@ -5,5 +5,12 @@ site/
 # Operator tools for the duck_block_utils rename/release, kept out of the repo
 # deliberately: one is single-use, the other is run against whatever extension is
 # installed. Ignored so `git add -A` cannot sweep them into an unrelated commit.
-scripts/
+#
+# `scripts/*` rather than `scripts/` because git cannot re-include a path whose
+# PARENT directory is excluded -- with `scripts/`, the negation below is silently
+# inert. check_block_functions.sh is the exception: it is not an operator tool but
+# a check CI runs, and it was swept in here by the directory rule rather than by
+# that decision.
+scripts/*
+!scripts/check_block_functions.sh
 DUCK_BLOCK_RENAME.md

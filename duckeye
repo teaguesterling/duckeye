@@ -21,6 +21,12 @@ set -uo pipefail
 # --init only. Separate from the LOAD lists above because installing needs to
 # know which repository each extension comes from; LOAD does not.
 : "${DUCKEYE_OFFICIAL:=http aws excel}"
+# panduck MUST be here. Formats were routed through it in bf7ac1f without adding it,
+# so `duckeye --init` on a fresh machine installed no panduck and every docx, odt,
+# epub, org, tex, rtf, textile and mediawiki file failed -- along with rst, ipynb and
+# man, whose pandoc ASTs panduck reads. It went unnoticed for five days because the
+# machine it was developed on had panduck installed by hand, and CI, which starts
+# empty and was red the whole time, was not being read.
 : "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck panduck}"
 
 usage() {
@@ -184,7 +190,6 @@ update() {
   local rc=0
   printf 'updating duckdb extensions...\n'
   duckdb -dark-mode -c "UPDATE EXTENSIONS;" 2>&1 || true
-  init || rc=1
 
   local bin_path script_dir repo_root
   bin_path=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")
@@ -223,6 +228,15 @@ update() {
     fi
     rm -rf "$tmp_update"
   fi
+
+  # init runs LAST, from the script on disk NOW -- which is the new one, since both
+  # branches above have already replaced it. It used to run first, from the running
+  # script, so a release that needs a NEW extension installed none of it: the list
+  # consulted was the OLD version's. That is exactly how v0.19.0 shipped needing
+  # panduck while `duckeye --update` alone never installed it, and the release notes
+  # had to tell people to run `duckeye --init` by hand afterwards. A separate process
+  # is the point: this shell has the old list parsed into it and cannot see the new one.
+  "$bin_path" --init || rc=1
   return $rc
 }
 
@@ -304,6 +318,34 @@ rerank_candidates() {
 emit() {
   case $out_fmt in
     ansi)      printf 'duck_blocks_render_ansi(%s)' "$1" ;;
+    # TEXT IS A RENDERER, so it omits what is not body. Unfiltered, duck_blocks_to_text
+    # (duck_block_utils 3.1.0) prints markdown FRONTMATTER as prose -- a single
+    # kind='block' / element_type='metadata' row. It already walks kind='value' metadata
+    # subtrees correctly (docx/odt/epub author, title, dates), so that one row type is
+    # all this removes.
+    #
+    # The filter this replaced removed anything not kind block/inline, and it LEAKED.
+    # Dropping a value row re-parents its kind='inline' children onto the preceding
+    # block, so after a formatted paragraph they became more of that paragraph: `-t text`
+    # printed "body emphasis textMeta Author...Meta Title" on a docx. A filter that
+    # removes a parent must remove its subtree. This one removes only rows measured to be
+    # CHILDLESS -- markdown yaml and toml frontmatter are the only producers of metadata
+    # rows, and none is ever followed by a deeper row -- and test.sh asserts that premise,
+    # so a producer that changes it fails loudly instead of leaking.
+    #
+    # Removing each metadata row WITH its subtree is also correct, and is not slow as a
+    # rule -- only as the correlated-subquery SQL tried here, which did not finish
+    # within 120s on a 20k-row document. duck_blocks_body does the same natively:
+    # duck_block_utils measured 0.094s on 20,001 rows on the 1.4 build (their
+    # measurement; not installable here yet). So where duckeye ever consumes ROWS
+    # itself, reach for duck_blocks_body rather than avoiding subtree removal.
+    #
+    # ONLY the renderers get this. -t md and -t html are FORMAT WRITERS that serialise
+    # metadata into the format's own home (a --- fence, a non-rendering <script>
+    # carrier); filtering them would destroy correct output. -t blocks keeps everything;
+    # ansi and pandoc already omit it. At duck_block_utils 3.3.0 unfiltered to_text
+    # handles frontmatter too, and this filter should be DELETED rather than swapped for
+    # duck_blocks_body. The guard on duck_blocks_to_text reports FIXED when that lands.
     text)      printf 'duck_blocks_to_text(%s)' "$1" ;;
     html)      printf 'duck_blocks_to_html(%s)' "$1" ;;
     blocks)    printf 'to_json(%s)' "$1" ;;
@@ -1224,19 +1266,32 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     # contract applies -- reorder would sort on the colliding keys and group every
     # page marker ahead of every paragraph. duck_blocks_concat is the raw append
     # and does not touch order at all.
+    # The page_break marker is LEVEL 1, a top-level marker the way hr is. It used to be
+    # NULL, and duck_blocks_validate rejected every PDF duckeye produced: the spec
+    # allows no NULL level and no per-type exception. Nothing depended on the NULL --
+    # no other code here mentions page_break or tests for a NULL level.
+    #
+    # duck_blocks_repair runs after the fold for the ORDER, which merge cannot fix.
+    # Each page prepends a marker numbered 0 onto a parsed page that also starts at 0,
+    # so the two collide INSIDE one page; merge repairs order between the lists it
+    # joins and never sees that. Measured before: duplicate element_order on every
+    # PDF (two pages: 0 and 59, each shared with the next block). After: dense from 0,
+    # valid. Text, -P and -T output are byte-identical, and panduck's page_break
+    # contract on two_pages.pdf still agrees.
+    #
     # The page_break attributes map must never be empty: an untyped MAP{} infers
     # MAP("NULL","NULL") rather than MAP(VARCHAR,VARCHAR), and the ::duck_block cast
     # would then fail on every page. Non-emptiness is what makes the inference right
     # -- there is no cast on the map itself, only on the struct around it.
     doc="WITH __pg AS (
            SELECT page, list_prepend(
-                    {'kind':'block','element_type':'page_break','content':NULL,'level':NULL,
+                    {'kind':'block','element_type':'page_break','content':NULL,'level':1,
                      'encoding':'text','attributes':MAP{'page_number': page::VARCHAR},
                      'element_order':0}::duck_block,
                     parse_markdown_to_duck_blocks(coalesce(text, ''))) AS pb
            FROM read_pdf('$src'${p_args:+, $p_args}))
-         SELECT reduce(list(pb ORDER BY page),
-                       lambda acc, x: duck_blocks_merge(acc, x)) AS blocks
+         SELECT duck_blocks_repair(reduce(list(pb ORDER BY page),
+                       lambda acc, x: duck_blocks_merge(acc, x))) AS blocks
          FROM __pg" ;;
   *.json|.pandoc_ast)              # Pandoc AST
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;
@@ -1285,8 +1340,8 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(
 CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
       doc="SELECT flatten(list(blocks)) AS blocks FROM ast_to_blocks_list('$src')"
     fi ;;
-  *.docx|*.odt|*.epub|*.org|*.tex|*.rtf|*.textile|*.mediawiki)
-    # panduck reads all ten natively: no pandoc(1) process, no AST round-trip through
+  *.docx|*.odt|*.epub|*.org|*.tex|*.rtf|*.textile|*.mediawiki|*.ipynb)
+    # panduck reads these natively: no pandoc(1) process, no AST round-trip through
     # a pipe, and no dependency on duck_block_utils' deprecated pandoc_ast_to_blocks.
     # The readers return duck_block rows directly, so they compose with the same
     # pipeline every other format uses.
@@ -1300,15 +1355,44 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
       *.rtf)       doc="SELECT list(b) AS blocks FROM read_rtf_blocks('$src') b" ;;
       *.textile)   doc="SELECT list(b) AS blocks FROM read_textile_blocks('$src') b" ;;
       *.mediawiki) doc="SELECT list(b) AS blocks FROM read_mediawiki_blocks('$src') b" ;;
+      # A notebook's markdown cells are parsed by the MARKDOWN extension, through
+      # panduck's expand_embedded, so markdown joins the load list for this format
+      # alone. With markdown absent panduck raises a named error naming the install
+      # command, which is why nothing here probes for it first -- a probe would turn
+      # a loud, correct failure into a quiet one.
+      #
+      # Measured on served 0.5.1 (cfbdfb9) against the pandoc(1) route it replaces, on
+      # a notebook carrying a table, list, quote, code cell and execution output:
+      # -t text and -T are BYTE-IDENTICAL, with nothing on stderr and no lambda
+      # deprecation warning on stdout. That warning (panduck#65) is what kept .ipynb
+      # on pandoc until 0.5.1; on DuckDB 2.0 the same lambdas were a Binder Error.
+      #
+      # The STRUCTURED writers differ, and that is the cost of the move, recorded
+      # rather than discovered later:
+      #   -t md     loses the `jupyter:` kernelspec frontmatter pandoc emitted;
+      #             panduck keeps the kernel language as a value block instead
+      #   -t html   loses pandoc's cell class names (`cell markdown`, `cell code`,
+      #             `output stream stdout`); the divs remain, unclassed
+      #   -t blocks carries panduck's own attributes -- source_type=markdown/code/
+      #             stream on the divs -- rather than pandoc's div classes, and a
+      #             table has no pandoc_ast attribute
+      # Prose, headings, lists, quotes, code and outputs are all present either way.
+      *.ipynb)     exts="panduck markdown"
+                   doc="SELECT list(b) AS blocks FROM read_panduck_doc('$src', expand_embedded := true) b" ;;
     esac ;;
-  *.rst|*.ipynb|*.man|*.[1-9])
-    # Three formats stay on pandoc(1), each for a measured reason:
+  *.rst|*.man|*.[1-9])
+    # Two formats stay on pandoc(1), each for a measured reason. .ipynb left this list
+    # when panduck 0.5.1 fixed the lambda warning (#65) -- it now reads through panduck
+    # above -- and test.sh still carries a guard for .rst that reports FIXED when that
+    # route can move too.
     #
-    #   .ipynb  panduck's reader emits a markdown cell as ONE raw block holding the
-    #           cell source verbatim, so no headings are extracted: -T finds nothing
-    #           and -S finds no sections. pandoc parses cell markdown into blocks.
-    #   .rst    panduck's reader keeps literal inline markup inside table cells --
-    #           a **plum** cell renders as **plum** rather than emphasised text.
+    #   .rst    0.5.1 (cfbdfb9) fixed the table-cell markup AND the block-quote nesting
+    #           that used to keep this here. One defect remains, measured on that served
+    #           build: a one-line footnote's BODY is dropped and its reference stays in
+    #           the paragraph as literal `[1]_`; pandoc keeps a note. Lost text, not
+    #           formatting (panduck#67, fix building upstream).
+    #           Move only when test.sh's footnote guard reports FIXED, and re-run list
+    #           parity first: #68 also changes which lines a list item owns.
     #   .man    panduck_can_read('a.man') is false and no extension in the stack
     #           reads roff, so pandoc is the only route. WHY panduck does not read
     #           it is NOT RECORDED -- an earlier version of this comment asserted
@@ -1323,7 +1407,6 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
     # sections, defeat inference.
     case "$key" in
       *.rst)         from=rst ;;
-      *.ipynb)       from=ipynb ;;
       *.man|*.[1-9]) from=man ;;
     esac
     via_pandoc=1
@@ -1399,8 +1482,22 @@ css_alias() {
 # document the selector runs against. Before this, -Q rewrote the document first and
 # -S then searched the selector's leftovers for a heading, which is why `-S Install
 # -Q code` reported "no section matching 'Install'" while plain `-S Install` worked.
+#
+# Both apply their spans to ROWS -- one per block, keeping its position -- rather than
+# handing doc.blocks to duck_blocks_slice once per span. That passed the whole list on
+# every call, ~60 ms each at 18,000 rows, so cost grew as spans x document: `-s`, with a
+# span per heading, ran past 120 s on a file a plain render reads in 0.2 s. Measured
+# identical output against the slice form before switching.
+#
+# Rows find their span by carrying it forward in a window, NOT by an ASOF join, which
+# is the obvious tool and was tried first. Inside these CTEs DuckDB estimates the span
+# list at 2 rows, under asof_loop_join_threshold (64), so it plans the ASOF as a nested
+# loop plus arg_max: 288 million joined rows for `-s` at 72,000 rows, 12 s. The same
+# query over temp tables, with real row counts, took 0.2 s -- a prototype that
+# benchmarks tables will not show this. The window form has no estimate to get wrong.
 section_span_doc() {
   printf '%s\n' "WITH doc AS MATERIALIZED ($1),
+     r AS (SELECT generate_subscripts(blocks, 1) AS i, unnest(blocks) AS b FROM doc),
      h AS (SELECT e.level AS lvl, e.title AS title, e.id AS id, e.element_order AS ord
            FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
      sec AS (SELECT h1.ord AS s, coalesce(min(h2.ord) - 1, 2147483647) AS e
@@ -1409,19 +1506,28 @@ section_span_doc() {
              GROUP BY h1.ord),
      -- A substring can match both a chapter and a section inside it. The chapter
      -- already carries the child, so keeping both printed it twice; drop any span
-     -- another span contains.
-     top AS (SELECT s, e FROM sec a
-             WHERE NOT EXISTS (SELECT 1 FROM sec b
-                               WHERE b.s <= a.s AND b.e >= a.e AND (b.s, b.e) <> (a.s, a.e)))
-     SELECT duck_blocks_reorder(flatten(list(duck_blocks_slice(doc.blocks, top.s, top.e)
-                                             ORDER BY top.s))) AS blocks
-     FROM doc, top HAVING count(*) > 0"
+     -- another span contains. Heading spans either nest or are disjoint, so in start
+     -- order a span is contained exactly when an earlier one reaches as far: a running
+     -- max, not a pairwise comparison.
+     top AS (SELECT s, e FROM sec
+             QUALIFY coalesce(max(e) OVER (ORDER BY s, e DESC
+                              ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), -1) < e),
+     -- What survives is disjoint, so a row can only be inside the latest span that
+     -- starts at or before it: carry each span forward from its first row.
+     t AS (SELECT i, b, s FROM (
+             SELECT r.i, r.b, last_value(top.s IGNORE NULLS) OVER w AS s,
+                    last_value(top.e IGNORE NULLS) OVER w AS e
+             FROM r LEFT JOIN top ON top.s = r.b.element_order
+             WINDOW w AS (ORDER BY r.b.element_order, r.i ROWS UNBOUNDED PRECEDING))
+           WHERE b.element_order <= e)
+     SELECT duck_blocks_reorder(list(b ORDER BY s, i)) AS blocks FROM t HAVING count(*) > 0"
 }
 
 # Spans here stop at the next heading of *any* level, so a hit reports the innermost
 # section that holds it rather than nesting parent inside child.
 search_span_doc() {
   printf '%s\n' "WITH doc AS MATERIALIZED ($1),
+     r AS (SELECT generate_subscripts(blocks, 1) AS i, unnest(blocks) AS b FROM doc),
      h AS (SELECT e.element_order AS ord
            FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
      span AS (SELECT ord AS s, coalesce(lead(ord) OVER (ORDER BY ord) - 1, 2147483647) AS e
@@ -1431,12 +1537,18 @@ search_span_doc() {
               SELECT 0 AS s, e FROM (SELECT coalesce((SELECT min(ord) - 1 FROM h),
                                                      2147483647)::INTEGER AS e)
               WHERE e >= 0),
-     hit AS (SELECT s, e FROM doc, span
-             WHERE duck_blocks_to_match_text(duck_blocks_slice(doc.blocks, span.s, span.e))
-                   ILIKE '%$pat%' ESCAPE '\\')
-     SELECT duck_blocks_reorder(flatten(list(duck_blocks_slice(doc.blocks, hit.s, hit.e)
-                                             ORDER BY hit.s))) AS blocks
-     FROM doc, hit HAVING count(*) > 0"
+     -- The spans tile the document, so each row belongs to the latest one starting at
+     -- or before it, and a span's text is one GROUP BY away.
+     t AS (SELECT i, b, s FROM (
+             SELECT r.i, r.b, last_value(span.s IGNORE NULLS) OVER w AS s,
+                    last_value(span.e IGNORE NULLS) OVER w AS e
+             FROM r LEFT JOIN span ON span.s = r.b.element_order
+             WINDOW w AS (ORDER BY r.b.element_order, r.i ROWS UNBOUNDED PRECEDING))
+           WHERE b.element_order <= e),
+     hit AS (SELECT s FROM t GROUP BY s
+             HAVING duck_blocks_to_match_text(list(b ORDER BY i)) ILIKE '%$pat%' ESCAPE '\\')
+     SELECT duck_blocks_reorder(list(b ORDER BY s, i)) AS blocks
+     FROM t WHERE s IN (SELECT s FROM hit) HAVING count(*) > 0"
 }
 
 # Narrow BEFORE selecting. mode is left alone: it still names what the user asked for,
@@ -1497,6 +1609,20 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
     CREATE OR REPLACE TEMP TABLE __qn AS
       SELECT 1 AS node_id, 0 AS ord, (SELECT min(lvl) FROM __qb) - 1 AS lvl, 'document' AS ty, '' AS nm
       UNION ALL SELECT ord + 1, ord, lvl, ty, nm FROM __qb;
+    -- Each node's parent (the last node before it at a lower level) and the end of its
+    -- span (the first node after it at the same level or above), from one windowed pass
+    -- per distinct level. These were correlated subqueries per node -- quadratic, 13 s
+    -- of the node table's build at 18,000 rows. Levels are few, so this stays linear.
+    CREATE OR REPLACE TEMP TABLE __qe AS
+      WITH lv AS (SELECT DISTINCT lvl AS l FROM __qn),
+           x AS (SELECT n.node_id, n.ord, n.lvl, lv.l,
+                   max(CASE WHEN n.lvl < lv.l THEN n.node_id END) OVER (PARTITION BY lv.l ORDER BY n.ord
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS parent_id,
+                   min(CASE WHEN n.lvl <= lv.l THEN n.ord END) OVER (PARTITION BY lv.l ORDER BY n.ord
+                       ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) AS nxt
+                 FROM __qn n, lv)
+      SELECT node_id, ord, lvl, parent_id, coalesce(nxt, (SELECT max(ord) + 1 FROM __qn)) AS e
+      FROM x WHERE l = lvl;
     CREATE OR REPLACE TEMP TABLE __qa AS
       SELECT a.node_id::BIGINT AS node_id, a.ty::VARCHAR AS type,
              (SELECT semantic_type FROM read_ast('$qself') WHERE false) AS semantic_type,
@@ -1507,19 +1633,20 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
              NULL::VARCHAR[] AS modifiers, NULL::VARCHAR AS annotations,
              '$src'::VARCHAR AS file_path, 'duck_block' AS language,
              NULL::UINTEGER AS start_line, NULL::UINTEGER AS end_line,
-             (SELECT max(p.node_id) FROM __qn p WHERE p.ord < a.ord AND p.lvl < a.lvl)::BIGINT AS parent_id,
+             e.parent_id::BIGINT AS parent_id,
              a.lvl::UINTEGER AS depth,
-             (row_number() OVER (PARTITION BY (SELECT max(p.node_id) FROM __qn p
-                WHERE p.ord < a.ord AND p.lvl < a.lvl) ORDER BY a.ord) - 1)::INTEGER AS sibling_index,
-             (SELECT count(*) FROM __qn c WHERE c.ord > a.ord AND c.lvl = a.lvl + 1
-                AND c.ord < coalesce((SELECT min(e.ord) FROM __qn e
-                     WHERE e.ord > a.ord AND e.lvl <= a.lvl), 2147483647))::UINTEGER AS children_count,
-             (SELECT count(*) FROM __qn d WHERE d.ord > a.ord
-                AND d.ord < coalesce((SELECT min(e.ord) FROM __qn e
-                     WHERE e.ord > a.ord AND e.lvl <= a.lvl), 2147483647))::UINTEGER AS descendant_count,
+             (row_number() OVER (PARTITION BY e.parent_id ORDER BY a.ord) - 1)::INTEGER AS sibling_index,
+             -- Children are the nodes one level down whose parent this is. The old
+             -- in-span count agreed with this on every node measured, including
+             -- level skips: a node two levels down names this parent but is no child.
+             coalesce(c.n, 0)::UINTEGER AS children_count,
+             (e.e - a.ord - 1)::UINTEGER AS descendant_count,
              (SELECT scope FROM read_ast('$qself') WHERE false) AS scope,
              a.nm::VARCHAR AS peek
-      FROM __qn a;
+      FROM __qn a JOIN __qe e ON e.node_id = a.node_id
+      LEFT JOIN (SELECT k.parent_id, count(*) AS n FROM __qe k JOIN __qe p ON p.node_id = k.parent_id
+                 WHERE k.lvl = p.lvl + 1 GROUP BY k.parent_id) c ON c.parent_id = a.node_id
+      ORDER BY a.node_id;
     CREATE OR REPLACE TEMP TABLE __qat AS
       SELECT ord + 1 AS node_id, unnest(map_keys(atr)) AS key, unnest(map_values(atr)) AS value
       FROM __qb WHERE atr IS NOT NULL AND len(map_keys(atr)) > 0;
@@ -1568,25 +1695,32 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
   # the attributes when the ancestors are known, repair covers what is left. Nothing
   # is double-wrapped and nothing is lost either way.
   #
-  # Gate any use of the new functions on the artifact, not the spec version:
-  #   SELECT count(*) FROM duckdb_functions() WHERE function_name='duck_blocks_repair'
-  # Measured 2026-09-10 on installed 9599650 / spec 6.5: absent.
+  # WIRED: duck_blocks_repair now wraps the selection below, ON TOP of the ancestor
+  # chain -- it arrived with duck_block_utils 6c1c2e5 (spec 1.2). Measured against a
+  # copy without it, before switching: every output the ancestor chain supplies is
+  # unchanged (an ordered list keeps start="3" in md and html, docx lists, -S with -Q,
+  # code, headings, the no-match error). What repair adds is the case the ancestor
+  # chain deliberately leaves alone: a bare INLINE match. It gets an implicit `plain`
+  # parent, so `-Q a -t ansi` renders "link (https://example.com)" instead of failing.
   #
-  # That probe is why the relabel above cost nothing here. A gate written against the
-  # version would have had to learn that 1.2 is NEWER than 6.5 -- a comparison that
-  # reads backwards and that no arithmetic gets right without being told.
-  doc="SELECT list(k.blk ORDER BY k.ord) AS blocks FROM __qb k
-       WHERE EXISTS (
-         SELECT 1 FROM __qs s JOIN __qn n ON n.node_id = s.node_id
-         WHERE k.ord >= n.ord
-           AND k.ord < coalesce((SELECT min(e.ord) FROM __qn e
-                 WHERE e.ord > n.ord AND e.lvl <= n.lvl), 2147483647))
-          OR EXISTS (
-         SELECT 1 FROM __qs s JOIN __qn n ON n.node_id = s.node_id
-         JOIN __qb m ON m.ord = n.ord
-         WHERE m.knd = 'block' AND k.ord < n.ord AND k.lvl < n.lvl
-           AND n.ord < coalesce((SELECT min(e.ord) FROM __qn e
-                 WHERE e.ord > k.ord AND e.lvl <= k.lvl), 2147483647))"
+  # Both halves come from __qe, not from EXISTS over the matches -- that was quadratic
+  # in the same way the node table was. Subtrees are a running-max cover (the technique
+  # panduck measured in their #76): walking in document order, a row is inside some
+  # match while the furthest span end seen so far lies beyond it. Ancestors walk the
+  # parent chain, which is the same set the old level-and-span test described.
+  doc="WITH RECURSIVE
+         m AS (SELECT e.ord, e.e FROM __qs s JOIN __qe e ON e.node_id = s.node_id),
+         cover AS (SELECT n.ord, max(m.e) OVER (ORDER BY n.ord ROWS UNBOUNDED PRECEDING) AS c
+                   FROM __qn n LEFT JOIN m ON m.ord = n.ord),
+         anc(node_id) AS (SELECT e.parent_id FROM m JOIN __qb b ON b.ord = m.ord
+                            JOIN __qe e ON e.ord = m.ord
+                          WHERE b.knd = 'block' AND e.parent_id IS NOT NULL
+                          UNION
+                          SELECT e.parent_id FROM anc JOIN __qe e ON e.node_id = anc.node_id
+                          WHERE e.parent_id IS NOT NULL)
+       SELECT duck_blocks_repair(list(k.blk ORDER BY k.ord)) AS blocks FROM __qb k
+       WHERE k.ord IN (SELECT ord FROM cover WHERE c > ord)
+          OR k.ord + 1 IN (SELECT node_id FROM anc)"
 fi
 
 cte="WITH doc AS MATERIALIZED ($doc)"
@@ -1769,10 +1903,7 @@ if ! grep -q '[^[:space:]]' "$out"; then
              # matching" there is simply false.
              [[ -n ${selector:-} ]] &&
                die "no output for '$selector' in $f
-       Either nothing matched, or every match was an inline type (bold, italic,
-       text, link), which renders only inside its containing block. Block-kind
-       matches carry their container, so -Q li works; -Q strong cannot, because
-       its container is the whole surrounding paragraph -- select that instead." ;;
+       Nothing matched, or what matched has no text to render." ;;
   esac
 fi
 

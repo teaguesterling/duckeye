@@ -257,6 +257,8 @@ compile_astcss() {
   local query=$1 dialect=${2:-auto}
   local socket=${DUCKEYE_LLM_SOCKET:-/tmp/woollama.sock}
   local endpoint=${DUCKEYE_LLM_ENDPOINT:-}
+  local model=${DUCKEYE_LLM_MODEL:-}
+  local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
   local payload resp compiled
 
   if [[ -n ${DUCKEYE_MOCK_ASTCSS:-} ]]; then
@@ -264,18 +266,47 @@ compile_astcss() {
     return 0
   fi
 
-  payload=$(printf '{"model":"qwen3.5-0.8b-astcss","prompt":"<|im_start|>system\\nYou are an ASTCSS compiler for sitting_duck. Convert the user natural language request into a single CSS selector for source code ASTs. Emit only the selector.\\nLanguage: %s\\n<|im_end|>\\n<|im_start|>user\\n%s\\n<|im_end|>\\n<|im_start|>assistant\\n","stream":false}' "$dialect" "$query")
-
-  if [[ -S "$socket" ]]; then
-    resp=$(curl -s --unix-socket "$socket" -H "Content-Type: application/json" -d "$payload" "http://localhost/api/generate" 2>/dev/null || true)
-  elif [[ -n "$endpoint" ]]; then
-    resp=$(curl -s -H "Content-Type: application/json" -d "$payload" "$endpoint/api/generate" 2>/dev/null || true)
-  elif curl -s --connect-timeout 0.3 "http://localhost:11434/api/tags" >/dev/null 2>&1; then
-    resp=$(curl -s -H "Content-Type: application/json" -d "$payload" "http://localhost:11434/api/generate" 2>/dev/null || true)
+  # Auto-discover Tiiny API key if present and no key is explicitly set
+  if [[ -z $key && -d "$HOME/.local/share/tiiny-pcsvr/auth_data" ]]; then
+    local key_file
+    key_file=$(ls -t "$HOME/.local/share/tiiny-pcsvr/auth_data/"*.json 2>/dev/null | head -n 1)
+    if [[ -n $key_file && -f $key_file ]]; then
+      key=$(sed -n 's/.*"auth_key":[[:space:]]*"\([^"]*\)".*/\1/p' "$key_file" 2>/dev/null || true)
+    fi
   fi
 
-  if [[ -n "$resp" ]]; then
-    compiled=$(printf '%s' "$resp" | sed -n 's/.*"response":"\([^"]*\)".*/\1/p' | tr -d '\n\r' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s/\\n//g')
+  # Auto-detect Tiiny device if no endpoint or socket is active
+  if [[ ! -S "$socket" && -z "$endpoint" ]]; then
+    if ! curl -s --connect-timeout 0.2 "http://localhost:11434/api/tags" >/dev/null 2>&1; then
+      if [[ -n $key ]] && curl -s --connect-timeout 0.3 "http://192.168.4.144/v1/models" -H "Authorization: Bearer $key" >/dev/null 2>&1; then
+        endpoint="http://192.168.4.144"
+      fi
+    fi
+  fi
+
+  local auth_hdr=()
+  [[ -n $key ]] && auth_hdr=(-H "Authorization: Bearer $key")
+
+  if [[ $endpoint == *"/v1"* || $endpoint == *"192.168.4.144"* ]]; then
+    local ep_clean="${endpoint%/}"
+    [[ $ep_clean != */v1 ]] && ep_clean+="/v1"
+    payload=$(printf '{"model":"%s","messages":[{"role":"system","content":"You are an ASTCSS compiler for sitting_duck. Convert the user natural language request into a single CSS selector for source code ASTs or document blocks (e.g. .func#name, .class#name, h2, p, li, blockquote). Emit ONLY the bare CSS selector, with no quotes, markdown, or explanation.\\nLanguage: %s"},{"role":"user","content":"%s"}],"max_tokens":50,"chat_template_kwargs":{"enable_thinking":false}}' "${model:-default}" "$dialect" "$query")
+    resp=$(curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "$ep_clean/chat/completions" 2>/dev/null || true)
+    if [[ -n $resp ]]; then
+      compiled=$(printf '%s' "$resp" | sed -n 's/.*"content":[[:space:]]*"\([^"]*\)".*/\1/p' | tr -d '\n\r' | sed -E 's/^[[:space:]`]+|[[:space:]`]+$//g; s/\\n//g')
+    fi
+  else
+    payload=$(printf '{"model":"%s","prompt":"<|im_start|>system\\nYou are an ASTCSS compiler for sitting_duck. Convert the user natural language request into a single CSS selector for source code ASTs. Emit only the selector.\\nLanguage: %s\\n<|im_end|>\\n<|im_start|>user\\n%s\\n<|im_end|>\\n<|im_start|>assistant\\n","stream":false}' "${model:-qwen3.5-0.8b-astcss}" "$dialect" "$query")
+    if [[ -S "$socket" ]]; then
+      resp=$(curl -s --unix-socket "$socket" -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "http://localhost/api/generate" 2>/dev/null || true)
+    elif [[ -n "$endpoint" ]]; then
+      resp=$(curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "$endpoint/api/generate" 2>/dev/null || true)
+    elif curl -s --connect-timeout 0.3 "http://localhost:11434/api/tags" >/dev/null 2>&1; then
+      resp=$(curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "http://localhost:11434/api/generate" 2>/dev/null || true)
+    fi
+    if [[ -n "$resp" ]]; then
+      compiled=$(printf '%s' "$resp" | sed -n 's/.*"response":"\([^"]*\)".*/\1/p' | tr -d '\n\r' | sed -E 's/^[[:space:]`]+|[[:space:]`]+$//g; s/\\n//g')
+    fi
   fi
 
   if [[ -z "$compiled" ]]; then
@@ -288,6 +319,8 @@ rerank_candidates() {
   local query=$1 threshold=$2 topk=$3 cand_file=$4
   local socket=${DUCKEYE_RERANK_SOCKET:-/tmp/reranker.sock}
   local endpoint=${DUCKEYE_RERANK_ENDPOINT:-}
+  local model=${DUCKEYE_RERANK_MODEL:-}
+  local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
   local payload_file=$tmp/rerank_payload.json resp_file=$tmp/scored.json
 
   if [[ -n ${DUCKEYE_MOCK_RERANK:-} ]]; then
@@ -295,16 +328,60 @@ rerank_candidates() {
     return 0
   fi
 
-  printf '{"model":"Qwen3-Reranker-0.6B","query":"%s","documents":' "$(q "$query")" >"$payload_file"
-  cat "$cand_file" >>"$payload_file"
-  printf '}' >>"$payload_file"
+  # Auto-discover Tiiny API key if present and no key is explicitly set
+  if [[ -z $key && -d "$HOME/.local/share/tiiny-pcsvr/auth_data" ]]; then
+    local key_file
+    key_file=$(ls -t "$HOME/.local/share/tiiny-pcsvr/auth_data/"*.json 2>/dev/null | head -n 1)
+    if [[ -n $key_file && -f $key_file ]]; then
+      key=$(sed -n 's/.*"auth_key":[[:space:]]*"\([^"]*\)".*/\1/p' "$key_file" 2>/dev/null || true)
+    fi
+  fi
 
-  if [[ -S "$socket" ]]; then
-    curl -s --unix-socket "$socket" -H "Content-Type: application/json" --data-binary @"$payload_file" "http://localhost/v1/rerank" >"$resp_file" 2>/dev/null || true
-  elif [[ -n "$endpoint" ]]; then
-    curl -s -H "Content-Type: application/json" --data-binary @"$payload_file" "$endpoint/v1/rerank" >"$resp_file" 2>/dev/null || true
-  elif curl -s --connect-timeout 0.3 "http://localhost:8001/v1/rerank" >/dev/null 2>&1; then
-    curl -s -H "Content-Type: application/json" --data-binary @"$payload_file" "http://localhost:8001/v1/rerank" >"$resp_file" 2>/dev/null || true
+  # Auto-detect Tiiny device if no endpoint or socket is active
+  if [[ ! -S "$socket" && -z "$endpoint" ]]; then
+    if ! curl -s --connect-timeout 0.2 "http://localhost:8001/health" >/dev/null 2>&1; then
+      if [[ -n $key ]] && curl -s --connect-timeout 0.3 "http://192.168.4.144/v1/models" -H "Authorization: Bearer $key" >/dev/null 2>&1; then
+        endpoint="http://192.168.4.144"
+      fi
+    fi
+  fi
+
+  local auth_hdr=()
+  [[ -n $key ]] && auth_hdr=(-H "Authorization: Bearer $key")
+
+  if [[ $endpoint == *"/v1"* || $endpoint == *"192.168.4.144"* ]]; then
+    local ep_clean="${endpoint%/}"
+    [[ $ep_clean != */v1 ]] && ep_clean+="/v1"
+
+    duckdb -dark-mode -noheader -list -c "
+      SELECT to_json(struct_pack(model := '${model:-Qwen/Qwen3-Embedding-0.6B}', input := list_prepend('$(q "$query")', (SELECT list(text) FROM read_json('$cand_file', columns={'text': 'VARCHAR'})))))
+    " >"$payload_file" 2>/dev/null || true
+
+    curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "$ep_clean/embeddings" >"$tmp/embed_resp.json" 2>/dev/null || true
+
+    if [[ -s "$tmp/embed_resp.json" ]] && grep -q '"embedding"' "$tmp/embed_resp.json"; then
+      duckdb -dark-mode -noheader -list -c "
+        WITH raw AS (
+          SELECT data FROM read_json('$tmp/embed_resp.json', columns={'data': 'STRUCT(embedding DOUBLE[])[]'})
+        ),
+        q AS (SELECT data[1].embedding AS q_vec, data[2:] AS docs FROM raw),
+        un AS (SELECT q_vec, unnest(docs) AS doc, (generate_subscripts(docs, 1) - 1)::INTEGER AS idx FROM q)
+        SELECT to_json(list(struct_pack(index := idx, relevance_score := round(list_cosine_similarity(q_vec, doc.embedding), 4))))
+        FROM un;
+      " >"$resp_file" 2>/dev/null || true
+    fi
+  else
+    printf '{"model":"%s","query":"%s","documents":' "${model:-Qwen3-Reranker-0.6B}" "$(q "$query")" >"$payload_file"
+    cat "$cand_file" >>"$payload_file"
+    printf '}' >>"$payload_file"
+
+    if [[ -S "$socket" ]]; then
+      curl -s --unix-socket "$socket" -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "http://localhost/v1/rerank" >"$resp_file" 2>/dev/null || true
+    elif [[ -n "$endpoint" ]]; then
+      curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "$endpoint/v1/rerank" >"$resp_file" 2>/dev/null || true
+    elif curl -s --connect-timeout 0.3 "http://localhost:8001/v1/rerank" >/dev/null 2>&1; then
+      curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "http://localhost:8001/v1/rerank" >"$resp_file" 2>/dev/null || true
+    fi
   fi
 
   if [[ ! -s "$resp_file" ]]; then

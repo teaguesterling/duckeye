@@ -29,11 +29,17 @@ $ duckeye -S "Photosynthesis" wikipedia.zim
 Use `zim://<archive>/<article>` syntax to treat a single article as a document:
 
 ```console
-# Outline a single article's headings
+# Outline a single article's headings (or machine-readable JSON: -T --json)
 $ duckeye -T 'zim://wikipedia.zim/Photosynthesis'
 
 # Extract a specific section within an article
-$ duckeye -S "Light reactions" 'zim://wikipedia.zim/Photosynthesis'
+$ duckeye -S "Process" 'zim://wikipedia.zim/Photosynthesis'
+
+# Structural CSS selector slicing on article HTML blocks (e.g. paragraphs, headings, lists)
+$ duckeye -S "Process" -Q 'p' -t md 'zim://wikipedia.zim/Photosynthesis'
+
+# Semantic re-ranking inside an article using local cross-encoders or Tiiny Pocket
+$ duckeye -R "chemical energy conversion in chloroplasts" --top-k 3 'zim://wikipedia.zim/Photosynthesis'
 
 # Search text within one article
 $ duckeye -s "chlorophyll" 'zim://wikipedia.zim/Photosynthesis'

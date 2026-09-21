@@ -11,6 +11,11 @@ AI models typically consume excessive context tokens when dumping full files int
 3. **Keyword Focusing**: `duckeye -s "deprecated" CHANGELOG.md` retrieves only the affected paragraphs.
 4. **Token-Saving Conversions**: `duckeye -S "Usage" -t text manual.pdf` converts formatted PDF sections to plain text without ANSI escape sequences.
 5. **Fast Data Profiling**: `duckeye -Z large_table.parquet` gives the agent instant statistics, null percentages, and distributions without full table dumps.
+6. **Natural Language Discovery (`-F`)**: Translates intent descriptions directly into ASTCSS or document CSS selectors.
+7. **Semantic Re-Ranking (`-R`)**: Evaluates candidate AST nodes or sections with a local cross-encoder (`Qwen3-Reranker-0.6B`) or Tiiny Pocket (`Qwen3-Embedding-0.6B`).
+8. **Machine-Readable JSON (`--json`)**: Emits structured JSON arrays with scores and line numbers for downstream agent tool pipelines.
+
+For the comprehensive progressive extraction guide, see [`AGENTS.md`](../AGENTS.md).
 
 ---
 

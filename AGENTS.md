@@ -216,6 +216,9 @@ Agents running in autonomous workflows can configure local daemon transport via 
 | Variable | Default | Purpose |
 |---|---|---|
 | `DUCKEYE_LLM_SOCKET` | `/tmp/woollama.sock` | Unix domain socket for ASTCSS compiler daemon |
-| `DUCKEYE_LLM_ENDPOINT` | `http://localhost:11434` | HTTP endpoint URL for Ollama / LLM server |
+| `DUCKEYE_LLM_ENDPOINT` | `http://localhost:11434` | HTTP endpoint URL for Ollama, Tiiny Pocket (`http://192.168.4.144`), or OpenAI servers |
+| `DUCKEYE_LLM_MODEL` | `qwen3.5-0.8b-astcss` / `default` | Model identifier for natural language discovery compilation (`-F`) |
+| `DUCKEYE_LLM_KEY` | `""` (auto-detected for Tiiny) | Bearer token for authenticated LLM and embedding endpoints |
 | `DUCKEYE_RERANK_SOCKET` | `/tmp/reranker.sock` | Unix domain socket for cross-encoder reranker daemon |
-| `DUCKEYE_RERANK_ENDPOINT` | `http://localhost:8001` | HTTP endpoint URL for Text Embeddings Inference / Reranker server |
+| `DUCKEYE_RERANK_ENDPOINT` | `http://localhost:8001` | HTTP endpoint for cross-encoder (`/v1/rerank`) or embedding similarity (`/v1/embeddings`) |
+| `DUCKEYE_RERANK_MODEL` | `Qwen3-Reranker-0.6B` / `Qwen/Qwen3-Embedding-0.6B` | Model identifier for cross-encoder scoring or dense vector embeddings |

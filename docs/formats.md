@@ -10,15 +10,16 @@
 | **HTML / XML** | `.htm`, `.html`, `.xhtml`, `.xml` | `webbed` DuckDB extension | High-speed DOM parsing, tag sanitization, structured layout |
 | **PDF** | `.pdf` | `pdf` DuckDB extension | Text layer extraction, OCR, heading hierarchy, page markers, page range slicing (`-P`) |
 | **Pandoc AST** | `.json` | `duck_block_utils` | Native conversion of Pandoc JSON AST into terminal blocks |
-| **Word Documents** | `.docx` | `pandoc` | Headings, styled text, tables, embedded lists |
-| **OpenDocument** | `.odt` | `pandoc` | Headings, document hierarchy, formatting |
-| **EPUB Books** | `.epub` | `pandoc` | Chapter outlines, table of contents, book text |
-| **LaTeX** | `.tex`, `.latex` | `pandoc` | Mathematical equations, sections, cross-references |
-| **reStructuredText**| `.rst` | `pandoc` | Python docstrings, Sphinx manuals, section hierarchies |
-| **Org-Mode** | `.org` | `pandoc` | Emacs outlines, task lists, code snippets |
-| **Jupyter Notebook**| `.ipynb` | `panduck` | Markdown cells and executed code cells |
-| **MediaWiki** | `.mediawiki` | `pandoc` | Wikipedia markup, templates, section headers |
-| **Man Pages** | `.man`, `.1`–`.9` | `pandoc` | Unix roff manual pages with direct section jumping |
+| **Word Documents** | `.docx` | `panduck` (native) | Headings, styled text, tables, embedded lists |
+| **OpenDocument** | `.odt` | `panduck` (native) | Headings, document hierarchy, formatting |
+| **EPUB Books** | `.epub` | `panduck` (native) | Chapter outlines, table of contents, book text |
+| **LaTeX** | `.tex`, `.latex` | `panduck` (native) | Mathematical equations, sections, cross-references |
+| **reStructuredText**| `.rst` | `pandoc` | Python docstrings, Sphinx manuals, section hierarchies (via pandoc(1)) |
+| **Org-Mode** | `.org` | `panduck` (native) | Emacs outlines, task lists, code snippets |
+| **Jupyter Notebook**| `.ipynb` | `panduck` (native) | Markdown cells and executed code cells |
+| **MediaWiki** | `.mediawiki` | `panduck` (native) | Wikipedia markup, templates, section headers |
+| **RTF / Textile** | `.rtf`, `.textile` | `panduck` (native) | Rich text & Textile document structures |
+| **Man Pages** | `.man`, `.1`–`.9` | `pandoc` | Unix roff manual pages with direct section jumping (via pandoc(1)) |
 | **Source Code ASTs**| `.py`, `.rs`, `.go`, `.c`, `.cpp`, `.js`, `.ts`, `.java`, `.kt`, `.cs`, `.swift`, `.rb`, `.php`, `.lua`, `.r`, `.sh`, `.zig`, `.dart`, `.sql`, `.gql`, `.tf`, `.css` (27 languages) | `sitting_duck` DuckDB extension | Tree-sitter AST parsing, class/function hierarchies, definition outlines, doc conversion |
 | **openZIM Archives**| `.zim`, `zim://...` | `zim` DuckDB extension | Multi-gigabyte offline archives, Xapian search, embedded PDFs |
 

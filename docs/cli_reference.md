@@ -59,9 +59,12 @@ usage: duckeye [OPTION]... [FILE]
 | `DUCKEYE_COMMUNITY` | `duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck panduck` | Community extensions installed by `--init` |
 | `DUCKEYE_THEME` | `auto` (`dark` / `light`) | Overrides terminal color scheme (default: probes OSC 11 with 50ms timeout) |
 | `DUCKEYE_LLM_SOCKET` | `/tmp/woollama.sock` | Unix domain socket path for ASTCSS compiler daemon |
-| `DUCKEYE_LLM_ENDPOINT` | `http://localhost:11434` | HTTP endpoint URL for ASTCSS compiler daemon |
+| `DUCKEYE_LLM_ENDPOINT` | `http://localhost:11434` | HTTP endpoint URL for Ollama, Tiiny (`http://192.168.4.144`), or OpenAI server |
+| `DUCKEYE_LLM_MODEL` | `qwen3.5-0.8b-astcss` / `default` | Model identifier for natural language discovery compilation (`-F`) |
+| `DUCKEYE_LLM_KEY` | `""` (auto-detected for Tiiny) | Bearer token for authenticated LLM and embedding endpoints |
 | `DUCKEYE_RERANK_SOCKET` | `/tmp/reranker.sock` | Unix domain socket path for cross-encoder reranker daemon |
-| `DUCKEYE_RERANK_ENDPOINT` | `http://localhost:8001` | HTTP endpoint URL for cross-encoder reranker daemon |
+| `DUCKEYE_RERANK_ENDPOINT` | `http://localhost:8001` | HTTP endpoint for cross-encoder (`/v1/rerank`) or embedding similarity (`/v1/embeddings`) |
+| `DUCKEYE_RERANK_MODEL` | `Qwen3-Reranker-0.6B` / `Qwen/Qwen3-Embedding-0.6B` | Model identifier for cross-encoder scoring or dense vector embeddings |
 | `COLUMNS` | `auto` (from `tput cols`) | Overrides terminal column width for table rendering and profiling |
 | `NO_COLOR` | `""` | Standard convention: when set, disables ANSI color output |
 

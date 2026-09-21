@@ -163,20 +163,34 @@ EOF
 printf -- '- a\n- b\n' >"$TMP/tight.md"
 printf -- '- a\n\n- b\n' >"$TMP/loose.md"
 
-# A notebook whose markdown cell holds two headings, and an .rst block quote -- the
-# two shapes that still keep .ipynb and .rst on pandoc(1). See the guards below.
+# A notebook whose markdown cell holds two headings, and the .rst shapes that keep
+# .rst on pandoc(1). See the guards below.
 cat >"$TMP/nb.ipynb" <<'EOF'
 {"cells":[{"cell_type":"markdown","metadata":{},"source":["# Top\n","\n","## Sub\n"]}],"metadata":{},"nbformat":4,"nbformat_minor":5}
 EOF
-cat >"$TMP/quote.rst" <<'EOF'
-Title
-=====
+# FOUR section titles, two of them numbered. The count is the assertion: pandoc reads
+# four headings here, panduck reads two, because a title whose text begins `1. ` is
+# classified as an enumerator before anything looks at the underline below it.
+cat >"$TMP/numbered.rst" <<'EOF'
+Document Navigation
+===================
 
-Before the quote.
+Intro paragraph.
 
-   A quoted warning.
+1. Table of Contents
+--------------------
 
-After the quote.
+Body under the numbered section.
+
+2. Section Extraction
+---------------------
+
+More body text.
+
+Plain Heading
+-------------
+
+Final body.
 EOF
 cat >"$TMP/footnote.rst" <<'EOF'
 Title
@@ -1065,15 +1079,28 @@ ok 'ipynb never shells out to pandoc' bash -c \
 has     'ipynb cells carry source_type'        'source_type' $DUCKEYE -t blocks "$TMP/nb.ipynb"
 no_leak 'ipynb no longer carries pandoc cell classes' 'cell markdown' \
         $DUCKEYE -t blocks "$TMP/nb.ipynb"
-# panduck 0.5.1 fixed .rst block-quote nesting (#64), so that guard is gone. ONE defect
-# still keeps .rst on pandoc(1): the reader DROPS a one-line footnote's body
-# (`.. [1] The body.`) and leaves the reference in the paragraph as literal `[1]_`,
-# where pandoc keeps it as a note. That is lost text, not formatting (panduck#67, fix
-# building upstream). When this flips, re-run rst list parity BEFORE switching the
-# route rather than trusting the guard alone: panduck#68 also reworks list ownership
-# (an item owns lines at its TEXT column, the marker's width).
+# Both defects these guards used to watch are FIXED on the served build and their
+# guards are deleted: .rst block quotes (panduck#64, in 0.5.1) and the one-line
+# footnote body (panduck#67, in 0.5.3). .rst still cannot move, and what found the
+# reason was not a guard -- it was re-running PARITY against the pandoc route once
+# #67 flipped. That is the lesson worth keeping: ONE guard reporting FIXED is not
+# parity. It measures the defect you already knew about.
+#
+# What the re-run found, both filed by panduck after reproducing them:
+#   #84  a numbered section title parses as an ordered list (plus an invented hr),
+#        so headings VANISH: -T drops them and -S cannot match them. FATAL.
+#        Cause: the scanner classifies the line as an enumerator from its own text,
+#        before anything looks ahead to the underline.
+#   #85  footnote/citation reference markers stay literal in prose (`[1]_`), and the
+#        bodies #67 recovered land as loose paragraphs. Nothing is lost; the
+#        reference-to-body LINK is. Fidelity, not data loss.
+# BOTH must clear, and parity must be re-run again, before .rst moves.
 cause=panduck
-broken 'rst reader keeps a one-line footnote body' 'one line footnote body' bash -c \
+broken 'rst numbered section title is a heading' 'HEADINGS=4' bash -c \
+  "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck;
+     SELECT 'HEADINGS=' || len(duck_blocks_headings_structs(list(b)))
+     FROM read_rst_blocks('$TMP/numbered.rst') b;\" 2>/dev/null"
+emits 'rst footnote reference stays literal in prose' '[1]_' bash -c \
   "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT string_agg(coalesce(content,''), ' ') FROM read_rst_blocks('$TMP/footnote.rst');\" 2>/dev/null"
 cause=unattributed
 

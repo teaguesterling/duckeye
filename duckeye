@@ -1460,16 +1460,26 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
   *.rst|*.man|*.[1-9])
     # Two formats stay on pandoc(1), each for a measured reason. .ipynb left this list
     # when panduck 0.5.1 fixed the lambda warning (#65) -- it now reads through panduck
-    # above -- and test.sh still carries a guard for .rst that reports FIXED when that
+    # above -- and test.sh carries two guards for .rst that report FIXED when that
     # route can move too.
     #
-    #   .rst    0.5.1 (cfbdfb9) fixed the table-cell markup AND the block-quote nesting
-    #           that used to keep this here. One defect remains, measured on that served
-    #           build: a one-line footnote's BODY is dropped and its reference stays in
-    #           the paragraph as literal `[1]_`; pandoc keeps a note. Lost text, not
-    #           formatting (panduck#67, fix building upstream).
-    #           Move only when test.sh's footnote guard reports FIXED, and re-run list
-    #           parity first: #68 also changes which lines a list item owns.
+    #   .rst    panduck has fixed three defects that each used to hold this route:
+    #           table-cell markup and block-quote nesting (0.5.1), and the one-line
+    #           footnote body (#67, served in 0.5.3). Re-running PARITY against the
+    #           pandoc route once #67 flipped -- rather than trusting the guard that
+    #           flipped -- found two more, both measured on served 4dc6985 and filed
+    #           by panduck after reproducing them:
+    #             - a numbered section title (`1. Title` over an underline) parses as
+    #               an ORDERED LIST plus an invented hr, so its heading disappears:
+    #               on a four-title file panduck reports two headings where pandoc
+    #               reports four. -T would silently drop them and -S could not match
+    #               them. Lost structure, and fatal on its own (panduck#84)
+    #             - footnote and citation reference markers stay literal in the prose
+    #               (`a note [1]_`), with the bodies as loose paragraphs; pandoc
+    #               strips the marker and attaches a note (panduck#85)
+    #           Move only when BOTH guards report FIXED -- and re-run parity again
+    #           rather than trusting them, since that is what caught these. #68 also
+    #           changes which lines a list item owns, so list parity moves too.
     #   .man    panduck_can_read('a.man') is false and no extension in the stack
     #           reads roff, so pandoc is the only route. WHY panduck does not read
     #           it is NOT RECORDED -- an earlier version of this comment asserted

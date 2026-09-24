@@ -168,30 +168,6 @@ printf -- '- a\n\n- b\n' >"$TMP/loose.md"
 cat >"$TMP/nb.ipynb" <<'EOF'
 {"cells":[{"cell_type":"markdown","metadata":{},"source":["# Top\n","\n","## Sub\n"]}],"metadata":{},"nbformat":4,"nbformat_minor":5}
 EOF
-# FOUR section titles, two of them numbered. The count is the assertion: pandoc reads
-# four headings here, panduck reads two, because a title whose text begins `1. ` is
-# classified as an enumerator before anything looks at the underline below it.
-cat >"$TMP/numbered.rst" <<'EOF'
-Document Navigation
-===================
-
-Intro paragraph.
-
-1. Table of Contents
---------------------
-
-Body under the numbered section.
-
-2. Section Extraction
----------------------
-
-More body text.
-
-Plain Heading
--------------
-
-Final body.
-EOF
 cat >"$TMP/footnote.rst" <<'EOF'
 Title
 =====
@@ -1079,27 +1055,28 @@ ok 'ipynb never shells out to pandoc' bash -c \
 has     'ipynb cells carry source_type'        'source_type' $DUCKEYE -t blocks "$TMP/nb.ipynb"
 no_leak 'ipynb no longer carries pandoc cell classes' 'cell markdown' \
         $DUCKEYE -t blocks "$TMP/nb.ipynb"
-# Both defects these guards used to watch are FIXED on the served build and their
-# guards are deleted: .rst block quotes (panduck#64, in 0.5.1) and the one-line
-# footnote body (panduck#67, in 0.5.3). .rst still cannot move, and what found the
-# reason was not a guard -- it was re-running PARITY against the pandoc route once
-# #67 flipped. That is the lesson worth keeping: ONE guard reporting FIXED is not
-# parity. It measures the defect you already knew about.
+# FOUR defects have now been fixed and their guards deleted, each measured on a served
+# build before removal: .rst block quotes (panduck#64, 0.5.1), the one-line footnote
+# body (#67, 0.5.3), a numbered section title parsing as an ordered list (#84, 0.5.5)
+# and headings carrying no id (#85 part 2a, 0.5.5). ONE defect still holds .rst on
+# pandoc(1), and it is the guard below.
 #
-# What the re-run found, both filed by panduck after reproducing them:
-#   #84  a numbered section title parses as an ordered list (plus an invented hr),
-#        so headings VANISH: -T drops them and -S cannot match them. FATAL.
-#        Cause: the scanner classifies the line as an enumerator from its own text,
-#        before anything looks ahead to the underline.
-#   #85  footnote/citation reference markers stay literal in prose (`[1]_`), and the
-#        bodies #67 recovered land as loose paragraphs. Nothing is lost; the
-#        reference-to-body LINK is. Fidelity, not data loss.
-# BOTH must clear, and parity must be re-run again, before .rst moves.
+# Each of those was found the same way and it is the lesson worth keeping: a guard
+# reporting FIXED is not parity. It measures the defect you already knew about. #84 and
+# the missing ids were found by re-running PARITY against the pandoc route after #67
+# flipped, not by any guard -- and #84 was fatal (headings vanished from -T and -S)
+# while the guard that had just gone green said nothing about it. Re-run parity again
+# before moving the route, not just these guards.
+#
+#   #85 part 1  footnote/citation reference markers stay literal in prose (`[1]_`) and
+#               the bodies land as loose document-level paragraphs with no id. Nothing
+#               is lost; the reference-to-body LINK is. The ruled shape (duck_block_utils,
+#               2026-09-22) is an inline ANCHOR carrying attributes['id'] plus a body
+#               subtree at document level with the matching id, so what the reader emits
+#               today is a third shape -- neither the ruled one nor the rejected nesting.
+#               panduck lands #97 first (the pandoc reader's Note/Cite arms do not
+#               recurse), then the RST reader.
 cause=panduck
-broken 'rst numbered section title is a heading' 'HEADINGS=4' bash -c \
-  "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck;
-     SELECT 'HEADINGS=' || len(duck_blocks_headings_structs(list(b)))
-     FROM read_rst_blocks('$TMP/numbered.rst') b;\" 2>/dev/null"
 emits 'rst footnote reference stays literal in prose' '[1]_' bash -c \
   "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT string_agg(coalesce(content,''), ' ') FROM read_rst_blocks('$TMP/footnote.rst');\" 2>/dev/null"
 cause=unattributed

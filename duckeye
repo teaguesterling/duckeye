@@ -1463,23 +1463,30 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
     # above -- and test.sh carries two guards for .rst that report FIXED when that
     # route can move too.
     #
-    #   .rst    panduck has fixed three defects that each used to hold this route:
-    #           table-cell markup and block-quote nesting (0.5.1), and the one-line
-    #           footnote body (#67, served in 0.5.3). Re-running PARITY against the
-    #           pandoc route once #67 flipped -- rather than trusting the guard that
-    #           flipped -- found two more, both measured on served 4dc6985 and filed
-    #           by panduck after reproducing them:
-    #             - a numbered section title (`1. Title` over an underline) parses as
-    #               an ORDERED LIST plus an invented hr, so its heading disappears:
-    #               on a four-title file panduck reports two headings where pandoc
-    #               reports four. -T would silently drop them and -S could not match
-    #               them. Lost structure, and fatal on its own (panduck#84)
-    #             - footnote and citation reference markers stay literal in the prose
-    #               (`a note [1]_`), with the bodies as loose paragraphs; pandoc
-    #               strips the marker and attaches a note (panduck#85)
-    #           Move only when BOTH guards report FIXED -- and re-run parity again
-    #           rather than trusting them, since that is what caught these. #68 also
-    #           changes which lines a list item owns, so list parity moves too.
+    #   .rst    panduck has now fixed five defects that each held this route: table-cell
+    #           markup and block-quote nesting (0.5.1), the one-line footnote body
+    #           (#67, 0.5.3), and -- in 0.5.5 -- a numbered section title parsing as an
+    #           ordered list instead of a heading (#84) and headings carrying no id
+    #           (#85 part 2a). Verified on the served build rather than the changelog:
+    #           a four-title fixture now reports four headings, matching pandoc, and
+    #           duck_blocks_to_html emits `<h2 id="table-of-contents">`.
+    #
+    #           ONE defect remains, and it is why this stays on pandoc(1): footnote and
+    #           citation reference markers are still literal in the prose (`a note
+    #           [1]_`), with bodies as loose document-level paragraphs carrying no id,
+    #           where pandoc strips the marker and attaches a note (panduck#85 part 1).
+    #           The ruled shape is an inline anchor with attributes['id'] plus a
+    #           document-level body subtree sharing it; today's output is a third shape,
+    #           neither ruled nor rejected. panduck lands #97 first (the pandoc reader's
+    #           Note/Cite arms do not recurse), then the RST reader.
+    #
+    #           Move only when that guard reports FIXED -- and RE-RUN PARITY rather than
+    #           trusting it, because parity is what caught #84 and the missing ids while
+    #           a freshly-green guard said nothing. #68 also changed which lines a list
+    #           item owns, so list parity moves too. One correction worth keeping from
+    #           panduck: an `hr` after a BULLETED line is CORRECT -- docutils emits
+    #           bullet_list + transition there and panduck matches it; pandoc is the
+    #           outlier, so do not file that as a defect.
     #   .man    panduck_can_read('a.man') is false and no extension in the stack
     #           reads roff, so pandoc is the only route. WHY panduck does not read
     #           it is NOT RECORDED -- an earlier version of this comment asserted

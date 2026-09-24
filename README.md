@@ -712,7 +712,7 @@ anything, or to convert an AST into blocks; three extensions still use it to
 
 | ext | why pandoc still reads it |
 |---|---|
-| `.rst` | panduck has fixed table cells, block-quote nesting and the one-line footnote body (served in 0.5.3). Two defects still hold the route, found by re-running parity against the pandoc route rather than by the guard that flipped: a numbered section title (`1. Title` over an underline) parses as an ordered list, so its heading disappears from `-T` and `-S` (panduck#84), and footnote/citation reference markers stay literal in the prose (panduck#85) |
+| `.rst` | panduck has fixed table cells, block-quote nesting, the one-line footnote body, numbered section titles and heading ids (the last two in 0.5.5). One defect still holds the route: footnote and citation reference markers stay literal in the prose (`a note [1]_`) with bodies as loose paragraphs carrying no id, where pandoc attaches a note (panduck#85 part 1) |
 | `.man`, `.N` | no extension in the stack reads roff — `panduck_can_read('a.man')` is false — so pandoc is the only route. Whether panduck intends to support it is not recorded either way |
 
 Everything else — `.docx .odt .epub .org .tex .rtf .textile .mediawiki`, plus
@@ -733,7 +733,7 @@ pandoc; whether panduck ever reads roff is an open question, not a settled one.
 | `.zim`, `zim://…` | [`zim`](https://github.com/teaguesterling/duckdb_zim) (handles HTML, markdown, and embedded PDFs) |
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | [`sitting_duck`](https://github.com/teaguesterling/duckdb_sitting_duck) (Tree-sitter AST to duck_blocks) |
 | `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` `.ipynb` | `panduck` extension — read natively, no `pandoc(1)`; `.ipynb` expands its markdown cells through `markdown`, and marks cells with `source_type` rather than pandoc's `cell markdown` class names |
-| `.rst` | `pandoc(1)` — panduck reads it, but loses a numbered section title's heading (panduck#84) and leaves footnote markers literal (panduck#85) |
+| `.rst` | `pandoc(1)` — panduck reads it, but leaves footnote markers literal with unlinked bodies (panduck#85 part 1) |
 | `.man`, `.1`–`.9` | `pandoc(1)` — man page source |
 | anything DuckDB reads, under `-d` | parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, … |
 | standard input | sniffed (magic bytes, doctypes, shebangs), or named with `-f` |

@@ -33,31 +33,66 @@ TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0; skip=0
 
-ok()   { local n=$1; shift
-  if "$@" >/dev/null 2>&1 </dev/null; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+# Extensions the community registry does not build for the DuckDB running this suite.
+# PROBED rather than hard-coded, so the assertions return by themselves when the
+# registry publishes. On DuckDB 1.5.6: sitting_duck (-Q and every code AST) and toml.
+unavailable=
+for _e in sitting_duck toml; do
+  duckdb -c "LOAD $_e;" >/dev/null 2>&1 || unavailable="$unavailable $_e"
+done
+if [[ -n $unavailable ]]; then
+  printf 'note: unavailable on %s:%s\n' "$(duckdb -version | awk '{print $1}')" "$unavailable"
+  printf '      assertions that fail ONLY for that reason are skipped, not passed\n'
+fi
+# missing_ext OUTPUT -> names the unavailable extension the output blames, else fails.
+# Matched on DuckDB's own IO Error text so a real failure mentioning the extension still
+# fails. An assertion that could not run is a skip; scoring it a pass is vacuous green.
+missing_ext() {
+  local e
+  for e in $unavailable; do
+    case $1 in *"$e.duckdb_extension\" not found"*|*"Extension \"$e\" not found"*) printf '%s' "$e"; return 0 ;; esac
+  done
+  return 1
+}
+# stdout and stderr captured SEPARATELY: classification needs stderr, while has/no_leak
+# must keep asserting on stdout alone (see the header note on not merging them).
+_run() { _out=$("$@" 2>"$TMP/.stderr" </dev/null); _rc=$?; _err=$(cat "$TMP/.stderr"); }
+
+ok()   { local n=$1 m; shift
+  _run "$@"
+  if (( _rc == 0 )); then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable"
   else fail=$((fail+1)); printf '  FAIL %s\n' "$n"; fi; }
 # has NAME PATTERN CMD... -- PATTERN must appear on STDOUT. stderr is discarded, not
 # merged: see the header note.
-has()  { local n=$1 pat=$2; shift 2
-  local out; out=$("$@" 2>/dev/null </dev/null)
-  if [[ $out == *"$pat"* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+has()  { local n=$1 pat=$2 m; shift 2
+  _run "$@"
+  if [[ $_out == *"$pat"* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable"
   else fail=$((fail+1)); printf '  FAIL %s (no %q on stdout)\n' "$n" "$pat"; fi; }
-no_out() { local n=$1; shift
-  local out; out=$("$@" 2>/dev/null </dev/null)
-  if [[ -z ${out//[[:space:]]/} ]]; then fail=$((fail+1)); printf '  FAIL %s (empty stdout)\n' "$n"
-  else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
+no_out() { local n=$1 m; shift
+  _run "$@"
+  if [[ -n ${_out//[[:space:]]/} ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable"
+  else fail=$((fail+1)); printf '  FAIL %s (empty stdout)\n' "$n"; fi; }
 # no_leak NAME PATTERN CMD... -- PATTERN must NOT appear on stdout. Asserting an
 # absence is the only way to catch a flag that is silently ignored, since output that
-# is too BROAD still contains everything a `has` looks for.
-no_leak() { local n=$1 pat=$2; shift 2
-  local out; out=$("$@" 2>/dev/null </dev/null | sed $'s/\x1b\\[[0-9;]*m//g')
+# is too BROAD still contains everything a `has` looks for. An absence proves nothing
+# when the command never ran, so a missing extension skips rather than passes.
+no_leak() { local n=$1 pat=$2 m; shift 2
+  _run "$@"
+  local out; out=$(printf '%s' "$_out" | sed $'s/\x1b\\[[0-9;]*m//g')
   if [[ $out == *"$pat"* ]]; then fail=$((fail+1)); printf '  FAIL %s (leaked %q)\n' "$n" "$pat"
+  elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable (absence would be vacuous)"
   else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
 skipping() { skip=$((skip+1)); printf '  skip %s (%s)\n' "$1" "$2"; }
 
-# no NAME CMD... -- CMD must exit non-zero.
-no() { local n=$1; shift
-  if "$@" >/dev/null 2>&1 </dev/null; then fail=$((fail+1)); printf '  FAIL %s (expected nonzero)\n' "$n"
+# no NAME CMD... -- CMD must exit non-zero. A missing extension also exits non-zero, so
+# that case SKIPS: passing there would credit duckeye for an artifact that is absent.
+no() { local n=$1 m; shift
+  _run "$@"
+  if (( _rc == 0 )); then fail=$((fail+1)); printf '  FAIL %s (expected nonzero)\n' "$n"
+  elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable (exit status would be vacuous)"
   else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
 # bash runs command_not_found_handle in a SUBSHELL, so a counter incremented here is
 # discarded -- measured. The marker file is what survives, and the summary turns it

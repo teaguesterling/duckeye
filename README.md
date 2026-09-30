@@ -237,11 +237,21 @@ where the AST loses content, which is why `-t md` no longer goes through one.
 ## Querying documents by CSS selector (`-Q`) — **experimental**
 
 > **Experimental.** `-Q` on *documents* is newer than `-Q` on code and the syntax
-> may still change. The selector engine is currently hard-coded inside duckeye
-> rather than provided by an extension; the intent is to move it into
-> `sitting_duck` once the shape settles
+> may still change. duckeye projects the document's blocks into a node table and
+> `sitting_duck` evaluates the selector against it (`ast_select_from`); what is
+> hard-coded here is the projection, not the selector engine, and the intent is to
+> move the projection upstream once the shape settles
 > ([sitting_duck#117](https://github.com/teaguesterling/sitting_duck/issues/117)).
 > `-Q` on source files is **not** experimental and is unaffected.
+>
+> **`-Q` needs the `sitting_duck` extension — including on documents.** On DuckDB
+> **1.5.6** the community registry does not yet build it, so `-Q` and every
+> code-AST path fail there with DuckDB's `Extension "sitting_duck" not found`
+> until [community-extensions#2855](https://github.com/duckdb/community-extensions/pull/2855)
+> lands. `duckeye --init` reports this as `UNPUBLISHED` rather than failing, and
+> names the capability you lose. `.toml` reading is unavailable on 1.5.6 for the
+> same reason. Everything else — rendering, `-T`, `-S`, `-s`, and every writer —
+> is unaffected: measured byte-identical between 1.5.5 and 1.5.6.
 
 The same `-Q` that addresses a syntax tree also addresses a document, because
 every reader produces the same `duck_block` vocabulary. Reading, querying and

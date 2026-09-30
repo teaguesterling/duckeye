@@ -28,6 +28,22 @@ set -uo pipefail
 # machine it was developed on had panduck installed by hand, and CI, which starts
 # empty and was red the whole time, was not being read.
 : "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck panduck}"
+# Extensions the community registry does not currently BUILD for every DuckDB version.
+# `--init` reports a 404 for these and keeps going, because an artifact that does not
+# exist is not a mistake of ours. A 404 for anything NOT listed here still fails, so a
+# misspelled or newly added name cannot hide behind this -- that is the whole point of
+# an allowlist rather than a blanket `|| true`. Each entry carries a reason and an exit:
+#   sitting_duck  the registry still pins 1.11.0 (b8c06a8), which predates the v1.5.6
+#                 compat work, so it cannot build for that line. Bump is open and CLEAN
+#                 as duckdb/community-extensions#2855 (1.15.2). Remove this entry when
+#                 `--init` reports NOW AVAILABLE. Without it, `-Q` and every code-AST
+#                 path fail with DuckDB's own "Extension not found".
+#   toml          the descriptor points at third-party vergenzt/duckdb-toml at 263bc5a
+#                 (v0.1.0) with no bump open, so nobody in this fleet can publish it for
+#                 a new DuckDB line. Without it, `.toml` does not read.
+# Measured on DuckDB 1.5.6 (2026-09-29): both 404 at community-extensions.duckdb.org,
+# while the other eleven duckeye needs serve normally.
+: "${DUCKEYE_UNPUBLISHED:=sitting_duck toml}"
 
 usage() {
   cat <<'EOF'
@@ -172,7 +188,23 @@ init() {
     for e in $( [[ $repo == core ]] && echo "$DUCKEYE_OFFICIAL" || echo "$DUCKEYE_COMMUNITY" ); do
       printf '%-20s %-10s ' "$e" "$repo"
       if err=$(duckdb -s "INSTALL $e FROM $repo;" 2>&1); then
-        echo installed
+        # An allowlisted extension that installs again means the allowance has EXPIRED.
+        # Say so loudly, in the same spirit as test.sh's guards reporting FIXED: a
+        # tolerance nothing revisits is how a workaround outlives its reason.
+        if [[ " $DUCKEYE_UNPUBLISHED " == *" $e "* ]]; then
+          echo 'installed — NOW AVAILABLE (drop it from DUCKEYE_UNPUBLISHED)'
+        else
+          echo installed
+        fi
+      elif [[ " $DUCKEYE_UNPUBLISHED " == *" $e "* && $err == *"HTTP 404"* ]]; then
+        # Not built for THIS DuckDB version. Environmental, so it does not fail --init,
+        # but it is printed every time rather than swallowed, and the capability it
+        # carries is named so the consequence is not a surprise later.
+        case $e in
+          sitting_duck) echo 'UNPUBLISHED for this DuckDB version — -Q and code ASTs will not work' ;;
+          toml)         echo 'UNPUBLISHED for this DuckDB version — .toml will not read' ;;
+          *)            echo 'UNPUBLISHED for this DuckDB version' ;;
+        esac
       else
         echo FAILED; printf '%s\n' "$err" | sed 's/^/    /' >&2; rc=1
       fi

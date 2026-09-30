@@ -71,24 +71,82 @@ command_not_found_handle() {
 # ok NAME CMD...        — must exit 0
 # no NAME CMD...        — must exit non-zero
 # has NAME PATTERN CMD... — must exit 0 and its output must match PATTERN
-ok() { local n=$1; shift
-  if "$@" >/dev/null 2>&1 </dev/null; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+# Extensions the community registry does not build for the DuckDB running this suite.
+# PROBED, never hard-coded: the set is whatever fails to LOAD right now, so when the
+# registry publishes, every assertion below comes back on its own with no edit here.
+# On DuckDB 1.5.6 that is sitting_duck (-Q and all code ASTs) and toml.
+unavailable=
+for _e in sitting_duck toml; do
+  duckdb -c "LOAD $_e;" >/dev/null 2>&1 || unavailable="$unavailable $_e"
+done
+if [[ -n $unavailable ]]; then
+  printf 'note: unavailable on %s:%s\n' "$(duckdb -version | awk '{print $1}')" "$unavailable"
+  printf '      assertions that fail ONLY for that reason are skipped, not passed\n'
+fi
+
+# missing_ext OUTPUT -> prints the unavailable extension the output blames, else fails.
+# Matched on DuckDB's own IO Error text, so a real failure that merely mentions the
+# extension still counts as a failure. An assertion that cannot run is a SKIP: counting
+# it as a pass is the vacuous-green trap, and counting it as a failure blames duckeye
+# for an artifact that does not exist.
+missing_ext() {
+  local e
+  for e in $unavailable; do
+    case $1 in *"$e.duckdb_extension\" not found"*|*"Extension \"$e\" not found"*) printf '%s' "$e"; return 0 ;; esac
+  done
+  return 1
+}
+# Run CMD capturing stdout and stderr separately: classification needs stderr, while
+# has/no_leak must keep asserting on stdout alone.
+_run() { _out=$("$@" 2>"$TMP/.stderr" </dev/null); _rc=$?; _err=$(cat "$TMP/.stderr"); }
+
+ok() { local n=$1 m; shift
+  _run "$@"
+  if (( _rc == 0 )); then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable"
   else fail=$((fail+1)); printf '  FAIL %s\n' "$n"; fi; }
-no() { local n=$1; shift
-  if "$@" >/dev/null 2>&1 </dev/null; then fail=$((fail+1)); printf '  FAIL %s (expected nonzero)\n' "$n"
+# `no` asserts a NON-ZERO exit, so a missing extension would make it pass for the wrong
+# reason -- the exact vacuous green this helper exists to catch elsewhere.
+no() { local n=$1 m; shift
+  _run "$@"
+  if (( _rc == 0 )); then fail=$((fail+1)); printf '  FAIL %s (expected nonzero)\n' "$n"
+  elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable (exit status would be vacuous)"
   else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
-has() { local n=$1 pat=$2; shift 2
-  local out; out=$("$@" 2>/dev/null </dev/null | strip)
+has() { local n=$1 pat=$2 m; shift 2
+  _run "$@"
+  local out; out=$(printf '%s' "$_out" | strip)
   if [[ $out == *"$pat"* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable"
   else fail=$((fail+1)); printf '  FAIL %s (no match for %q)\n' "$n" "$pat"; fi; }
 skipping() { skip=$((skip+1)); printf '  skip %s (%s)\n' "$1" "$2"; }
+# gated EXT HELPER NAME ARGS... -- run HELPER only while EXT is available, else skip.
+#
+# For the assertions missing_ext CANNOT classify, because the assertion's own shape
+# destroys the evidence. Two cases, both measured on DuckDB 1.5.6:
+#   - a nested redirect: `bash -c "duckeye ... 2>/dev/null | python3 ..."` throws away
+#     the very stderr carrying DuckDB's "Extension not found".
+#   - duckeye's own message replacing it: with -Q yielding nothing, `-R` reports
+#     "no candidates available to rank" and never mentions the extension.
+# The second case is the dangerous one. `no_leak 'rank threshold drops low scores'`
+# asserts an ABSENCE, and empty output satisfies it, so it scored green while the
+# feature under test never ran. Gating is explicit here rather than widening
+# missing_ext, because a looser match would start swallowing real failures -- the
+# matcher's ability to still say FAIL is the property worth protecting.
+gated() { local e=$1 h=$2 n=$3; shift 3
+  if [[ " $unavailable " == *" $e "* ]]; then
+    skipping "$n" "$e unavailable (the assertion's own construction hides the error)"
+  else "$h" "$n" "$@"; fi; }
 
 # no_leak NAME PATTERN CMD... — output must NOT contain PATTERN. The negative half
 # of an assertion pair: "the prose is present" and "the raw AST is absent" are
 # different claims, and output can satisfy the first while failing the second.
-no_leak() { local n=$1 pat=$2; shift 2
-  local out; out=$("$@" 2>/dev/null </dev/null | strip)
+# An ABSENT pattern proves nothing if the command never ran, so a missing extension
+# skips here too rather than scoring a pass.
+no_leak() { local n=$1 pat=$2 m; shift 2
+  _run "$@"
+  local out; out=$(printf '%s' "$_out" | strip)
   if [[ $out == *"$pat"* ]]; then fail=$((fail+1)); printf '  FAIL %s (leaked %q)\n' "$n" "$pat"
+  elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable (absence would be vacuous)"
   else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
 
 # Guards for defects that live UPSTREAM, in duck_block_utils' renderer and
@@ -724,7 +782,7 @@ has 'python toc'       'execute'        $DUCKEYE -T "$TMP/test_code.py"
 # file, and the validity check PASSED ON EMPTY INPUT -- zero lines parsed is zero
 # failures. It must therefore assert it actually saw rows; a check that cannot fail is
 # worse than no check, because it occupies the place where a real one belongs.
-ok  'piped -r on code emits valid JSON' \
+gated sitting_duck ok 'piped -r on code emits valid JSON' \
     bash -c "$DUCKEYE -r '$TMP/test_code.py' 2>/dev/null | python3 -c \
       'import sys,json
 n=0
@@ -780,12 +838,16 @@ has 'find -F short flag'          'execute'        env DUCKEYE_MOCK_ASTCSS='.fun
 has 'find with dialect'           'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE --find "find execute function" --dialect python "$TMP/test_code.py"
 no  'find offline fails'          env -u DUCKEYE_MOCK_ASTCSS DUCKEYE_LLM_SOCKET=/nonexistent.sock DUCKEYE_LLM_ENDPOINT=http://127.0.0.1:59999 $DUCKEYE --find "find something" "$TMP/test_code.py"
 has 'find on document'            'Alpha'          env DUCKEYE_MOCK_ASTCSS='h2' $DUCKEYE --find "find h2 headings" "$TMP/doc.md"
-has 'find combined with rank'     'execute'        env DUCKEYE_MOCK_ASTCSS='.func' DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -F "find all functions" -R "executes task" "$TMP/test_code.py"
-has 'rank filters candidates'     'execute'        env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" "$TMP/test_code.py"
-no_leak 'rank threshold drops low scores' 'cancel' env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" "$TMP/test_code.py"
-has 'rank threshold override'     'cancel'         env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" --threshold 0.20 "$TMP/test_code.py"
-has 'rank top-k limits'           'execute'        env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.85}]' $DUCKEYE -Q '.func' -R "executes task" --top-k 1 "$TMP/test_code.py"
-has 'rank --json output'          '"score":0.95'   env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" --json "$TMP/test_code.py"
+# These six go through -Q, so they need sitting_duck -- but when it is absent, -Q yields
+# nothing and duckeye reports "no candidates available to rank" instead of DuckDB's
+# error, which missing_ext cannot see. Hence explicit gating. The no_leak one is why it
+# matters: an absent 'cancel' in EMPTY output scored a pass while nothing was ranked.
+gated sitting_duck has 'find combined with rank'     'execute'        env DUCKEYE_MOCK_ASTCSS='.func' DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -F "find all functions" -R "executes task" "$TMP/test_code.py"
+gated sitting_duck has 'rank filters candidates'     'execute'        env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" "$TMP/test_code.py"
+gated sitting_duck no_leak 'rank threshold drops low scores' 'cancel' env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" "$TMP/test_code.py"
+gated sitting_duck has 'rank threshold override'     'cancel'         env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" --threshold 0.20 "$TMP/test_code.py"
+gated sitting_duck has 'rank top-k limits'           'execute'        env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.85}]' $DUCKEYE -Q '.func' -R "executes task" --top-k 1 "$TMP/test_code.py"
+gated sitting_duck has 'rank --json output'          '"score":0.95'   env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" --json "$TMP/test_code.py"
 has 'rank document prose'         'Alpha'          env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.20}, {"index": 2, "relevance_score": 0.92}]' $DUCKEYE -R "alpha details" "$TMP/doc.md"
 has 'outline --json'              '"title":"Alpha"' $DUCKEYE -T --json "$TMP/doc.md"
 has 'section --json'              '"element_type":"heading"' $DUCKEYE -S Alpha --json "$TMP/doc.md"

@@ -62,10 +62,11 @@ if ((${#called[@]} == 0)); then
   exit 2
 fi
 
-loaded=() load=
+loaded=() load= absent=()
 for e in $DUCKEYE_CHECK_EXTS; do
   if duckdb -c "LOAD $e;" >/dev/null 2>&1; then load+="LOAD $e; "; loaded+=("$e")
   else printf 'note: %s not installed, names it provides cannot be verified\n' "$e" >&2
+       absent+=("$e")
   fi
 done
 ((${#loaded[@]})) || { echo 'no checkable extensions installed' >&2; exit 2; }
@@ -73,17 +74,48 @@ available=$(duckdb -noheader -list -c \
   "${load}SELECT DISTINCT function_name FROM duckdb_functions();" 2>/dev/null) \
   || { echo "failed to load: ${loaded[*]}" >&2; exit 2; }
 
-missing=() skipped=()
+# owner_of NAME -> the absent extension that would provide NAME, or empty.
+#
+# This script already NOTICES an extension it cannot load, then used to report that
+# extension's functions as UNRESOLVED anyway -- the note and the verdict contradicting
+# each other. A name cannot be verified against a binary that is not installed, and
+# calling it missing blames duckeye for an artifact the registry has not built. On
+# DuckDB 1.5.6 that is sitting_duck and toml (see DUCKEYE_UNPUBLISHED in duckeye).
+#
+# Attribution is by prefixes this script can DEFEND, not by a guess: a name it cannot
+# attribute stays UNRESOLVED, because excusing an unattributable name is how a genuine
+# rename would slip through as "probably someone else's".
+owner_of() {
+  local fn=$1 e
+  for e in ${absent[@]+"${absent[@]}"}; do
+    case $e in
+      sitting_duck) case $fn in ast_*|parse_ast*|read_ast) printf 'sitting_duck'; return 0 ;; esac ;;
+      toml)         case $fn in parse_toml)                printf 'toml';         return 0 ;; esac ;;
+      *)            case $fn in "${e}_"*)                  printf '%s' "$e";      return 0 ;; esac ;;
+    esac
+  done
+  return 1
+}
+
+missing=() skipped=() unverifiable=()
 for fn in "${called[@]}"; do
   for o in ${own[@]+"${own[@]}"}; do
     [[ $fn == "$o" ]] && { skipped+=("$fn"); continue 2; }
   done
-  grep -qxF "$fn" <<<"$available" || missing+=("$fn")
+  if grep -qxF "$fn" <<<"$available"; then continue; fi
+  if e=$(owner_of "$fn"); then unverifiable+=("$fn ($e not installed)"); else missing+=("$fn"); fi
 done
 
 printf 'checked %d call(s) against loaded: %s\n' \
-  "$((${#called[@]} - ${#skipped[@]}))" "${loaded[*]}"
+  "$((${#called[@]} - ${#skipped[@]} - ${#unverifiable[@]}))" "${loaded[*]}"
 ((${#skipped[@]})) && printf '  own macro (not checked): %s\n' "${skipped[@]}"
+# Printed, never swallowed: a name nobody checked is a gap in this check's coverage, and
+# a silent omission is the same defect as a false UNRESOLVED with the evidence removed.
+((${#unverifiable[@]})) && {
+  printf '  UNVERIFIABLE -- the extension that provides these is not installed:\n'
+  printf '    %s\n' "${unverifiable[@]}"
+  printf '    (not a failure: the registry has not built them for this DuckDB version)\n'
+}
 
 if ((${#missing[@]})); then
   printf '\nUNRESOLVED -- these do not exist in the installed extension:\n'
@@ -99,4 +131,10 @@ EOF
   exit 1
 fi
 
-echo 'all calls resolve'
+# Say what was actually checked. "all calls resolve" with names left unverified
+# overstates the result -- the same defect as omitting them, phrased optimistically.
+if ((${#unverifiable[@]})); then
+  printf 'all verifiable calls resolve (%d unverifiable, listed above)\n' "${#unverifiable[@]}"
+else
+  echo 'all calls resolve'
+fi

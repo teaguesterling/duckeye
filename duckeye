@@ -1392,13 +1392,17 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     # MAP("NULL","NULL") rather than MAP(VARCHAR,VARCHAR), and the ::duck_block cast
     # would then fail on every page. Non-emptiness is what makes the inference right
     # -- there is no cast on the map itself, only on the struct around it.
+    #
+    # layout := 'reading' is pinned because the pdf extension's default moved to its
+    # column-aware 'auto' engine, which keeps a hyphenated line break as printed
+    # ("contin-" / "ues"); poppler's reading order joins it, and the prose below needs that.
     doc="WITH __pg AS (
            SELECT page, list_prepend(
                     {'kind':'block','element_type':'page_break','content':NULL,'level':1,
                      'encoding':'text','attributes':MAP{'page_number': page::VARCHAR},
                      'element_order':0}::duck_block,
                     parse_markdown_to_duck_blocks(coalesce(text, ''))) AS pb
-           FROM read_pdf('$src'${p_args:+, $p_args}))
+           FROM read_pdf('$src', layout := 'reading'${p_args:+, $p_args}))
          SELECT duck_blocks_repair(reduce(list(pb ORDER BY page),
                        lambda acc, x: duck_blocks_merge(acc, x))) AS blocks
          FROM __pg" ;;

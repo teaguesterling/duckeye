@@ -1365,8 +1365,26 @@ no_leak '-r warning stays off stdout' 'deprecated' $DUCKEYE -r "$TMP/d.parquet"
 echo 'cli'
 ok  'help'                       $DUCKEYE -h
 ok  'version'                    $DUCKEYE --version
-has 'version prints the number'  '0.21.0'  $DUCKEYE --version
-has '-V is the short form'       '0.21.0'  $DUCKEYE -V
+# No version LITERAL in any of these. The pin moves every release, and an assertion that
+# has to be edited in lockstep with it is one more step to forget on the day it matters.
+# Shape here, relationship to the tag below; between them a wrong pin cannot pass.
+#
+# Pure bash rather than `sort -V`: this repo supports the macOS sort, which has not always
+# had -V. _run invokes "$@" inside a command substitution, so a shell function works as an
+# assertion exactly like an external command.
+ver_is_semver() { [[ ${1:-} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+ver_ge() {           # ver_ge A B -- true when A >= B, field by field
+  local i; local -a A B
+  IFS=. read -r -a A <<<"${1:-0}"; IFS=. read -r -a B <<<"${2:-0}"
+  for i in 0 1 2; do
+    (( ${A[i]:-0} > ${B[i]:-0} )) && return 0
+    (( ${A[i]:-0} < ${B[i]:-0} )) && return 1
+  done
+  return 0
+}
+pin=$($DUCKEYE --version 2>/dev/null | awk '{print $2}')
+ok  'version prints a semver'    ver_is_semver "$pin"
+ok  '-V is the short form'       test "$($DUCKEYE -V 2>/dev/null)" = "$($DUCKEYE --version 2>/dev/null)"
 # --version is what you run to find out WHAT YOU HAVE when things are broken, so it must
 # not need duckdb, an extension or pandoc. Invoked through an ABSOLUTE $BASH rather than
 # letting the shebang resolve: with an empty PATH, `#!/usr/bin/env bash` cannot find bash
@@ -1381,16 +1399,23 @@ ok  'version needs nothing else' env PATH="$TMP/empty" "$BASH" "$DUCKEYE" --vers
 ok  'version is silent on stderr' \
     bash -c "[[ -z \$(env PATH='$TMP/empty' '$BASH' '$DUCKEYE' --version 2>&1 >/dev/null) ]]"
 no_leak 'version is not the help' 'usage:' $DUCKEYE --version
-# The pin must not drift from the tag. --version is duckeye's ONLY version surface --
-# there is no VERSION file and no changelog -- so a stale pin is invisible until someone
-# reports the wrong number. Compared against the most recent tag REACHABLE from HEAD, so
-# ordinary commits after a release still pass; only tagging without bumping fails. CI
-# checks out with fetch-depth: 0 so this RUNS there instead of skipping, because a guard
-# that always skips is the same as no guard.
+# The pin must never be OLDER than the latest tag. --version is duckeye's ONLY version
+# surface -- no VERSION file, no changelog -- so a stale pin is invisible until someone
+# reports the wrong number.
+#
+# Deliberately >=, not ==. The bump commit necessarily lands BEFORE the tag that matches
+# it, so `==` would make every release's own bump red until the tag was pushed -- a red
+# window built into the release process, which is worse than the drift it was guarding.
+# A pin ahead of the tag is a normal pre-release state; a pin behind one means a release
+# shipped reporting the previous version, which is the only real error here.
+#
+# Compared against the most recent tag REACHABLE from HEAD, so ordinary commits after a
+# release still pass. CI checks out with fetch-depth: 0 so this RUNS there instead of
+# skipping, because a guard that always skips is the same as no guard.
 if t=$(git describe --tags --abbrev=0 2>/dev/null) && [[ -n $t ]]; then
-  has 'version matches the latest tag' "${t#v}" $DUCKEYE --version
+  ok 'version is not older than the latest tag' ver_ge "$pin" "${t#v}"
 else
-  skipping 'version matches the latest tag' 'no git tags reachable here'
+  skipping 'version is not older than the latest tag' 'no git tags reachable here'
 fi
 # --init and --update both end in `install.sh --user-bin`, which writes to
 # $HOME/.local/bin/duckeye and $HOME/.claude/... . On a dev machine

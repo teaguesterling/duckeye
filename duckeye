@@ -21,7 +21,7 @@ set -uo pipefail
 # can lie about which duckeye you are running, which is the one question it exists to
 # answer. test.sh compares it to the most recent reachable tag, so cutting a release
 # without bumping this fails the suite rather than shipping a stale number.
-DUCKEYE_VERSION=0.21.0
+DUCKEYE_VERSION=0.22.0
 
 : "${DUCKEYE_BASE:=duck_block_utils}"
 : "${DUCKEYE_EXTS:=}"

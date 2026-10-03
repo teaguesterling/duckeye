@@ -33,17 +33,18 @@ set -uo pipefail
 # exist is not a mistake of ours. A 404 for anything NOT listed here still fails, so a
 # misspelled or newly added name cannot hide behind this -- that is the whole point of
 # an allowlist rather than a blanket `|| true`. Each entry carries a reason and an exit:
-#   sitting_duck  the registry still pins 1.11.0 (b8c06a8), which predates the v1.5.6
-#                 compat work, so it cannot build for that line. Bump is open and CLEAN
-#                 as duckdb/community-extensions#2855 (1.15.2). Remove this entry when
-#                 `--init` reports NOW AVAILABLE. Without it, `-Q` and every code-AST
-#                 path fail with DuckDB's own "Extension not found".
 #   toml          the descriptor points at third-party vergenzt/duckdb-toml at 263bc5a
 #                 (v0.1.0) with no bump open, so nobody in this fleet can publish it for
 #                 a new DuckDB line. Without it, `.toml` does not read.
-# Measured on DuckDB 1.5.6 (2026-09-29): both 404 at community-extensions.duckdb.org,
-# while the other eleven duckeye needs serve normally.
-: "${DUCKEYE_UNPUBLISHED:=sitting_duck toml}"
+# sitting_duck was listed here and is NOT any more: duckdb/community-extensions#2855
+# merged 2026-09-30 and the registry now serves ref 73fcc2f for v1.5.6, so `--init`
+# reports it installed rather than 404. Removing it is not bookkeeping -- the allowlist
+# downgrades a real 404 to a warning, so keeping a published name on it would hide the
+# next outage of the extension every `-Q` and code-AST path depends on, which is the one
+# failure this list must not cause.
+# Measured on DuckDB 1.5.6 (2026-10-03): toml alone 404s at community-extensions.duckdb.org,
+# while the other twelve duckeye needs serve normally.
+: "${DUCKEYE_UNPUBLISHED:=toml}"
 
 usage() {
   cat <<'EOF'
@@ -1753,26 +1754,39 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
                  FROM __qn n, lv)
       SELECT node_id, ord, lvl, parent_id, coalesce(nxt, (SELECT max(ord) + 1 FROM __qn)) AS e
       FROM x WHERE l = lvl;
-    CREATE OR REPLACE TEMP TABLE __qa AS
-      SELECT a.node_id::BIGINT AS node_id, a.ty::VARCHAR AS type,
-             (SELECT semantic_type FROM read_ast('$qself') WHERE false) AS semantic_type,
-             0::UTINYINT AS flags, a.nm::VARCHAR AS name,
-             (SELECT qualified_name FROM read_ast('$qself') WHERE false) AS qualified_name,
-             NULL::VARCHAR AS signature_type,
-             (SELECT parameters FROM read_ast('$qself') WHERE false) AS parameters,
-             NULL::VARCHAR[] AS modifiers, NULL::VARCHAR AS annotations,
-             '$src'::VARCHAR AS file_path, 'duck_block' AS language,
-             NULL::UINTEGER AS start_line, NULL::UINTEGER AS end_line,
-             e.parent_id::BIGINT AS parent_id,
-             a.lvl::UINTEGER AS depth,
-             (row_number() OVER (PARTITION BY e.parent_id ORDER BY a.ord) - 1)::INTEGER AS sibling_index,
+    -- INHERIT sitting_duck's node schema, then fill it BY NAME. A hand-written column
+    -- list is what broke here: sitting_duck gained a \`receiver\` column by the time it
+    -- was published for v1.5.6, the list did not have it, and ast_select_from('__qa', ..)
+    -- stopped binding --
+    --   Binder Error: Values list \"a\" does not have a column named \"receiver\"
+    -- -- so EVERY document -Q returned nothing. Note how that failed: the presence
+    -- assertions went red while every absence and exit-status one still passed, because
+    -- \"no output\" satisfies them. 25 assertions at once, and only because sitting_duck
+    -- had become installable again -- while it was unavailable they all skipped, so the
+    -- -Q rewrite they cover had never actually run against it.
+    --
+    -- Creating the table from a zero-row read_ast() means a column duckeye does not set
+    -- (receiver, semantic_type, qualified_name, parameters, scope -- and whatever is added
+    -- next) is simply NULL, rather than a Binder Error on the next upstream addition. It
+    -- also replaces four borrowed-type subqueries with one, which is what they were for.
+    CREATE OR REPLACE TEMP TABLE __qa AS SELECT * FROM read_ast('$qself') WHERE false;
+    INSERT INTO __qa (node_id, type, flags, name, signature_type, modifiers, annotations,
+                      file_path, language, start_line, end_line, parent_id, depth,
+                      sibling_index, children_count, descendant_count, peek)
+      SELECT a.node_id::BIGINT, a.ty::VARCHAR,
+             0::UTINYINT, a.nm::VARCHAR,
+             NULL::VARCHAR, NULL::VARCHAR[], NULL::VARCHAR,
+             '$src'::VARCHAR, 'duck_block',
+             NULL::UINTEGER, NULL::UINTEGER,
+             e.parent_id::BIGINT,
+             a.lvl::UINTEGER,
+             (row_number() OVER (PARTITION BY e.parent_id ORDER BY a.ord) - 1)::INTEGER,
              -- Children are the nodes one level down whose parent this is. The old
              -- in-span count agreed with this on every node measured, including
              -- level skips: a node two levels down names this parent but is no child.
-             coalesce(c.n, 0)::UINTEGER AS children_count,
-             (e.e - a.ord - 1)::UINTEGER AS descendant_count,
-             (SELECT scope FROM read_ast('$qself') WHERE false) AS scope,
-             a.nm::VARCHAR AS peek
+             coalesce(c.n, 0)::UINTEGER,
+             (e.e - a.ord - 1)::UINTEGER,
+             a.nm::VARCHAR
       FROM __qn a JOIN __qe e ON e.node_id = a.node_id
       LEFT JOIN (SELECT k.parent_id, count(*) AS n FROM __qe k JOIN __qe p ON p.node_id = k.parent_id
                  WHERE k.lvl = p.lvl + 1 GROUP BY k.parent_id) c ON c.parent_id = a.node_id

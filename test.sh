@@ -1364,6 +1364,34 @@ no_leak '-r warning stays off stdout' 'deprecated' $DUCKEYE -r "$TMP/d.parquet"
 
 echo 'cli'
 ok  'help'                       $DUCKEYE -h
+ok  'version'                    $DUCKEYE --version
+has 'version prints the number'  '0.21.0'  $DUCKEYE --version
+has '-V is the short form'       '0.21.0'  $DUCKEYE -V
+# --version is what you run to find out WHAT YOU HAVE when things are broken, so it must
+# not need duckdb, an extension or pandoc. Invoked through an ABSOLUTE $BASH rather than
+# letting the shebang resolve: with an empty PATH, `#!/usr/bin/env bash` cannot find bash
+# and the script never starts, so the obvious spelling of this test fails without ever
+# reaching duckeye -- measured, it reported
+#   /usr/bin/env: 'bash': No such file or directory
+# which looks like a duckeye failure and is not one.
+mkdir -p "$TMP/empty"   # a genuinely empty bin dir -- $TMP/nopandoc holds a fake pandoc
+ok  'version needs nothing else' env PATH="$TMP/empty" "$BASH" "$DUCKEYE" --version
+# ... and says nothing on stderr while doing it. Without this, the assertion above passes
+# while duckeye complains about a missing basename(1) on every line it cannot run.
+ok  'version is silent on stderr' \
+    bash -c "[[ -z \$(env PATH='$TMP/empty' '$BASH' '$DUCKEYE' --version 2>&1 >/dev/null) ]]"
+no_leak 'version is not the help' 'usage:' $DUCKEYE --version
+# The pin must not drift from the tag. --version is duckeye's ONLY version surface --
+# there is no VERSION file and no changelog -- so a stale pin is invisible until someone
+# reports the wrong number. Compared against the most recent tag REACHABLE from HEAD, so
+# ordinary commits after a release still pass; only tagging without bumping fails. CI
+# checks out with fetch-depth: 0 so this RUNS there instead of skipping, because a guard
+# that always skips is the same as no guard.
+if t=$(git describe --tags --abbrev=0 2>/dev/null) && [[ -n $t ]]; then
+  has 'version matches the latest tag' "${t#v}" $DUCKEYE --version
+else
+  skipping 'version matches the latest tag' 'no git tags reachable here'
+fi
 # --init and --update both end in `install.sh --user-bin`, which writes to
 # $HOME/.local/bin/duckeye and $HOME/.claude/... . On a dev machine
 # ~/.local/bin/duckeye is typically a SYMLINK to the repo checkout, so that

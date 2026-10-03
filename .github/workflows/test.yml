@@ -9,7 +9,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 for the TAGS, not the history. test.sh asserts that the
+      # DUCKEYE_VERSION pin equals the most recent reachable tag, and `git describe`
+      # finds nothing in a shallow clone -- the guard would skip here on every run, and
+      # a guard that always skips is the same as no guard at all.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y pandoc unzip

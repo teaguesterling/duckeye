@@ -14,6 +14,15 @@
 #   DUCKEYE_COMMUNITY  --init installs these from the community repo
 set -uo pipefail
 
+# duckeye's version, and the ONLY place it is written down: there is no VERSION file and
+# no changelog, so `--version` reads this and the git tag is the only other copy. Assigned
+# plainly rather than through `: "${DUCKEYE_VERSION:=}"` on purpose -- every other setting
+# here is meant to be overridden from the environment, but a version that answers to $ENV
+# can lie about which duckeye you are running, which is the one question it exists to
+# answer. test.sh compares it to the most recent reachable tag, so cutting a release
+# without bumping this fails the suite rather than shipping a stale number.
+DUCKEYE_VERSION=0.22.0
+
 : "${DUCKEYE_BASE:=duck_block_utils}"
 : "${DUCKEYE_EXTS:=}"
 : "${DUCKEYE_PAGER=less -R}"
@@ -99,6 +108,7 @@ Options:
                          less -R. $NO_COLOR disables it
       --init             install the DuckDB extensions duckeye needs, then exit
       --update           update DuckDB extensions and duckeye, then exit
+  -V, --version          print duckeye's version, then exit
   -h, --help             show this help
 
 NAME and TEXT match case-insensitively as substrings; SQL LIKE wildcards
@@ -279,8 +289,15 @@ lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 q() { printf '%s' "${1//\'/\'\'}"; }
 
 # Aliases: dep auto-pages on tty; der defaults to raw data mode
-[[ $(basename "$0") == dep && -t 1 ]] && do_page=1 || do_page=
-[[ $(basename "$0") == der ]] && mode=raw || mode=full
+#
+# ${0##*/} rather than $(basename "$0"): identical for a path with or without slashes, but
+# it needs no PATH lookup and no subshell. These two lines run at TOP LEVEL on every
+# invocation, so with basename(1) unreachable they printed
+#   duckeye: line 292: basename: command not found
+# on stderr before the option loop had even started -- which `--version` must not do, since
+# it is what you run when the environment is broken. Also two fewer forks per run.
+[[ ${0##*/} == dep && -t 1 ]] && do_page=1 || do_page=
+[[ ${0##*/} == der ]] && mode=raw || mode=full
 arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 in_file= out_file=
 find_query= rank_criterion= rank_threshold= top_k= dialect= json_out=
@@ -574,6 +591,9 @@ while (( $# )); do
     -P|--pages)    [[ $# -ge 2 ]] || die '-P/--pages needs a page or range (e.g. 3, 1-5, 1..5)' 64
                    pages=$2; shift ;;
     --pages=*)     pages=${1#--pages=} ;;
+    # Before --help, and before anything that needs duckdb: --version is what you run to
+    # find out what you have when the rest is broken.
+    -V|--version)  printf 'duckeye %s\n' "$DUCKEYE_VERSION"; exit 0 ;;
     -h|--help)     usage; exit 0 ;;
     --init)        init; exit $? ;;
     --update)      update; exit $? ;;

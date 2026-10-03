@@ -786,6 +786,7 @@ it to `DUCKEYE_EXTS`.
 -n, --limit N          cap rows in any listing (-d, -z, -Z, and .zim -T/-s)
     --init             install the DuckDB extensions
     --update           update DuckDB extensions and duckeye
+-V, --version          print duckeye's version
 -h, --help             full help
 ```
 

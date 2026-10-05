@@ -435,9 +435,21 @@ fi
 # through the v1 rename while every message still named -o and -r, and a `no` test
 # reads neither -- so the suite was green on advice that pointed at flags which no
 # longer meant that.
-no  '-t rejects -d'                         $DUCKEYE -t md -d "$TMP/d.parquet"
-has '-t/-d conflict names -t'   '-t does not apply to data modes' \
-    bash -c "$DUCKEYE -t md -d '$TMP/d.parquet' 2>&1 >/dev/null"
+# -t under a data mode names a DuckDB WRITER, the mirror of -f naming a reader there.
+# The old expectation was that -t was refused outright; what made that wrong is the -o
+# migration guard, which already advises `-t csv` for a format-shaped -o value -- so
+# refusing it sent the user to a flag that then called csv an unknown format.
+has 'a document -t under -d says so' '-t pandoc is a document format' \
+    bash -c "$DUCKEYE -t pandoc -d '$TMP/d.parquet' 2>&1 >/dev/null"
+no  '-t pandoc is refused under -d'         $DUCKEYE -t pandoc -d "$TMP/d.parquet"
+# The other direction closes the loop the -o guard opens: a data format without -d
+# advises -d rather than calling the format unknown.
+has 'a data -t without -d advises -d' '-t csv is a data-table format' \
+    bash -c "$DUCKEYE -t csv '$TMP/doc.md' 2>&1 >/dev/null"
+no  '-t csv is refused on a document'       $DUCKEYE -t csv "$TMP/doc.md"
+# .mode trash is a real DuckDB mode that emits NOTHING with exit 0, so accepting it
+# would turn a typo into an empty result that looks like a successful query.
+no  '-t trash is refused under -d'          $DUCKEYE -t trash -d "$TMP/d.parquet"
 no  '-t rejects -T'                         $DUCKEYE -t md -T "$TMP/doc.md"
 has '-t/-T conflict names -T'   '-t does not apply to -T' \
     bash -c "$DUCKEYE -t md -T '$TMP/doc.md' 2>&1 >/dev/null"
@@ -524,6 +536,74 @@ has 'piped -z emits JSONL'        '{"'     $DUCKEYE -z "$TMP/d.parquet"
 has 'piped -Z stays visual'       '│'      $DUCKEYE -Z "$TMP/d.parquet"
 # A pager means a person is reading, so -p keeps the box even though stdout is a pipe.
 has '-p keeps the box'            '│'      env DUCKEYE_PAGER=cat $DUCKEYE -p -r "$TMP/d.parquet"
+
+# -t names a DuckDB writer under a data mode, on either side of the tty test. These
+# assert the FORMAT's own shape, not a bare token: every data assertion above matches
+# something like name_1 that appears in every mode, so none of them can tell csv from
+# box. That is the same gap the JSONL block above was written to close.
+has '-t csv under -d'        'id,has_tab,has_nl'  $DUCKEYE -t csv -d "$TMP/gnarly.csv"
+has '-t json under -d'       '[{'                 $DUCKEYE -t json -d "$TMP/d.csv"
+has '-t md under -d'         '| id |'             $DUCKEYE -t md -d "$TMP/d.csv"
+has '-t box forces the box onto a pipe' '│'       $DUCKEYE -t box -d "$TMP/d.parquet"
+has '-t jsonl under -d'      '{"id":'             $DUCKEYE -t jsonl -d "$TMP/d.csv"
+# DuckDB has no `tsv` mode -- it spells that `tabs` -- but the -o migration guard
+# advises `-t tsv`, so duckeye owns the alias or that advice is a dead end.
+ok  '-t tsv is an alias for tabs' \
+    bash -c "[[ \"\$($DUCKEYE -t tsv -d '$TMP/d.csv')\" == \"\$($DUCKEYE -t tabs -d '$TMP/d.csv')\" ]]"
+# -Z keeps the box by default because the picture is the output, but an explicit -t is
+# the user saying otherwise.
+has '-t csv overrides the -Z box' 'column,type' $DUCKEYE -t csv -Z "$TMP/d.parquet"
+
+# --color decides ESCAPES, never which format the output is in. These two are the
+# pipe-side halves of that: a program must not receive box drawing just because
+# colour was forced on.
+has '--color always keeps JSONL on a pipe' '{"id":' $DUCKEYE --color=always -d "$TMP/d.csv"
+no_leak '--color always does not box a pipe' '│'    $DUCKEYE --color=always -d "$TMP/d.parquet"
+
+# -o names a file, and a file is read by programs just as a pipe is, so data modes
+# write JSONL to it rather than the box. Before this, -o was accepted and IGNORED in
+# a data mode: the rows went to stdout and no file was created.
+rm -f "$TMP/o.jsonl"
+ok  '-d -o creates the file' \
+    bash -c "$DUCKEYE -d -o '$TMP/o.jsonl' '$TMP/gnarly.csv' && [[ -s '$TMP/o.jsonl' ]]"
+has '-d -o writes data, not the box' '{"id":1,"has_tab":"a\tb","has_nl":"l1\nl2"}' \
+    bash -c "cat '$TMP/o.jsonl' 2>/dev/null"
+no_leak '-d -o does not also print to stdout' '{"id":' \
+    bash -c "$DUCKEYE -d -o '$TMP/o2.jsonl' '$TMP/gnarly.csv'"
+
+# The TERMINAL side of the box/JSONL rule needs a pty: [[ -t 1 ]] is false under the
+# command substitution every other assertion here runs through, so none of them can
+# see the box-on-a-tty branch at all. util-linux and BSD/macOS spell script(1)
+# differently; when neither works these SKIP, because a tty claim proven on a pipe is
+# the vacuous green this suite keeps catching.
+pty_kind=
+if script -qec true /dev/null >/dev/null 2>&1; then pty_kind=linux
+elif script -q /dev/null true >/dev/null 2>&1; then pty_kind=bsd; fi
+pty_run() {
+  case $pty_kind in
+    linux) script -qec "$1" /dev/null ;;
+    bsd)   script -q /dev/null bash -c "$1" ;;
+    *)     return 97 ;;
+  esac
+}
+pty_has() { local n=$1 pat=$2 cmd=$3 out
+  if [[ -z $pty_kind ]]; then skipping "$n" 'no usable script(1) for a pty'; return; fi
+  out=$(pty_run "$cmd" 2>/dev/null </dev/null | strip | tr -d '\r')
+  if [[ $out == *"$pat"* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  else fail=$((fail+1)); printf '  FAIL %s (no match for %q)\n' "$n" "$pat"; fi; }
+pty_has 'a terminal gets the box'           '│'      "$DUCKEYE -d '$TMP/d.parquet'"
+pty_has '--color never keeps the box'       '│'      "$DUCKEYE --color=never -d '$TMP/d.parquet'"
+pty_has 'NO_COLOR keeps the box'            '│'      "NO_COLOR=1 $DUCKEYE -d '$TMP/d.parquet'"
+pty_has '-t csv beats the box on a tty'     'id,name' "$DUCKEYE -t csv -d '$TMP/d.csv'"
+pty_has '-p still boxes under a pty'        '│'      "DUCKEYE_PAGER=cat $DUCKEYE -p -d '$TMP/d.parquet'"
+# -o from a terminal must still write data: the file is the consumer, not the screen.
+if [[ -n $pty_kind ]]; then
+  rm -f "$TMP/o3.jsonl"
+  pty_run "$DUCKEYE -d -o '$TMP/o3.jsonl' '$TMP/gnarly.csv'" >/dev/null 2>&1 </dev/null
+  has '-o from a tty writes data, not the box' '{"id":1,' bash -c "cat '$TMP/o3.jsonl' 2>/dev/null"
+else
+  skipping '-o from a tty writes data, not the box' 'no usable script(1) for a pty'
+fi
 has 'profile temporal span' 'days' $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile list len' 'len' $DUCKEYE -Z "$TMP/d.parquet"
 has 'profile map entries' 'entries' $DUCKEYE -Z "$TMP/d.parquet"

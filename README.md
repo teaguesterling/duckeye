@@ -779,7 +779,9 @@ it to `DUCKEYE_EXTS`.
 -i, --input FILE       input file; same as giving FILE positionally
 -f, --from FMT         treat input as FMT instead of guessing; under data modes,
                        names a DuckDB reader (csv, parquet, json, yaml, toml, xlsx, pdf, lines, zip, git, ast)
--t, --to FMT           ansi (default), text, md, html, pandoc, blocks
+-t, --to FMT           ansi (default), text, md, html, pandoc, blocks; under data modes,
+                       names a DuckDB writer (box, csv, tsv, json, jsonl, md, html, latex,
+                       line, list, ascii, column, table, insert, quote)
 -o, --output FILE      write to FILE instead of stdout (names a FILE, not a format)
     --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies data mode

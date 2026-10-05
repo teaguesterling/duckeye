@@ -93,11 +93,16 @@ Options:
   -i, --input FILE       the input file; the same as giving FILE positionally.
                          Giving both is an error
   -o, --output FILE      write to FILE instead of stdout (escapes are stripped).
+                         A file is read by programs, so data modes write JSONL to
+                         it rather than the box, exactly as they do for a pipe
                          NOTE: -o names a FILE, not a format -- use -t for that
-  -t, --to FMT           write the document as ansi (default), text, md, html,
-                         pandoc (a Pandoc AST) or blocks (duck_blocks JSON).
-                         Applies after -S/-s, so a section converts on its own.
-                         Not for -d, -z, -Z, -T, or an archive's corpus listings
+  -t, --to FMT           write the output as FMT. For a document: ansi (default),
+                         text, md, html, pandoc (a Pandoc AST) or blocks
+                         (duck_blocks JSON) -- applies after -S/-s, so a section
+                         converts on its own. Under -d, -z or -Z, FMT names a
+                         DuckDB writer: box, csv, tsv, json, jsonl, md, html,
+                         latex, line, list, ascii, column, table, insert, quote
+                         Not for -T, or an archive's corpus listings
   -f, --from FMT         treat the input as FMT rather than guessing from the
                          filename: md, html, pdf, rst, docx, tex, zim, ...
                          Under -d, FMT names a DuckDB reader: csv, parquet, json, pdf, yaml, ...
@@ -105,15 +110,17 @@ Options:
   -n, --limit N          cap the rows any listing prints (-d, -z, -Z, and .zim -T/-s)
       --color WHEN       auto (default), always, never. auto means colour when
                          stdout is a terminal, or when -p is paging through
-                         less -R. $NO_COLOR disables it
+                         less -R. $NO_COLOR disables it. Colour only -- it never
+                         changes which format the output is in
       --init             install the DuckDB extensions duckeye needs, then exit
       --update           update DuckDB extensions and duckeye, then exit
   -V, --version          print duckeye's version, then exit
   -h, --help             show this help
 
 NAME and TEXT match case-insensitively as substrings; SQL LIKE wildcards
-(% and _) work. -S also matches a heading's slug id exactly. -t, -S, -s, -r, -z
-and -Z are mutually exclusive. -S and -s exit 1 when nothing matches.
+(% and _) work. -S also matches a heading's slug id exactly. -S, -s, -r, -z and -Z
+are mutually exclusive; -t composes with -S and -s, and applies after them. -S and
+-s exit 1 when nothing matches.
 
 Formats:
   .md .markdown        markdown extension
@@ -131,9 +138,11 @@ Formats:
   file is data rather than a Pandoc AST. LOAD anything extra via DUCKEYE_EXTS.
   -r is a deprecated alias for -d and warns.
 
-Raw mode prints through DuckDB's own box renderer rather than duck_blocks: it
-streams (a million rows in about a second, where the ANSI block renderer stalls
-past twenty thousand) and emits plain UTF-8, so it pipes into grep and awk.
+Raw mode prints through DuckDB's own writers rather than duck_blocks: it streams
+(a million rows in about a second, where the ANSI block renderer stalls past twenty
+thousand). A terminal or pager gets the box; a pipe or -o FILE gets JSONL, which
+escapes the newlines and tabs that document cells routinely hold, so grep and
+wc -l stay honest. -t names a format explicitly on either path.
 
 ZIM archives (Kiwix / openZIM: offline Wikipedia, Gutenberg, Stack Exchange):
 
@@ -299,7 +308,7 @@ q() { printf '%s' "${1//\'/\'\'}"; }
 [[ ${0##*/} == dep && -t 1 ]] && do_page=1 || do_page=
 [[ ${0##*/} == der ]] && mode=raw || mode=full
 arg= where= limit= fmt= color=auto out_fmt=ansi pages=
-in_file= out_file=
+in_file= out_file= data_fmt=
 find_query= rank_criterion= rank_threshold= top_k= dialect= json_out=
 
 # ---------------------------------------------------------------- intelligence layer
@@ -496,6 +505,47 @@ want_color() {
   [[ -t 1 ]]
 }
 
+# Box drawing is for PEOPLE: a terminal, or a pager about to show it to one. Kept
+# deliberately separate from want_color, which decides ESCAPES. Sharing one predicate
+# let --color and $NO_COLOR change the data FORMAT: `--color never -d` emitted JSONL to
+# a terminal, and `--color always -d | prog` handed a program box characters. Neither
+# switch claims to restructure output, and someone asking for no colour wants a
+# monochrome box, not a different serialisation.
+#
+# -o sits on the pipe side of the test: a file is read by programs just as a pipe is,
+# so a data mode writing to one writes data rather than a picture of data.
+want_box() {
+  [[ -n $out_file ]] && return 1
+  [[ -n $do_page ]] && return 0
+  [[ -t 1 ]]
+}
+
+# Under -d/-z/-Z the output is a data table, so -t names a DuckDB WRITER -- the exact
+# mirror of -f naming a DuckDB reader there. duckeye owns three things DuckDB will not
+# do for it:
+#   - the aliases. DuckDB has no `tsv` mode (it spells that `tabs`), yet the -o
+#     migration guard advises `-t tsv`; without the alias that advice is a dead end.
+#   - refusing `trash`. It is a real mode that emits NOTHING with exit 0, which would
+#     turn a typo into an empty result indistinguishable from a successful query.
+#   - refusing the document formats by NAME, so `-t pandoc -d` says what is wrong
+#     instead of falling through to DuckDB's generic mode list.
+DATA_FORMATS='box, csv, tsv, json, jsonl, md, html, latex, line, list, ascii, column, table, insert, quote'
+data_mode_for() {
+  case $1 in
+    box|duckbox)       printf 'box' ;;
+    jsonl|jsonlines)   printf 'jsonlines' ;;
+    tsv|tabs)          printf 'tabs' ;;
+    md|markdown)       printf 'markdown' ;;
+    csv|json|html|latex|line|list|ascii|column|table|insert|quote|tcl)
+                       printf '%s' "$1" ;;
+    ansi|text|pandoc|blocks)
+      die "-t $1 is a document format; under -d/-z/-Z the output is a data table ($DATA_FORMATS)" 64 ;;
+    *) die "unknown output format: $1
+  documents:       ansi, text, md, html, pandoc, blocks
+  data (-d/-z/-Z): $DATA_FORMATS" 64 ;;
+  esac
+}
+
 # Determine dark vs light mode for DuckDB's box renderer.
 # Checks $DUCKEYE_THEME, $COLORFGBG, and runs a 50ms OSC 11 probe on interactive ttys
 # to avoid DuckDB's 5-second blocking background-color timeout in non-interactive shells.
@@ -690,10 +740,25 @@ if [[ -n $pages ]]; then
   fi
 fi
 
+# A data mode and a document take -t from different vocabularies, and naming the wrong
+# one has to say WHICH: `-t csv` on a document used to report "unknown output format:
+# csv", flatly contradicting the -o guard above that had just advised exactly that.
+#
+# `ansi` stays the sentinel for "no -t given", so an explicit `-t ansi` under a data
+# mode means the default rather than an error. Not worth a second variable to detect.
 if [[ $out_fmt != ansi ]]; then
-  emit x >/dev/null                       # reject an unknown format before doing work
-  [[ $mode == raw || $mode == summary || $mode == profile ]] && die '-t does not apply to data modes: output is a data table' 64
-  [[ $mode == toc ]] && die '-t does not apply to -T: the outline is already plain text' 64
+  if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
+    # die runs in this command substitution's SUBSHELL, so its exit status has to be
+    # propagated by hand or an invalid format would print its message and carry on.
+    data_fmt=$(data_mode_for "$out_fmt") || exit $?
+  else
+    case $out_fmt in
+      box|duckbox|csv|tsv|tabs|json|jsonl|jsonlines|latex|line|list|ascii|column|table|insert|quote|tcl)
+        die "-t $out_fmt is a data-table format; add -d to read the input as data" 64 ;;
+    esac
+    emit x >/dev/null                     # reject an unknown format before doing work
+    [[ $mode == toc ]] && die '-t does not apply to -T: the outline is already plain text' 64
+  fi
 fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/duckeye.XXXXXX") || die 'cannot create temp directory'
@@ -1276,7 +1341,13 @@ FROM __duckeye_src"
   #
   # -Z is the exception: it is textplot ANSI histograms, and the picture IS the output.
   # As JSON it would be a table of bar-chart strings, so it keeps the box on every path.
-  if want_color; then
+  # An explicit -t wins on both sides of the tty test, -Z included: the DEFAULT keeps -Z
+  # visual because the picture is the output, but naming a format is the user saying
+  # otherwise. .maxwidth only means anything to the box family and is inert for the
+  # rest, so it is set once rather than per format.
+  if [[ -n $data_fmt ]]; then
+    duck=(duckdb $(duckdb_color_mode) -cmd ".mode $data_fmt" -cmd ".maxwidth $term_cols" -c "$load $sql")
+  elif want_box; then
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -c "$load $sql")
   elif [[ $mode == profile ]]; then
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth 0" -c "$load $sql")
@@ -1284,6 +1355,15 @@ FROM __duckeye_src"
     duck=(duckdb $(duckdb_color_mode) -cmd ".mode jsonlines" -c "$load $sql")
   fi
   page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
+  # -o names a FILE, and data modes used to accept it and IGNORE it -- the rows went to
+  # stdout and no file was created. want_box already puts a file on the pipe side of the
+  # format decision, so the serialisation is right; this is what puts the bytes there.
+  # Like the document path, -o bypasses the pager: a file is not a reader.
+  if [[ -n $out_file ]]; then
+    : >"$out_file" 2>/dev/null || die "cannot write $out_file" 1
+    "${duck[@]}" >"$out_file"
+    exit $?
+  fi
   "${duck[@]}" | "${page[@]}"
   exit "${PIPESTATUS[0]}"
 fi
@@ -1325,7 +1405,7 @@ if [[ $key == *.zim ]]; then
     for e in $DUCKEYE_EXTS; do load+="LOAD $e; "; done
     page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
     # Same rule as the data modes: a pipe gets JSONL, a terminal or pager gets the box.
-    if want_color; then
+    if want_box; then
       duckdb $(duckdb_color_mode) -cmd ".mode box" -cmd ".maxwidth $term_cols" -s "$load" -s "$zsql" | "${page[@]}"
     else
       duckdb $(duckdb_color_mode) -cmd ".mode jsonlines" -s "$load" -s "$zsql" | "${page[@]}"

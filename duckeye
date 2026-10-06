@@ -118,9 +118,10 @@ Options:
   -h, --help             show this help
 
 NAME and TEXT match case-insensitively as substrings; SQL LIKE wildcards
-(% and _) work. -S also matches a heading's slug id exactly. -S, -s, -r, -z and -Z
-are mutually exclusive; -t composes with -S and -s, and applies after them. -S and
--s exit 1 when nothing matches.
+(% and _) work. -S also matches a heading's slug id exactly. -T, -S, -s, -d, -z and -Z
+are mutually exclusive, which is the set setmode() enforces; -r counts as -d, being its
+deprecated alias. -t composes with -S and -s, and applies after them. -S and -s exit 1
+when nothing matches.
 
 Formats:
   .md .markdown        markdown extension
@@ -129,8 +130,9 @@ Formats:
   .json                Pandoc AST
   .docx .odt .epub .org .tex .rtf .textile .mediawiki
                        panduck extension, natively (no pandoc(1) needed)
-  .rst .ipynb          via pandoc(1) — panduck reads both, but loses table-cell
-                       markup (.rst) and notebook cell structure (.ipynb)
+  .ipynb               panduck extension, natively — panduck 0.5.1 fixed the lambda
+                       warning that had kept notebooks on pandoc(1)
+  .rst                 via pandoc(1) — panduck reads it, but loses table-cell markup
   .man .1 ... .9       man page source, via pandoc(1) — roff has no native reader
   .zim  zim://...      zim extension (see ZIM archives below)
   -d bypasses this table entirely and hands FILE to DuckDB, so the format is
@@ -147,7 +149,7 @@ wc -l stay honest. -t names a format explicitly on either path.
 ZIM archives (Kiwix / openZIM: offline Wikipedia, Gutenberg, Stack Exchange):
 
   duckeye wiki.zim                  # what this archive holds
-  duckeye -t wiki.zim               # index it (path, title)
+  duckeye -T wiki.zim               # index it (path, title)
   duckeye -s photosynthesis wiki.zim    # the archive's own full-text search,
                                         # ranked, with snippets
   duckeye -S Photosynthesis wiki.zim    # open that article
@@ -171,7 +173,7 @@ Env:
 Examples:
   duckeye README.md                  # render to stdout, unpaged
   dep README.md                      # same, paged (alias for duckeye -p)
-  duckeye -t spec.md                 # outline
+  duckeye -T spec.md                 # outline
   duckeye -S 'Runbook Steps' spec.md # one section
   duckeye -s tmux spec.md            # every section mentioning tmux
 EOF
@@ -232,7 +234,7 @@ init() {
   done
   printf '%-20s %-10s ' pandoc system
   if command -v pandoc >/dev/null; then echo found
-  else echo 'missing — .rst/.ipynb/.man will not render; the rest use panduck'
+  else echo 'missing — .rst/.man will not render; the rest use panduck'
   fi
   dbu_body_floor
   return $rc

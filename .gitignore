@@ -14,3 +14,6 @@ site/
 scripts/*
 !scripts/check_block_functions.sh
 DUCK_BLOCK_RENAME.md
+
+# Worktrees created under the repo for isolated work; never part of a commit.
+.worktrees/

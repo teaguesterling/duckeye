@@ -9,7 +9,7 @@ description: >-
   YAML, TOML, XLSX, ZIP, git logs). Also activate when querying code by CSS
   selectors (-Q), or when the user mentions duckeye, dep, der, sitting_duck, or
   duck_block_utils.
-version: 0.20.0
+version: 0.23.1
 ---
 
 # duckeye — Terminal Document & Source AST Reader
@@ -34,6 +34,8 @@ duckeye -P 1-5 manual.pdf           # page range of a PDF
 duckeye main.py                     # render Python AST with syntax code blocks
 cat FILE | duckeye -                # read from stdin (sniffs format, shebangs, & PDF magic)
 duckeye -f html page.txt            # override format detection
+duckeye -d -D FILE                  # -D undoes an earlier -d (e.g. set by der)
+duckeye -V                          # print duckeye's version, then exit
 ```
 
 ### Navigating & AST CSS Selectors
@@ -50,7 +52,7 @@ duckeye -T 'src/**/*.py'            # glob outline across multiple source files
 duckeye -d 'data/*.parquet'         # aggregate raw data over multiple files
 ```
 
-`-t`, `-S`, `-s`, and `-d` are **mutually exclusive**.
+`-T`, `-S`, `-s`, `-d`, `-z`, and `-Z` are **mutually exclusive** (`-t` is not: it composes with `-S`/`-s`/`-Q`).
 Input files support glob patterns (e.g. `'src/**/*.rs'`, `'data/*.parquet'`).
 Matching for `-S` and `-s` is case-insensitive substring; standard Unix glob wildcards (`*`, `?`) work. Underscores (`_`) and percent signs (`%`) match literally.
 `-S` also matches heading slug IDs exactly.
@@ -66,8 +68,18 @@ duckeye -t pandoc FILE              # Pandoc AST JSON
 duckeye -t blocks FILE              # duck_blocks JSON
 ```
 
-`-o` applies **after** `-S`/`-s`/`-Q`, so it converts only the selected content.
-`-o` does not apply to `-d` or `-t`.
+`-t` applies **after** `-S`/`-s`/`-Q`, so it converts only the selected content.
+It does not apply to `-T` (the outline is already plain text) or to an archive's
+corpus listings.
+
+**`-t` and `-o` are different things.** `-t FMT` names the output *format*; `-o FILE`
+names an output *file*. Writing to a file strips ANSI escapes, so `-o out.txt` and
+`-t text` both get you clean text, but only `-t` changes the serializer.
+
+```sh
+duckeye -t md -S Install FILE > install.md   # -t picks the format
+duckeye -o install.txt -S Install FILE       # -o picks the destination
+```
 
 ### Data files & Tabular AST Exploration
 
@@ -83,7 +95,6 @@ duckeye -Z -w "category = 'tools'" products.parquet  # profile filtered subset
 der app.js                          # force raw AST table mode
 duckeye -d -Q '.call#eval' app.js   # query code AST nodes as table with line numbers & peek text
 duckeye config.yaml                 # YAML as data table
-duckeye Cargo.toml                  # TOML configuration table
 duckeye spreadsheet.xlsx            # Excel spreadsheet
 duckeye -d report.pdf               # inspect PDF pages as data table
 duckeye archive.zip                 # inspect zip archive contents
@@ -92,6 +103,39 @@ duckeye -d -f lines script.sh       # inspect file with line numbers & offsets
 duckeye -w "score > 90" data.parquet  # -w implies data mode, full SQL WHERE syntax
 duckeye -n 20 huge.csv              # limit rows
 ```
+
+`.toml` is in the table above but **does not read on the shipped DuckDB** — the `toml`
+extension is unpublished for it (duckeye tracks this in `DUCKEYE_UNPUBLISHED`), so
+`duckeye Cargo.toml` fails with `Extension "toml" ... not found`. `--init` reports it as
+unpublished rather than dying, and will say when it becomes available.
+
+#### What a data mode writes, and where
+
+Data modes (`-d`, `-z`, `-Z`) pick their output by **destination**, not by colour:
+
+| Destination | Output |
+|---|---|
+| terminal, or `-p` through a pager | the DuckDB box |
+| a pipe | JSONL |
+| `-o FILE` | JSONL — a file is read by programs, like a pipe |
+
+`--color` and `$NO_COLOR` affect **escapes only**. They never change which format comes
+out, so `duckeye -d --color never data.csv` in a terminal is still the box, and
+`duckeye -d --color always data.csv | …` is still JSONL.
+
+`-t` names the format explicitly on either path. Under `-d`, `-z` or `-Z` it names a
+DuckDB **writer** — the mirror of `-f` naming a reader there — not a document format:
+
+```sh
+duckeye -d -t csv data.parquet      # CSV to a terminal
+duckeye -d -t md data.parquet       # markdown table
+duckeye -d -t box data.csv > t.txt  # force the box into a file
+duckeye -z -t json data.csv         # JSON summary, for a tool to parse
+```
+
+Writers: `box`, `csv`, `tsv`, `json`, `jsonl`, `md`, `html`, `latex`, `line`, `list`,
+`ascii`, `column`, `table`, `insert`, `quote`. A document format (`ansi`, `pandoc`,
+`blocks`, …) under a data mode is a usage error, not a silent fallback.
 
 ### ZIM archives (offline Wikipedia, Gutenberg, etc.)
 
@@ -147,11 +191,13 @@ duckeye -T --json docs/architecture.md
 
 ## Agent Usage Guidelines
 
-1. **Use `-o text` when reading document content programmatically** — it strips
+1. **Use `-t text` when reading document content programmatically** — it strips
    ANSI escapes. Default `ansi` output contains SGR sequences that clutter
-   tool output.
+   tool output. (`-o FILE` also strips them, but it names a destination, not a format.)
+   Don't reach for `--color never` to get clean output: colour and format are
+   independent, so it removes escapes without changing the serializer.
 
-2. **Use `-t` first to discover structure**, then `-S` or `-Q` to extract specific
+2. **Use `-T` first to discover structure**, then `-S` or `-Q` to extract specific
    sections or functions. This avoids dumping entire large files or codebases into context.
 
 3. **Prefer duckeye over `cat` for non-plaintext files** — PDF, DOCX, EPUB, HTML,
@@ -172,6 +218,13 @@ duckeye -T --json docs/architecture.md
 
 8. **`-S` and `-s` exit 1 on no match** — use this in conditionals.
 
+9. **A piped data mode already gives you JSONL** — no `-t` needed, and it escapes the
+   newlines and tabs that document cells hold, so `grep` and `wc -l` stay honest. Reach
+   for `-t json` only when you want one array rather than a line per row.
+
+10. **`duckeye -V` reports the version** — the only version surface there is. Quote it
+    when a behaviour you observed may be version-specific.
+
 ---
 
 ## Supported Formats
@@ -184,9 +237,9 @@ duckeye -T --json docs/architecture.md
 | `.json` | Pandoc AST |
 | `.zim`, `zim://…` | `zim` DuckDB extension (handles HTML, markdown, and embedded PDFs) |
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | `sitting_duck` DuckDB extension (Tree-sitter AST to duck_blocks & CSS selector engine) |
-| `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` | `panduck` — native |
-| `.rst` `.ipynb` `.man` `.1`–`.9` | `pandoc(1)` |
-| anything under `-d` | DuckDB reader (parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, …) |
+| `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` `.ipynb` | `panduck` — native, no `pandoc(1)` |
+| `.rst` `.man` `.1`–`.9` | `pandoc(1)` — the only two routes that still need it |
+| anything under `-d` | DuckDB reader (parquet, csv, json, yaml, xlsx, pdf, zip, git, lines, ast, …; `toml` is unpublished — see above) |
 
 ---
 
@@ -198,7 +251,10 @@ duckeye -T --json docs/architecture.md
 | `DUCKEYE_BASE` | `duck_block_utils` | Base extension always loaded |
 | `DUCKEYE_EXTS` | _(empty)_ | Extra extensions to `LOAD` |
 | `DUCKEYE_THEME` | `auto` | `dark` or `light` theme override |
+| `DUCKEYE_OFFICIAL` | _(list)_ | Extensions `--init` installs from the core repo |
+| `DUCKEYE_COMMUNITY` | _(list)_ | Extensions `--init` installs from the community repo |
 | `COLUMNS` | `auto` | Column width for table rendering & profiling |
+| `NO_COLOR` | _(unset)_ | Set to disable colour. Escapes only — never the output format |
 
 ## Setup & Updates
 
@@ -208,4 +264,9 @@ duckeye --init      # installs DuckDB extensions
 duckeye --update    # updates DuckDB extensions and duckeye
 ```
 
-Requires `duckdb` on `PATH`. `pandoc` is optional (needed for DOCX/EPUB/RST/etc).
+Requires `duckdb` on `PATH`. `pandoc` is optional, and now needed only for `.rst` and man
+pages — DOCX, ODT, EPUB, LaTeX, Org, RTF, Textile, MediaWiki and `.ipynb` all read
+natively through `panduck`.
+
+`duckeye -V` prints the running version — check it against this skill's `version:` if
+something here does not match what you observe.

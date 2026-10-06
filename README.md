@@ -211,9 +211,12 @@ $ duckeye -t pandoc spec.rst | pandoc -f json -t docx -o spec.docx
 ```
 
 `-t pandoc` builds its AST with panduck, which reports the api version it emits, so
-the stamp is right without consulting the local pandoc. `-t` doesn't apply to `-d` (that output is a
-data table), to `-T` (already plain text), or to an archive's corpus listings — but it
-does apply to `-S` on an archive, which opens a document.
+the stamp is right without consulting the local pandoc. `-t` doesn't apply to `-T` (already
+plain text) or to an archive's corpus listings — but it does apply to `-S` on an archive,
+which opens a document. Under `-d`, `-z` and `-Z` it still applies, but the formats above
+are document formats and those modes emit a data table, so there `-t` names a DuckDB
+*writer* instead (`box`, `csv`, `json`, `jsonl`, `md`, …) — the mirror of `-f` naming a
+reader. See [Data files and profiling](#data-files-and-profiling).
 
 **`-t md` does not shell out.** It calls `duck_blocks_to_md`, one of the
 duck_blocks writers, so *writing* markdown needs no `pandoc` binary and takes no

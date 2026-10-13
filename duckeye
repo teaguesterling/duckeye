@@ -320,7 +320,14 @@ compile_astcss() {
   local endpoint=${DUCKEYE_LLM_ENDPOINT:-}
   local model=${DUCKEYE_LLM_MODEL:-}
   local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
-  local payload resp compiled
+  # Initialised, not just declared: `set -u` is on, and on the paths where no transport is
+  # reached (no socket, no endpoint, no ollama) or one answers with an empty body, the
+  # assignments below never run. A bare `local payload resp compiled` leaves them UNSET,
+  # so `[[ -n "$resp" ]]` and `[[ -z "$compiled" ]]` died with `unbound variable` --
+  # which meant the die() at the end of this function, whose whole job is to tell the user
+  # to set DUCKEYE_LLM_SOCKET or DUCKEYE_LLM_ENDPOINT, was unreachable on exactly the
+  # machines that needed it.
+  local payload='' resp='' compiled=''
 
   if [[ -n ${DUCKEYE_MOCK_ASTCSS:-} ]]; then
     printf '%s' "$DUCKEYE_MOCK_ASTCSS"

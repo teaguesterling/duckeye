@@ -112,6 +112,20 @@ no() { local n=$1 m; shift
   if (( _rc == 0 )); then fail=$((fail+1)); printf '  FAIL %s (expected nonzero)\n' "$n"
   elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable (exit status would be vacuous)"
   else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
+# dies_with NAME PATTERN ARGS... -- nonzero exit AND PATTERN in stderr.
+#
+# `no` alone cannot tell duckeye's own refusal from a bash crash: both exit nonzero. That is
+# how the --find unbound-variable bug survived a test that covered its exact path -- the
+# intended "could not connect to LLM daemon" die() was replaced by `compiled: unbound
+# variable` and the assertion never noticed. Where the MESSAGE is the product, assert it.
+dies_with() { local n=$1 pat=$2 m; shift 2
+  _run "$@"
+  if (( _rc == 0 )); then fail=$((fail+1)); printf '  FAIL %s (expected nonzero)\n' "$n"
+  elif [[ $_err == *"unbound variable"* || $_err == *"syntax error"* ]]; then
+    fail=$((fail+1)); printf '  FAIL %s (crashed instead of refusing: %s)\n' "$n" "${_err##*$'\n'}"
+  elif [[ $_err == *"$pat"* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable"
+  else fail=$((fail+1)); printf '  FAIL %s (stderr has no match for %q)\n' "$n" "$pat"; fi; }
 has() { local n=$1 pat=$2 m; shift 2
   _run "$@"
   local out; out=$(printf '%s' "$_out" | strip)
@@ -916,7 +930,16 @@ echo 'code & document intelligence'
 has 'find ASTCSS mock'            'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE --find "find execute function" "$TMP/test_code.py"
 has 'find -F short flag'          'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE -F "find execute function" "$TMP/test_code.py"
 has 'find with dialect'           'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE --find "find execute function" --dialect python "$TMP/test_code.py"
-no  'find offline fails'          env -u DUCKEYE_MOCK_ASTCSS DUCKEYE_LLM_SOCKET=/nonexistent.sock DUCKEYE_LLM_ENDPOINT=http://127.0.0.1:59999 $DUCKEYE --find "find something" "$TMP/test_code.py"
+# Both --find transport failures, asserted on the MESSAGE. `no` passed on either of these
+# while duckeye was crashing with `unbound variable` instead of refusing.
+dies_with 'find offline refuses legibly'   'could not connect to LLM daemon' env -u DUCKEYE_MOCK_ASTCSS DUCKEYE_LLM_SOCKET=/nonexistent.sock DUCKEYE_LLM_ENDPOINT=http://127.0.0.1:59999 $DUCKEYE --find "find something" "$TMP/test_code.py"
+# The OTHER crash path -- no socket, no endpoint, no ollama, so `resp` is never assigned --
+# is deliberately NOT tested, because it cannot be made deterministic from the environment.
+# Clearing DUCKEYE_LLM_* is not enough: compile_astcss also auto-discovers a Tiiny key under
+# ~/.local/share/tiiny-pcsvr/auth_data and probes localhost:11434, either of which may be
+# present on a developer's machine. Measured here: with the env cleared, this box reached a
+# real LLM and rendered a result instead of refusing. The fix covers both paths with the same
+# one-line initialisation; the case above is the one an assertion can pin.
 has 'find on document'            'Alpha'          env DUCKEYE_MOCK_ASTCSS='h2' $DUCKEYE --find "find h2 headings" "$TMP/doc.md"
 # These six go through -Q, so they need sitting_duck -- but when it is absent, -Q yields
 # nothing and duckeye reports "no candidates available to rank" instead of DuckDB's

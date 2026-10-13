@@ -9,7 +9,7 @@ description: >-
   YAML, TOML, XLSX, ZIP, git logs). Also activate when querying code by CSS
   selectors (-Q), or when the user mentions duckeye, dep, der, sitting_duck, or
   duck_block_utils.
-version: 0.23.1
+version: 0.23.2
 ---
 
 # duckeye — Terminal Document & Source AST Reader
@@ -17,13 +17,16 @@ version: 0.23.1
 duckeye renders documents and source code ASTs in the terminal. One bash script, no build step — it
 dispatches to DuckDB extensions for parsing and renders via `duck_block_utils`.
 
-**Location**: `~/.dotfiles/duckeye/duckeye` (symlinked onto `PATH`)
+`duckeye --init` installs it onto `PATH` along with the DuckDB extensions it dispatches to.
 
 ---
 
 ## Quick Reference
 
 ### Reading documents & source code
+
+`FILE` is positional; `-i FILE` / `--input FILE` is the same thing named, for when a
+wrapper builds the argument list and wants every argument to carry a flag.
 
 ```sh
 duckeye FILE                        # render to stdout, unpaged (alias: de FILE)
@@ -179,6 +182,10 @@ duckeye -F "request handlers" -R "handles token validation and auth headers" src
 duckeye -Q '.func' -R "handles token validation and auth headers" src/auth.py
 duckeye -R "security requirements and rate limits" docs/api_spec.md --top-k 3
 
+# --threshold sets the score cutoff (default 0.70, or 0.0 when --top-k is given,
+# because --top-k is already a limit and two limits at once hide each other)
+duckeye -Q '.func' -R "parses user input" --threshold 0.4 src/parse.py
+
 # Document structure discovery
 duckeye -F "major section headings" docs/architecture.md
 
@@ -191,11 +198,30 @@ duckeye -T --json docs/architecture.md
 
 ## Agent Usage Guidelines
 
-1. **Use `-t text` when reading document content programmatically** — it strips
-   ANSI escapes. Default `ansi` output contains SGR sequences that clutter
-   tool output. (`-o FILE` also strips them, but it names a destination, not a format.)
-   Don't reach for `--color never` to get clean output: colour and format are
-   independent, so it removes escapes without changing the serializer.
+1. **For programmatic reads, just pipe the default output — do not reach for `-t text`.**
+   duckeye strips SGR escapes itself whenever stdout is not a terminal, so piped
+   default output is already clean *and* keeps the structure the renderer computed:
+   bullets, nesting, quote bars, table rules.
+
+   `-t text` is a different thing: it is **text extraction**, not a plain-text
+   renderer. It calls `duck_blocks_to_text`, which duck_block_utils documents under
+   "Extraction Functions" as *"extract plain text content from elements"* — so list
+   markers, indentation and item grouping are deliberately gone. On a nested list the
+   two differ like this:
+
+   ```
+   duckeye doc.md            duckeye -t text doc.md
+     • alpha                 alpha
+       • nested one          nested one
+     • beta                  beta
+   ```
+
+   Reach for `-t text` when you want prose and nothing else — word counts, search
+   terms, embeddings. For reading a document, the default is strictly better.
+
+   Don't reach for `--color never` either: colour and format are independent, so it
+   removes escapes without changing the serializer. (`-o FILE` also strips them, but
+   it names a destination, not a format.)
 
 2. **Use `-T` first to discover structure**, then `-S` or `-Q` to extract specific
    sections or functions. This avoids dumping entire large files or codebases into context.
@@ -255,6 +281,35 @@ duckeye -T --json docs/architecture.md
 | `DUCKEYE_COMMUNITY` | _(list)_ | Extensions `--init` installs from the community repo |
 | `COLUMNS` | `auto` | Column width for table rendering & profiling |
 | `NO_COLOR` | _(unset)_ | Set to disable colour. Escapes only — never the output format |
+
+### Configuring `-F` and `-R`
+
+Both reach a model over HTTP, and **neither works until one of these is set**. Without any of
+them `-F` refuses with `could not connect to LLM daemon for --find … Set DUCKEYE_LLM_SOCKET or
+DUCKEYE_LLM_ENDPOINT` — so if you see that, this table is the answer. Run `duckeye --help` for
+the built-in defaults; they point at local daemons and are not worth memorising.
+
+| Variable | Purpose |
+|---|---|
+| `DUCKEYE_LLM_SOCKET` | Unix socket of a local LLM daemon, for `-F` / `--find` |
+| `DUCKEYE_LLM_ENDPOINT` | HTTP base URL instead of a socket. A URL containing `/v1` is treated as OpenAI-shaped (`/chat/completions`); anything else as Ollama-shaped (`/api/generate`) |
+| `DUCKEYE_LLM_MODEL` | Model name to request for `-F` |
+| `DUCKEYE_RERANK_SOCKET` | Unix socket of a cross-encoder reranker, for `-R` / `--rank` |
+| `DUCKEYE_RERANK_ENDPOINT` | HTTP base URL instead of a socket; `-R` posts to `<endpoint>/v1/rerank` |
+| `DUCKEYE_RERANK_MODEL` | Model name to request for `-R` |
+| `DUCKEYE_LLM_KEY` / `DUCKEYE_API_KEY` | Bearer token for either endpoint |
+
+`-F` and `-R` are independent: configuring one does not configure the other, and a selector
+query (`-Q`) needs neither.
+
+### Test hooks
+
+| Variable | Purpose |
+|---|---|
+| `DUCKEYE_MOCK_ASTCSS` | Return this selector from `-F` without calling a model |
+| `DUCKEYE_MOCK_RERANK` | Return this JSON score array from `-R` without calling a model |
+
+Useful for exercising `-F` / `-R` paths in a test with no model available; not for normal use.
 
 ## Setup & Updates
 

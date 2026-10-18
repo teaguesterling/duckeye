@@ -34,6 +34,17 @@ jobs:
       - name: Run tests
         run: ./test.sh
 
+      # The skill is a COPY of the CLI's interface, shipped to agents, and a copy does not
+      # notice when the original moves. It moved three times (-t outline -> format, -r -> -d,
+      # -o format -> FILE) and the stale copy in the retritis marketplace plugin went on telling
+      # agents the old flags; that marketplace's own lint passed it, because it checks a curated
+      # command list and never looked at flag syntax. --self-test runs too: a lint never seen to
+      # fire is not a lint, and this one has two directions that each catch a different drift.
+      - name: Skill flags agree with --help
+        run: |
+          ./scripts/check_skill_flags.sh --self-test
+          ./scripts/check_skill_flags.sh
+
       # integration.sh had never run in CI. 127 assertions -- every format end to
       # end, the README's published commands executed verbatim, cross-format
       # invariants and stream hygiene -- existed and were dark, which is the same

@@ -1598,10 +1598,32 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
       fi
       selector=$(compile_astcss "$find_query" "$lang_hint") || exit $?
     fi
+    # ast_to_blocks is a DEFINITIONS outline: its defs CTE keeps only named constructs
+    # (is_definition AND is_construct AND name IS NOT NULL), in every style. Imports,
+    # conditionals and calls are not in it at all (#14). So the outline serves -T/-S/-s,
+    # whose units are definitions, and the plain view prints the source itself. A root
+    # node's peek is the whole file -- measured byte-identical on this script, 118,647
+    # bytes. Note duck_block_code takes (language, content), in that order.
     if [[ -n ${selector:-} ]]; then
       premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');
 CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(q "$selector")'); "
-      doc="SELECT list(block) AS blocks FROM ast_to_blocks_from('__sel')"
+      # All definitions: the outline renders them, with their signature headings. Any
+      # statement: print each OUTERMOST match as source, in file order -- a nested match
+      # is already inside its ancestor's text.
+      doc="SELECT CASE
+  WHEN (SELECT coalesce(bool_and(is_definition(semantic_type) AND is_construct(flags) AND name IS NOT NULL), true) FROM __sel)
+  THEN (SELECT list(block) FROM ast_to_blocks_from('__sel'))
+  ELSE (SELECT flatten(list(duck_block_code(language, peek) ORDER BY file_path, start_line, node_id)) FROM __sel s
+        WHERE NOT EXISTS (SELECT 1 FROM __sel p WHERE p.file_path = s.file_path
+                          AND p.node_id < s.node_id AND s.node_id <= p.node_id + p.descendant_count))
+END AS blocks"
+    elif [[ $mode == full ]]; then
+      premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');
+CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
+      # One file: its source. A glob: each file's source under a heading naming it.
+      doc="SELECT flatten(list(CASE WHEN n > 1 THEN list_concat([duck_block_heading(file_path, 1)], duck_block_code(language, peek))
+                              ELSE duck_block_code(language, peek) END ORDER BY file_path)) AS blocks
+FROM (SELECT *, count(*) OVER () AS n FROM __ast WHERE depth = 0)"
     else
       premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');
 CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "

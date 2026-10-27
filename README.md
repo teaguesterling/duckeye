@@ -247,14 +247,21 @@ where the AST loses content, which is why `-t md` no longer goes through one.
 > ([sitting_duck#117](https://github.com/teaguesterling/sitting_duck/issues/117)).
 > `-Q` on source files is **not** experimental and is unaffected.
 >
-> **`-Q` needs the `sitting_duck` extension — including on documents.** On DuckDB
-> **1.5.6** the community registry does not yet build it, so `-Q` and every
-> code-AST path fail there with DuckDB's `Extension "sitting_duck" not found`
-> until [community-extensions#2855](https://github.com/duckdb/community-extensions/pull/2855)
-> lands. `duckeye --init` reports this as `UNPUBLISHED` rather than failing, and
-> names the capability you lose. `.toml` reading is unavailable on 1.5.6 for the
-> same reason. Everything else — rendering, `-T`, `-S`, `-s`, and every writer —
-> is unaffected: measured byte-identical between 1.5.5 and 1.5.6.
+> **`-Q` needs the `sitting_duck` extension — including on documents.** It is
+> served and loads on **1.5.6 and 2.0.0** alike, measured 2026-10-27 by calling
+> `LOAD` and not by reading `INSTALL`'s exit code;
+> [community-extensions#2855](https://github.com/duckdb/community-extensions/pull/2855)
+> merged 2026-09-30. This paragraph said the opposite for a month.
+>
+> Three extensions are **not usable on 2.0.0**, and `duckeye --init` prints each
+> as `UNAVAILABLE for this DuckDB version` with the capability you lose, rather
+> than failing: `toml` and `pdf` return HTTP 404, and `textplot` installs and
+> then throws on `LOAD`, because it moved to Query.Farm's own repository while
+> the community registry still serves a binary for it. So `.toml` does not read,
+> `.pdf` does not read and a PDF inside a `.zim` does not render, and `-Z`
+> sparklines and profile histograms do not draw. `toml` is unavailable on 1.5.6
+> too. Everything else — rendering, `-T`, `-S`, `-s`, `-Q` and every writer — is
+> unaffected: measured byte-identical between 1.5.5, 1.5.6 and 2.0.0.
 
 The same `-Q` that addresses a syntax tree also addresses a document, because
 every reader produces the same `duck_block` vocabulary. Reading, querying and

@@ -51,9 +51,22 @@ DUCKEYE_VERSION=0.23.2
 # downgrades a real 404 to a warning, so keeping a published name on it would hide the
 # next outage of the extension every `-Q` and code-AST path depends on, which is the one
 # failure this list must not cause.
+#   pdf           the registry has no 2.0.0 build. Community extensions are rebuilt per
+#                 DuckDB version and lag a major release; nothing in this fleet can
+#                 publish it. Without it, `.pdf` does not read. Drop this entry when the
+#                 registry serves pdf for the pinned version -- `--init` says so itself,
+#                 because an allowlisted name that installs prints NOW AVAILABLE.
+# "Unpublished" means NOT USABLE on this DuckDB version, which is wider than a 404:
+# an entry here is tolerated by --init whatever the reason, because what makes a
+# failure tolerable is that somebody declared it, not which error it raised.
 # Measured on DuckDB 1.5.6 (2026-10-03): toml alone 404s at community-extensions.duckdb.org,
 # while the other twelve duckeye needs serve normally.
-: "${DUCKEYE_UNPUBLISHED:=toml}"
+# Re-measured on DuckDB 2.0.0 (2026-10-27), the version CI now pins, by calling LOAD on
+# all sixteen rather than reading INSTALL's exit code: pdf and toml 404, textplot
+# INSTALLS AND THEN THROWS ON LOAD -- it moved to Query.Farm's own repository and the
+# community registry still serves a binary for it -- and the other thirteen are usable,
+# sitting_duck included.
+: "${DUCKEYE_UNPUBLISHED:=toml pdf textplot}"
 
 usage() {
   cat <<'EOF'
@@ -209,24 +222,38 @@ init() {
   for repo in core community; do
     for e in $( [[ $repo == core ]] && echo "$DUCKEYE_OFFICIAL" || echo "$DUCKEYE_COMMUNITY" ); do
       printf '%-20s %-10s ' "$e" "$repo"
-      if err=$(duckdb -s "INSTALL $e FROM $repo;" 2>&1); then
-        # An allowlisted extension that installs again means the allowance has EXPIRED.
-        # Say so loudly, in the same spirit as test.sh's guards reporting FIXED: a
-        # tolerance nothing revisits is how a workaround outlives its reason.
+      # LOAD, not just INSTALL. A successful INSTALL is a description -- bytes arrived
+      # and the exit code was 0 -- and it was reported as success for an extension that
+      # cannot be used. Measured on DuckDB 2.0.0 (2026-10-27): `textplot` installs from
+      # the registry and then throws on LOAD, because it moved to Query.Farm's own
+      # repository and the community registry still serves a binary that will not load.
+      # `--init` printed `installed` and exited 0, while every -Z case failed. One
+      # predicate answers what a caller needs -- can this extension be USED here --
+      # and the only way to measure it is to use it.
+      if err=$(duckdb -s "INSTALL $e FROM $repo; LOAD $e;" 2>&1); then
+        # An allowlisted extension that now WORKS means the allowance has EXPIRED. Say
+        # so loudly, in the same spirit as test.sh's guards reporting FIXED: a tolerance
+        # nothing revisits is how a workaround outlives its reason.
         if [[ " $DUCKEYE_UNPUBLISHED " == *" $e "* ]]; then
-          echo 'installed — NOW AVAILABLE (drop it from DUCKEYE_UNPUBLISHED)'
+          echo 'usable — NOW AVAILABLE (drop it from DUCKEYE_UNPUBLISHED)'
         else
           echo installed
         fi
-      elif [[ " $DUCKEYE_UNPUBLISHED " == *" $e "* && $err == *"HTTP 404"* ]]; then
-        # Not built for THIS DuckDB version. Environmental, so it does not fail --init,
-        # but it is printed every time rather than swallowed, and the capability it
-        # carries is named so the consequence is not a surprise later.
+      elif [[ " $DUCKEYE_UNPUBLISHED " == *" $e "* ]]; then
+        # Declared unavailable for THIS DuckDB version. Environmental, so it does not
+        # fail --init, but the REASON is printed every time rather than swallowed, and
+        # the capability it carries is named so the consequence is not a surprise later.
+        # The tolerance no longer requires an HTTP 404: a registry that serves an
+        # unloadable binary is the same loss to a caller, and keying on the 404 is what
+        # let textplot through. What makes a failure tolerable is that it is DECLARED.
         case $e in
-          sitting_duck) echo 'UNPUBLISHED for this DuckDB version — -Q and code ASTs will not work' ;;
-          toml)         echo 'UNPUBLISHED for this DuckDB version — .toml will not read' ;;
-          *)            echo 'UNPUBLISHED for this DuckDB version' ;;
+          sitting_duck) echo 'UNAVAILABLE for this DuckDB version — -Q and code ASTs will not work' ;;
+          toml)         echo 'UNAVAILABLE for this DuckDB version — .toml will not read' ;;
+          pdf)          echo 'UNAVAILABLE for this DuckDB version — .pdf will not read, and a PDF inside a .zim will not render' ;;
+          textplot)     echo 'UNAVAILABLE for this DuckDB version — -Z sparklines and profile histograms will not draw' ;;
+          *)            echo 'UNAVAILABLE for this DuckDB version' ;;
         esac
+        printf '%s\n' "$err" | sed 's/^/    /' >&2
       else
         echo FAILED; printf '%s\n' "$err" | sed 's/^/    /' >&2; rc=1
       fi
@@ -944,6 +971,26 @@ exts= doc= via_pandoc= zim_open= premacro=
 # A macro rather than SQL inlined at
 # every call site, and a macro rather than an extension function because it spans two
 # extensions that deliberately do not depend on each other.
+## A PDF inside an archive needs the pdf extension, and pdf does not build for every
+# DuckDB version -- no v2.0.0 binary exists as of 2026-10-27, so DUCKEYE_UNPUBLISHED
+# carries it. The arm cannot just stay and go unused: DuckDB resolves pdf_to_text at
+# BIND time, on a CASE arm it will never take, so every .zim read died with
+# `Scalar Function with name pdf_to_text does not exist` -- measured, 5 of test.sh's
+# cases failed that way and not one of them is about a PDF. The guard reads
+# DUCKEYE_UNPUBLISHED rather than probing, so what this build cannot have stays the one
+# source of truth it already is. Dropping the arm loses nothing silently: the ELSE below
+# answers a PDF entry with `(no renderer for application/pdf: ENTRY)`, which is true.
+if [[ " ${DUCKEYE_UNPUBLISHED-} " == *" pdf "* ]]; then
+  zim_pdf_arm=''
+  zim_exts='webbed markdown zim'
+else
+  zim_exts='webbed markdown zim pdf'
+  zim_pdf_arm="    WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
+      THEN parse_markdown_to_duck_blocks(pdf_to_text(
+             CASE WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
+                  THEN zim_get_content(archive, entry) END))"
+fi
+
 zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
   CASE
     WHEN zim_mimetype(archive, entry) LIKE 'text/html%'
@@ -956,10 +1003,7 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
       THEN html_to_duck_blocks(zim_get_text(archive, entry))
     WHEN zim_mimetype(archive, entry) LIKE 'text/markdown%'
       THEN parse_markdown_to_duck_blocks(zim_get_text(archive, entry))
-    WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
-      THEN parse_markdown_to_duck_blocks(pdf_to_text(
-             CASE WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
-                  THEN zim_get_content(archive, entry) END))
+$zim_pdf_arm
     WHEN zim_mimetype(archive, entry) LIKE 'text/%'
       THEN duck_block_code(zim_get_text(archive, entry))
     -- A missing entry and an unrenderable one are different answers. zim_mimetype
@@ -1385,7 +1429,7 @@ if [[ $key == *.zim ]]; then
   if [[ $mode == section ]]; then
     # zim_suggest walks the title index, so this stays fast on a full Wikipedia.
     # zim_get_text pulls the article's bytes straight through, no filesystem hop.
-    exts="webbed markdown zim pdf"
+    exts="$zim_exts"
     premacro+=$zim_macro
     doc="SELECT zim_to_blocks('$src', s.path) AS blocks
          FROM (SELECT path FROM zim_suggest('$src', '$pat', max_results := 1)) s"
@@ -1429,7 +1473,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
   zim://*)                         # zim://<archive>.zim/<entry> names one entry
     rest=${f#zim://}
     [[ $rest == *.zim/* ]] || die "zim:// needs an entry path: zim://ARCHIVE.zim/ENTRY" 64
-    exts="webbed markdown zim pdf"
+    exts="$zim_exts"
     premacro+=$zim_macro
     doc="SELECT zim_to_blocks('$(q "${rest%%.zim/*}.zim")', '$(q "${rest#*.zim/}")') AS blocks" ;;
   *.md|*.markdown)

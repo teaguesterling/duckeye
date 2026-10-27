@@ -80,7 +80,11 @@ available=$(duckdb -noheader -list -c \
 # extension's functions as UNRESOLVED anyway -- the note and the verdict contradicting
 # each other. A name cannot be verified against a binary that is not installed, and
 # calling it missing blames duckeye for an artifact the registry has not built. On
-# DuckDB 1.5.6 that is sitting_duck and toml (see DUCKEYE_UNPUBLISHED in duckeye).
+# DuckDB 2.0.0, the pinned version, that is pdf, toml and textplot (see
+# DUCKEYE_UNPUBLISHED in duckeye). It was sitting_duck and toml on 1.5.6; sitting_duck
+# now serves for both, measured 2026-10-27 by calling LOAD rather than reading
+# INSTALL's exit code -- which is also how textplot joined the list, since it installs
+# successfully and then throws.
 #
 # Attribution is by prefixes this script can DEFEND, not by a guess: a name it cannot
 # attribute stays UNRESOLVED, because excusing an unattributable name is how a genuine
@@ -91,6 +95,14 @@ owner_of() {
     case $e in
       sitting_duck) case $fn in ast_*|parse_ast*|read_ast) printf 'sitting_duck'; return 0 ;; esac ;;
       toml)         case $fn in parse_toml)                printf 'toml';         return 0 ;; esac ;;
+      # read_pdf does NOT match the pdf_ prefix the default arm defends, so without this
+      # arm it would be reported MISSING -- blaming duckeye for an unbuilt artifact.
+      pdf)          case $fn in pdf_*|read_pdf)             printf 'pdf';          return 0 ;; esac ;;
+      # textplot's names carry a tp_ prefix, not a textplot_ one, so the default arm
+      # below cannot defend them either. Same shape as read_pdf, different reason: the
+      # registry serves a textplot binary for 2.0.0 that will not LOAD, because the
+      # extension moved to Query.Farm's own repository.
+      textplot)     case $fn in tp_*)                       printf 'textplot';     return 0 ;; esac ;;
       *)            case $fn in "${e}_"*)                  printf '%s' "$e";      return 0 ;; esac ;;
     esac
   done

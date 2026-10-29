@@ -253,14 +253,20 @@ where the AST loses content, which is why `-t md` no longer goes through one.
 > [community-extensions#2855](https://github.com/duckdb/community-extensions/pull/2855)
 > merged 2026-09-30. This paragraph said the opposite for a month.
 >
-> Three extensions are **not usable on 2.0.0**, and `duckeye --init` prints each
-> as `UNAVAILABLE for this DuckDB version` with the capability you lose, rather
-> than failing: `toml` and `pdf` return HTTP 404, and `textplot` installs and
-> then throws on `LOAD`, because it moved to Query.Farm's own repository while
-> the community registry still serves a binary for it. So `.toml` does not read,
-> `.pdf` does not read and a PDF inside a `.zim` does not render, and `-Z`
-> sparklines and profile histograms do not draw. `toml` is unavailable on 1.5.6
-> too. Everything else — rendering, `-T`, `-S`, `-s`, `-Q` and every writer — is
+> **One** extension is not usable on 2.0.0: `toml` returns HTTP 404, so `.toml`
+> does not read, and `duckeye --init` prints it as `UNAVAILABLE for this DuckDB
+> version` with the capability you lose rather than failing. `toml` is
+> unavailable on 1.5.6 too.
+>
+> Two names that used to be listed here are not any more, measured 2026-10-29.
+> **`pdf`** now installs and loads on 2.0.0, so `.pdf` reads and a PDF inside a
+> `.zim` renders. The scalar it exposes was RENAMED between lines -- `pdf_to_text`
+> on the 1.5.6 build, `pdf_text` on the 2.0.0 one -- so the `.zim` reader resolves
+> the name from the loaded catalog instead of naming one. **`textplot`** is served
+> from [Query.Farm's own repository](https://query.farm/products/extensions/),
+> which `--init` now registers; the community registry still serves a copy whose
+> init throws. That is a THIRD-PARTY binary source: set `DUCKEYE_QUERYFARM=` to
+> decline it and lose only `-Z` sparklines and profile histograms. Everything else — rendering, `-T`, `-S`, `-s`, `-Q` and every writer — is
 > unaffected: measured byte-identical between 1.5.5, 1.5.6 and 2.0.0.
 
 The same `-Q` that addresses a syntax tree also addresses a document, because

@@ -900,6 +900,40 @@ has 'python section'   'return True'    $DUCKEYE -S execute "$TMP/test_code.py"
 has 'python search'    'execute'        $DUCKEYE -s task "$TMP/test_code.py"
 has 'python -t md'     'Service'        $DUCKEYE -t md "$TMP/test_code.py"
 
+# duckeye#14: the code view rendered sitting_duck's ast_to_blocks, a DEFINITIONS outline.
+# Imports, conditionals and calls vanished -- a shell hook rendered as its variable
+# assignments alone, its `if ... grep -qE` logic gone. A reader that hides the logic is
+# worse than cat, so agents left duckeye for it. The view must show what the file says.
+cat >"$TMP/test_stmts.py" <<'PY'
+import sys
+
+def f(a):
+    return a
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        print(f(sys.argv))
+PY
+cat >"$TMP/test_stmts.sh" <<'SH'
+#!/bin/bash
+OPS="commit|push"
+if echo "$1" | grep -qE "^git ($OPS)"; then
+  echo warn >&2
+fi
+exit 0
+SH
+has 'code view keeps imports'        'import sys'          $DUCKEYE -t text "$TMP/test_stmts.py"
+has 'code view keeps conditionals'   'if __name__'         $DUCKEYE -t text "$TMP/test_stmts.py"
+has 'shell view keeps conditionals'  'grep -qE'            $DUCKEYE -t text "$TMP/test_stmts.sh"
+has 'shell view keeps commands'      'exit 0'              $DUCKEYE -t text "$TMP/test_stmts.sh"
+has 'code view keeps definitions'    'def f(a)'            $DUCKEYE -t text "$TMP/test_stmts.py"
+# -Q on a statement selected the nodes and then rendered nothing: the same outline
+# filter, applied after the selection.
+has '-Q renders a selected statement' 'grep -qE'           $DUCKEYE -Q if_statement -t text "$TMP/test_stmts.sh"
+# The inner `if` is selected too, inside the outer one. Print it once, not twice.
+ok  '-Q prints a nested match once' \
+    bash -c "[[ \$($DUCKEYE -Q if_statement -t text '$TMP/test_stmts.py' | grep -c 'len(sys.argv)') == 1 ]]"
+
 cat >"$TMP/test_code.rs" <<'RS'
 pub struct Worker {
     pub id: u64,

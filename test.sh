@@ -1062,6 +1062,15 @@ else
 fi
 
 
+# The ZIM CASE binds its PDF arm even when this entry is HTML. Before the
+# compatibility resolver, this failed on the consolidated pdf API because
+# pdf_to_text was removed. Keep this small checked-in fixture independent of the
+# optional external archive above; run it against both pdf API generations.
+if [[ -f fixtures/test.zim ]]; then
+  has 'ZIM PDF scalar binds with either pdf API' 'Plants convert light.' \
+      $DUCKEYE -t text 'zim://fixtures/test.zim/A/Photosynthesis'
+fi
+
 # ---- v1 flag surface (spec: docs/superpowers/specs/2026-09-08-cli-flag-redesign-design.md)
 # -f from-format / -t to-format / -o output FILE, per pandoc and every other tool.
 # -T is the table of contents, -d/-D choose data vs document, -i is an input file.

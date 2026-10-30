@@ -49,8 +49,13 @@ $ duckeye -s "chlorophyll" 'zim://wikipedia.zim/Photosynthesis'
 
 ## Embedded PDF Extraction
 
-When a `.zim` archive contains embedded PDF documentation, `duckeye` extracts the binary stream directly with `zim_get_content()` and parses it with `pdf_to_text()` without writing temporary files:
+When a `.zim` archive contains embedded PDF documentation, `duckeye` extracts the binary stream directly with `zim_get_content()` and parses it with `pdf_text()` (or `pdf_to_text()` on older PDF extension releases) without writing temporary files:
 
 ```console
 $ duckeye 'zim://archive.zim/_assets_/manual.pdf'
 ```
+
+The PDF scalar name is resolved from the loaded catalog before the ZIM macro is
+bound. This matters even for HTML entries: DuckDB binds every CASE branch, so
+referencing an unavailable legacy PDF function breaks otherwise unrelated entries.
+The consolidated `pdf_text` spelling is preferred when both names are present.

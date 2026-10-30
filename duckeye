@@ -139,7 +139,7 @@ when nothing matches.
 Formats:
   .md .markdown        markdown extension
   .htm .html           webbed extension
-  .pdf                 pdf extension (via pdf_to_markdown or read_pdf)
+  .pdf                 pdf extension (read_pdf; embedded PDFs use pdf_text/pdf_to_text)
   .json                Pandoc AST
   .docx .odt .epub .org .tex .rtf .textile .mediawiki
                        panduck extension, natively (no pandoc(1) needed)
@@ -971,27 +971,27 @@ exts= doc= via_pandoc= zim_open= premacro=
 # A macro rather than SQL inlined at
 # every call site, and a macro rather than an extension function because it spans two
 # extensions that deliberately do not depend on each other.
-## A PDF inside an archive needs the pdf extension, and pdf does not build for every
-# DuckDB version -- no v2.0.0 binary exists as of 2026-10-27, so DUCKEYE_UNPUBLISHED
-# carries it. The arm cannot just stay and go unused: DuckDB resolves pdf_to_text at
-# BIND time, on a CASE arm it will never take, so every .zim read died with
-# `Scalar Function with name pdf_to_text does not exist` -- measured, 5 of test.sh's
-# cases failed that way and not one of them is about a PDF. The guard reads
-# DUCKEYE_UNPUBLISHED rather than probing, so what this build cannot have stays the one
-# source of truth it already is. Dropping the arm loses nothing silently: the ELSE below
-# answers a PDF entry with `(no renderer for application/pdf: ENTRY)`, which is true.
-if [[ " ${DUCKEYE_UNPUBLISHED-} " == *" pdf "* ]]; then
-  zim_pdf_arm=''
-  zim_exts='webbed markdown zim'
-else
-  zim_exts='webbed markdown zim pdf'
-  zim_pdf_arm="    WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
-      THEN parse_markdown_to_duck_blocks(pdf_to_text(
-             CASE WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
-                  THEN zim_get_content(archive, entry) END))"
-fi
+## A PDF inside an archive needs the pdf extension, and the arm cannot just stay and
+# go unused: DuckDB resolves the pdf scalar at BIND time, on a CASE arm it will never
+# take, so a name that is not there kills every .zim read -- measured at c16e66e, 5 of
+# test.sh's cases failed that way and not one of them is about a PDF.
+#
+# TWO ways the name can be absent, and they need different answers:
+#   1. pdf is not loadable here at all. Drop the arm. Nothing is lost silently: the
+#      ELSE below answers a PDF entry with `(no renderer for application/pdf: ENTRY)`.
+#   2. pdf IS loadable but spells the scalar differently. Measured 2026-10-29 via
+#      duckdb_functions(): the community build for DuckDB 1.5.6 (pdf 6535c81) offers
+#      `pdf_to_text` and NOT `pdf_text`; the build for 2.0.0 offers `pdf_text` and NOT
+#      `pdf_to_text`. Neither name exists in both, so no literal is correct for both,
+#      and once pdf became installable on 2.0.0 the literal `pdf_to_text` reproduced
+#      failure 1 on a build that HAS the extension -- including on HTML entries.
+#
+# So the name is read from the loaded catalog rather than written here, and the arm is
+# dropped only when nothing answers. The probe is a duckdb process, so it runs from
+# build_zim_macro at the two zim call sites and not on every duckeye invocation.
+# Resolution preferring `pdf_text` and the regression fixture come from PR #16.
 
-zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
+zim_macro_template="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
   CASE
     WHEN zim_mimetype(archive, entry) LIKE 'text/html%'
       -- html_to_duck_blocks is the SCALAR reader, deliberately. parse_html_blocks
@@ -1003,7 +1003,7 @@ zim_macro="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) AS (
       THEN html_to_duck_blocks(zim_get_text(archive, entry))
     WHEN zim_mimetype(archive, entry) LIKE 'text/markdown%'
       THEN parse_markdown_to_duck_blocks(zim_get_text(archive, entry))
-$zim_pdf_arm
+@ZIM_PDF_ARM@
     WHEN zim_mimetype(archive, entry) LIKE 'text/%'
       THEN duck_block_code(zim_get_text(archive, entry))
     -- A missing entry and an unrenderable one are different answers. zim_mimetype
@@ -1027,6 +1027,43 @@ $zim_pdf_arm
                                      || ': ' || entry || ')')
          END
   END);"
+
+# NOT named zim_*: scripts/check_block_functions.sh:57 scans this file for
+# `zim_<name>(` as a SQL call, so a bash function in that namespace is reported
+# UNRESOLVED against the installed extension. Measured -- it exited 1 on
+# `zim_build`, and the branch's own `zim_macro_sql` would have tripped it too.
+#
+# build_zim_macro sets zim_exts and zim_macro together. It is NOT a command substitution:
+# the exts list and the macro must agree about whether pdf is in play, and a $( ) runs
+# in a subshell where an assignment to zim_exts would be discarded.
+build_zim_macro() {
+  local fn='' arm=''
+  # A declared-unavailable pdf skips the probe entirely, so a build that cannot have
+  # the extension pays nothing and prints nothing.
+  if [[ " ${DUCKEYE_UNPUBLISHED-} " != *" pdf "* ]]; then
+    fn=$(duckdb -list -noheader -c "LOAD pdf;
+      SELECT arg_min(function_name, CASE function_name WHEN 'pdf_text' THEN 0 ELSE 1 END)
+      FROM duckdb_functions()
+      WHERE function_type = 'scalar' AND function_name IN ('pdf_text', 'pdf_to_text');" \
+      2>/dev/null) || fn=''
+  fi
+  # Whitelist the answer rather than trust it: this string is interpolated into SQL.
+  case $fn in
+    pdf_text|pdf_to_text) ;;
+    *) fn='' ;;
+  esac
+  if [[ -n $fn ]]; then
+    zim_exts='webbed markdown zim pdf'
+    arm="    WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
+      THEN parse_markdown_to_duck_blocks($fn(
+             CASE WHEN zim_mimetype(archive, entry) LIKE 'application/pdf%'
+                  THEN zim_get_content(archive, entry) END))"
+  else
+    zim_exts='webbed markdown zim'
+  fi
+  zim_macro=${zim_macro_template//@ZIM_PDF_ARM@/$arm}
+}
+
 
 # Sparklines come from textplot's tp_sparkline(), which returns a fixed 20 columns
 # regardless of bin count.
@@ -1429,6 +1466,7 @@ if [[ $key == *.zim ]]; then
   if [[ $mode == section ]]; then
     # zim_suggest walks the title index, so this stays fast on a full Wikipedia.
     # zim_get_text pulls the article's bytes straight through, no filesystem hop.
+    build_zim_macro
     exts="$zim_exts"
     premacro+=$zim_macro
     doc="SELECT zim_to_blocks('$src', s.path) AS blocks
@@ -1473,6 +1511,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
   zim://*)                         # zim://<archive>.zim/<entry> names one entry
     rest=${f#zim://}
     [[ $rest == *.zim/* ]] || die "zim:// needs an entry path: zim://ARCHIVE.zim/ENTRY" 64
+    build_zim_macro
     exts="$zim_exts"
     premacro+=$zim_macro
     doc="SELECT zim_to_blocks('$(q "${rest%%.zim/*}.zim")', '$(q "${rest#*.zim/}")') AS blocks" ;;

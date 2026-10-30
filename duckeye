@@ -12,6 +12,8 @@
 #   DUCKEYE_PAGER      pager used by -p           (default: less -R)
 #   DUCKEYE_OFFICIAL   --init installs these from the core repo
 #   DUCKEYE_COMMUNITY  --init installs these from the community repo
+#   DUCKEYE_QUERYFARM  --init installs these from Query.Farm's repo
+#   DUCKEYE_QUERYFARM_URL  that repo's prefix
 set -uo pipefail
 
 # duckeye's version, and the ONLY place it is written down: there is no VERSION file and
@@ -36,7 +38,29 @@ DUCKEYE_VERSION=0.23.2
 # man, whose pandoc ASTs panduck reads. It went unnoticed for five days because the
 # machine it was developed on had panduck installed by hand, and CI, which starts
 # empty and was red the whole time, was not being read.
-: "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck panduck}"
+: "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs sitting_duck panduck}"
+
+# textplot is NOT in the list above, and which list serves it depends on the DuckDB
+# line. MEASURED 2026-10-29: on 2.0.0 the community registry still serves a binary
+# whose init throws, naming Query.Farm as the new home; Query.Farm's own repository
+# serves a working one. On 1.5.6 the community copy loads and Query.Farm cannot be
+# reached at all, because `CREATE EXTENSION REPOSITORY` is a PARSER ERROR before 2.0.
+# So the repository is chosen from the running duckdb's major version rather than
+# written into both lists, which would make one of them wrong on every machine.
+: "${DUCKEYE_QUERYFARM:=textplot}"
+# Documented at https://query.farm/products/extensions/ ("Builds are signed and
+# verified"). A THIRD-PARTY binary source: overridable so a caller who does not want
+# it can set DUCKEYE_QUERYFARM= and lose only -Z.
+#
+# WHICH repository serves a DUCKEYE_QUERYFARM name is answered lazily, and that is not
+# tidiness. `--version` must work, and stay silent, with NOTHING else on PATH:
+# test.sh:1511 runs it under an empty bin dir precisely so a stray helper cannot leak.
+# A probe at load time broke it -- `duckdb --version 2>/dev/null | sed ...` redirects
+# duckdb's stderr and NOT sed's, so `sed: command not found` reached stderr on every
+# invocation. MEASURED: 375 passed, 1 failed, and the one was that assertion. So the
+# probe runs only when a query_farm name is actually about to be installed or loaded,
+# and it uses shell builtins alone -- no sed, no cut, nothing to be missing.
+: "${DUCKEYE_QUERYFARM_URL:=https://duckdb-extensions.query.farm}"
 # Extensions the community registry does not currently BUILD for every DuckDB version.
 # `--init` reports a 404 for these and keeps going, because an artifact that does not
 # exist is not a mistake of ours. A 404 for anything NOT listed here still fails, so a
@@ -51,22 +75,25 @@ DUCKEYE_VERSION=0.23.2
 # downgrades a real 404 to a warning, so keeping a published name on it would hide the
 # next outage of the extension every `-Q` and code-AST path depends on, which is the one
 # failure this list must not cause.
-#   pdf           the registry has no 2.0.0 build. Community extensions are rebuilt per
-#                 DuckDB version and lag a major release; nothing in this fleet can
-#                 publish it. Without it, `.pdf` does not read. Drop this entry when the
-#                 registry serves pdf for the pinned version -- `--init` says so itself,
-#                 because an allowlisted name that installs prints NOW AVAILABLE.
+# pdf was listed here and is NOT any more. The registry had no 2.0.0 build on
+# 2026-10-27; it serves one on 2026-10-29, MEASURED by INSTALL+LOAD on both lines.
+# `--init` said so itself -- an allowlisted name that loads prints NOW AVAILABLE --
+# which is what this entry was told to wait for. NOTE: duckdb/community-extensions#3425,
+# the build this fleet opened for it, was CLOSED unmerged; the binary arrived another
+# way, so do not read its availability as that PR landing.
+# textplot was listed here and is NOT any more either: it is reachable, from
+# Query.Farm's repository rather than the community one. See DUCKEYE_QUERYFARM above.
 # "Unpublished" means NOT USABLE on this DuckDB version, which is wider than a 404:
 # an entry here is tolerated by --init whatever the reason, because what makes a
 # failure tolerable is that somebody declared it, not which error it raised.
 # Measured on DuckDB 1.5.6 (2026-10-03): toml alone 404s at community-extensions.duckdb.org,
 # while the other twelve duckeye needs serve normally.
-# Re-measured on DuckDB 2.0.0 (2026-10-27), the version CI now pins, by calling LOAD on
-# all sixteen rather than reading INSTALL's exit code: pdf and toml 404, textplot
-# INSTALLS AND THEN THROWS ON LOAD -- it moved to Query.Farm's own repository and the
-# community registry still serves a binary for it -- and the other thirteen are usable,
-# sitting_duck included.
-: "${DUCKEYE_UNPUBLISHED:=toml pdf textplot}"
+# Re-measured on DuckDB 2.0.0 (2026-10-29) by calling LOAD on every name rather than
+# reading INSTALL's exit code: `toml` alone 404s. `pdf` now installs and loads. The
+# community `textplot` still installs and then throws on LOAD, so it is served from
+# Query.Farm instead -- not tolerated, REDIRECTED, which is why it is not listed here.
+# toml is unavailable on 1.5.6 too.
+: "${DUCKEYE_UNPUBLISHED:=toml}"
 
 usage() {
   cat <<'EOF'
@@ -181,7 +208,13 @@ Env:
   DUCKEYE_OFFICIAL   --init installs these from the core repo
   DUCKEYE_COMMUNITY  --init installs these from the community repo
                      (default: duck_block_utils markdown webbed zim pdf yaml
-                      toml read_lines duck_tails zipfs textplot sitting_duck panduck)
+                      toml read_lines duck_tails zipfs sitting_duck panduck)
+  DUCKEYE_QUERYFARM  --init installs these from Query.Farm's repo, a THIRD-PARTY
+                     source (default on DuckDB 2.0+: textplot; empty before that,
+                     where the community copy works). Set empty to decline it and
+                     lose only -Z sparklines and profile histograms.
+  DUCKEYE_QUERYFARM_URL  that repo's prefix
+                     (default: https://duckdb-extensions.query.farm)
 
 Examples:
   duckeye README.md                  # render to stdout, unpaged
@@ -215,12 +248,58 @@ dbu_body_floor() {
   fi
 }
 
+# 0 when duckdb cannot be run at all, which makes every caller below take the
+# community path rather than guess at a repository that may not exist.
+duckeye_ddb_major() {
+  if [[ -z ${_ddb_major_cached-} ]]; then
+    local v
+    v=$(duckdb --version 2>/dev/null) || v=''
+    v=${v#v}; v=${v%%.*}
+    [[ -z $v || $v == *[!0-9]* ]] && v=0
+    _ddb_major_cached=$v
+  fi
+  printf '%s' "$_ddb_major_cached"
+}
+
+# Build the LOAD prelude for an extension list. A Query.Farm extension is installed
+# into its own repository subdirectory, and an unqualified LOAD does NOT fall back to
+# it -- MEASURED 2026-10-29: with the flat-path copy moved aside, `LOAD textplot` fails
+# with `not found` rather than finding the repositories/query_farm/ copy.
+#
+# This is one function because the four LOAD sites were NOT kept in step: only the
+# general-query one was qualified, and -Z is the single mode that loads textplot, so
+# the one path that needed the repo name was the one still missing it. A populated
+# local extension directory hid that -- a flat-path binary answers an unqualified
+# LOAD -- and a clean CI runner failed nine -Z assertions. One builder, four callers,
+# so the next extension that moves repository cannot land half-applied.
+duckeye_load_sql() {
+  local e out='' major=''
+  for e in "$@"; do
+    if [[ -n ${DUCKEYE_QUERYFARM-} && " $DUCKEYE_QUERYFARM " == *" $e "* ]]; then
+      # Probed only when a query_farm name is really in the list, and at most once per
+      # call. No cache outlives this: every caller runs it in a command substitution.
+      [[ -n $major ]] || major=$(duckeye_ddb_major)
+      (( major >= 2 )) && { out+="LOAD $e FROM query_farm; "; continue; }
+    fi
+    out+="LOAD $e; "
+  done
+  printf '%s' "$out"
+}
+
 # Each extension is named alongside the repository it comes from, so a failure
 # reports DuckDB's own reason instead of being masked by a guess at the other repo.
 init() {
   local e repo rc=0 err
-  for repo in core community; do
-    for e in $( [[ $repo == core ]] && echo "$DUCKEYE_OFFICIAL" || echo "$DUCKEYE_COMMUNITY" ); do
+  local list sql
+  for repo in core community query_farm; do
+    case $repo in
+      core)       list=$DUCKEYE_OFFICIAL ;;
+      community)  list=$DUCKEYE_COMMUNITY
+                  (( $(duckeye_ddb_major) < 2 )) && list+=" $DUCKEYE_QUERYFARM" ;;
+      query_farm) list=''
+                  (( $(duckeye_ddb_major) >= 2 )) && list=$DUCKEYE_QUERYFARM ;;
+    esac
+    for e in $list; do
       printf '%-20s %-10s ' "$e" "$repo"
       # LOAD, not just INSTALL. A successful INSTALL is a description -- bytes arrived
       # and the exit code was 0 -- and it was reported as success for an extension that
@@ -230,7 +309,20 @@ init() {
       # `--init` printed `installed` and exited 0, while every -Z case failed. One
       # predicate answers what a caller needs -- can this extension be USED here --
       # and the only way to measure it is to use it.
-      if err=$(duckdb -s "INSTALL $e FROM $repo; LOAD $e;" 2>&1); then
+      # Query.Farm is not a repository duckdb knows, so it is registered first, and
+      # the extension lands under repositories/query_farm/ rather than beside the
+      # others -- which is why LOAD must name the repo here and at every later LOAD.
+      # MEASURED 2026-10-29: a plain `LOAD textplot` after this install fails with
+      # `Extension ".../textplot.duckdb_extension" not found`.
+      if [[ $repo == query_farm ]]; then
+        sql="SET allow_extension_repositories = 'allowed';
+             CREATE EXTENSION REPOSITORY IF NOT EXISTS query_farm
+               WITH PREFIX '$DUCKEYE_QUERYFARM_URL';
+             INSTALL $e FROM query_farm; LOAD $e FROM query_farm;"
+      else
+        sql="INSTALL $e FROM $repo; LOAD $e;"
+      fi
+      if err=$(duckdb -s "$sql" 2>&1); then
         # An allowlisted extension that now WORKS means the allowance has EXPIRED. Say
         # so loudly, in the same spirit as test.sh's guards reporting FIXED: a tolerance
         # nothing revisits is how a workaround outlives its reason.
@@ -1189,7 +1281,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     sql="SUMMARIZE ($target_query);"
   elif [[ $mode == profile ]]; then
     load=
-    for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
+    load=$(duckeye_load_sql $exts $DUCKEYE_EXTS)
     cols_raw=$(duckdb -dark-mode -noheader -list -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name || chr(9) || column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
 
     if [[ $term_cols -le 85 ]]; then
@@ -1421,7 +1513,7 @@ FROM __duckeye_src"
     *) no_autoload="SET autoload_known_extensions=false; " ;;
   esac
   load="${no_autoload:-}"
-  for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
+  load+=$(duckeye_load_sql $exts $DUCKEYE_EXTS)
   # Piped output is read by programs, not people, so it leaves the box behind. JSONL
   # rather than CSV/TSV because duckeye's cells routinely hold document text: .mode tabs
   # emits an embedded tab or newline RAW, silently turning one row into extra columns or
@@ -1492,8 +1584,8 @@ if [[ $key == *.zim ]]; then
     esac
     term_cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
     [[ $term_cols =~ ^[0-9]+$ && $term_cols -gt 0 ]] || term_cols=120
-    load="LOAD zim; "
-    for e in $DUCKEYE_EXTS; do load+="LOAD $e; "; done
+    load=$(duckeye_load_sql zim)
+    load+=$(duckeye_load_sql $DUCKEYE_EXTS)
     page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
     # Same rule as the data modes: a pipe gets JSONL, a terminal or pager gets the box.
     if want_box; then
@@ -2117,7 +2209,10 @@ fi
 # `-Q a` produces. So the better choice is now the one it used to be.
 
 load="${prethreads:-}"
-for e in $DUCKEYE_BASE $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
+# A Query.Farm extension is installed into its own repository subdirectory, so every
+# session must name the repo on LOAD as well as on INSTALL. No registration is needed
+# here -- MEASURED 2026-10-29, a fresh session loads it with FROM alone.
+load+=$(duckeye_load_sql $DUCKEYE_BASE $exts $DUCKEYE_EXTS)
 
 duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")
 [[ -n $premacro ]] && duck+=(-s "$premacro")   # its own -s: macros must exist before $sql binds

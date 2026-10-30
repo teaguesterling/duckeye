@@ -261,6 +261,31 @@ duckeye_ddb_major() {
   printf '%s' "$_ddb_major_cached"
 }
 
+# Build the LOAD prelude for an extension list. A Query.Farm extension is installed
+# into its own repository subdirectory, and an unqualified LOAD does NOT fall back to
+# it -- MEASURED 2026-10-29: with the flat-path copy moved aside, `LOAD textplot` fails
+# with `not found` rather than finding the repositories/query_farm/ copy.
+#
+# This is one function because the four LOAD sites were NOT kept in step: only the
+# general-query one was qualified, and -Z is the single mode that loads textplot, so
+# the one path that needed the repo name was the one still missing it. A populated
+# local extension directory hid that -- a flat-path binary answers an unqualified
+# LOAD -- and a clean CI runner failed nine -Z assertions. One builder, four callers,
+# so the next extension that moves repository cannot land half-applied.
+duckeye_load_sql() {
+  local e out='' major=''
+  for e in "$@"; do
+    if [[ -n ${DUCKEYE_QUERYFARM-} && " $DUCKEYE_QUERYFARM " == *" $e "* ]]; then
+      # Probed only when a query_farm name is really in the list, and at most once per
+      # call. No cache outlives this: every caller runs it in a command substitution.
+      [[ -n $major ]] || major=$(duckeye_ddb_major)
+      (( major >= 2 )) && { out+="LOAD $e FROM query_farm; "; continue; }
+    fi
+    out+="LOAD $e; "
+  done
+  printf '%s' "$out"
+}
+
 # Each extension is named alongside the repository it comes from, so a failure
 # reports DuckDB's own reason instead of being masked by a guess at the other repo.
 init() {
@@ -1256,7 +1281,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     sql="SUMMARIZE ($target_query);"
   elif [[ $mode == profile ]]; then
     load=
-    for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
+    load=$(duckeye_load_sql $exts $DUCKEYE_EXTS)
     cols_raw=$(duckdb -dark-mode -noheader -list -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name || chr(9) || column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
 
     if [[ $term_cols -le 85 ]]; then
@@ -1488,7 +1513,7 @@ FROM __duckeye_src"
     *) no_autoload="SET autoload_known_extensions=false; " ;;
   esac
   load="${no_autoload:-}"
-  for e in $exts $DUCKEYE_EXTS; do load+="LOAD $e; "; done
+  load+=$(duckeye_load_sql $exts $DUCKEYE_EXTS)
   # Piped output is read by programs, not people, so it leaves the box behind. JSONL
   # rather than CSV/TSV because duckeye's cells routinely hold document text: .mode tabs
   # emits an embedded tab or newline RAW, silently turning one row into extra columns or
@@ -1559,8 +1584,8 @@ if [[ $key == *.zim ]]; then
     esac
     term_cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
     [[ $term_cols =~ ^[0-9]+$ && $term_cols -gt 0 ]] || term_cols=120
-    load="LOAD zim; "
-    for e in $DUCKEYE_EXTS; do load+="LOAD $e; "; done
+    load=$(duckeye_load_sql zim)
+    load+=$(duckeye_load_sql $DUCKEYE_EXTS)
     page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
     # Same rule as the data modes: a pipe gets JSONL, a terminal or pager gets the box.
     if want_box; then
@@ -2187,14 +2212,7 @@ load="${prethreads:-}"
 # A Query.Farm extension is installed into its own repository subdirectory, so every
 # session must name the repo on LOAD as well as on INSTALL. No registration is needed
 # here -- MEASURED 2026-10-29, a fresh session loads it with FROM alone.
-for e in $DUCKEYE_BASE $exts $DUCKEYE_EXTS; do
-  # The name test comes FIRST so the version probe never runs for a load list that
-  # holds no query_farm name -- which is every invocation but -Z.
-  if [[ -n $DUCKEYE_QUERYFARM && " $DUCKEYE_QUERYFARM " == *" $e "* ]] \
-     && (( $(duckeye_ddb_major) >= 2 )); then load+="LOAD $e FROM query_farm; "
-  else                                        load+="LOAD $e; "
-  fi
-done
+load+=$(duckeye_load_sql $DUCKEYE_BASE $exts $DUCKEYE_EXTS)
 
 duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")
 [[ -n $premacro ]] && duck+=(-s "$premacro")   # its own -s: macros must exist before $sql binds

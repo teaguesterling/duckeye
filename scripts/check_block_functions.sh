@@ -65,6 +65,14 @@ fi
 loaded=() load= absent=()
 for e in $DUCKEYE_CHECK_EXTS; do
   if duckdb -c "LOAD $e;" >/dev/null 2>&1; then load+="LOAD $e; "; loaded+=("$e")
+  # A Query.Farm extension lives in its own repository subdirectory, and an unqualified
+  # LOAD does not look there. Without this arm a clean machine reports textplot absent
+  # and turns every tp_ name into UNVERIFIABLE -- the check still exits 0, having
+  # measured nothing. That is the failure this script exists to not have.
+  # Retried rather than version-gated on purpose: this script already prefers calling
+  # LOAD over reading a descriptor, and the retry costs one process on the miss path.
+  elif duckdb -c "LOAD $e FROM query_farm;" >/dev/null 2>&1
+  then load+="LOAD $e FROM query_farm; "; loaded+=("$e")
   else printf 'note: %s not installed, names it provides cannot be verified\n' "$e" >&2
        absent+=("$e")
   fi

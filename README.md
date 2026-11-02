@@ -888,9 +888,16 @@ against the libraries, not duckeye:
   ([panduck#37](https://github.com/teaguesterling/duckdb_panduck/issues/37)).
   duckeye no longer hits this: `-t pandoc` uses `duck_blocks_to_pandoc_ast`, whose
   spec 1.2 struct carries `meta` and `blocks` as JSON *type*, so `to_json()` of it
-  is the Pandoc document and the macro that used to reassemble one is gone. That
-  function moved from duck_block_utils to panduck 0.7.0 at duck_block_utils 4.0.
-  Update the two together: 3.5.1 with panduck 0.7.0 fails on `LOAD`.
+  is the Pandoc document and the macro that used to reassemble one is gone.
+  **Every** pandoc function moved from duck_block_utils to panduck at
+  duck_block_utils 4.0, under the same names — measured on the served pair
+  (duck_block_utils `65f03cb`, spec 1.4, and panduck `dc094ee`): loading
+  duck_block_utils alone provides none of `read_pandoc_ast`,
+  `read_pandoc_blocks`, `pandoc_ast_to_blocks`, `duck_blocks_to_pandoc_ast` or
+  `panduck_blocks_to_pandoc_ast`, and loading panduck provides all five. So both
+  directions need panduck: `-t pandoc` to build an AST, and a `.json` input to
+  read one. Update the two extensions together; 3.5.1 with panduck 0.7.0 fails
+  on `LOAD`.
 - **`.textile` table cells kept their alignment modifiers** (`<.`, `>.`, `=.`) and `.rst`
   cells kept literal inline markup. Both are fixed in panduck v0.5.0, served since
   2026-09-14 and measured: `.textile` is read by panduck, so the fix reaches users

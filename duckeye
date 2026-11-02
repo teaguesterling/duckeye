@@ -1692,6 +1692,18 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
                        lambda acc, x: duck_blocks_merge(acc, x))) AS blocks
          FROM __pg" ;;
   *.json|.pandoc_ast)              # Pandoc AST
+    # panduck, for the same reason `-t pandoc` needs it: duck_block_utils 4.0 moved every
+    # pandoc function out, under the same names. MEASURED on the served pair
+    # (duck_block_utils 65f03cb, spec 1.4, and panduck dc094ee): loading duck_block_utils
+    # alone raises `Catalog Error: Scalar Function with name read_pandoc_ast does not exist!`,
+    # and loading panduck returns the blocks. This branch set no exts at all, so it had been
+    # riding on whatever the default load happened to carry -- which was duck_block_utils.
+    #
+    # The stdin branch below already reads an AST through panduck's read_pandoc_blocks. This
+    # one keeps read_pandoc_ast because it takes a PATH: read_pandoc_blocks is a table
+    # function and the pipe-only workaround there exists for a constant-folding bug on
+    # /dev/stdin, which a real file does not hit.
+    exts="panduck"
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;
   *.py|*.pyi|*.pyw|*.rs|*.go|*.c|*.h|*.cpp|*.hpp|*.cc|*.cxx|*.c++|*.hh|*.hxx|\
   *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.java|*.kt|*.kts|*.cs|*.swift|*.rb|*.ruby|\

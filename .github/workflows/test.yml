@@ -69,19 +69,33 @@ jobs:
       # reproduced on the current CLI with lambda_syntax='DISABLE_SINGLE_ARROW'.
       #
       # The setting goes in a .duckdbrc under a throwaway HOME, which the CLI reads for
-      # every duckdb invocation duckeye makes. extension_directory keeps pointing at the
-      # real one --init filled, and .gitconfig comes along for the git:// cases.
+      # every duckdb invocation duckeye makes. The real extension directory --init filled
+      # is reached by SYMLINK, and .gitconfig comes along for the git:// cases.
       #
-      # The activation check is not decoration: if the CLI ever stopped reading
-      # .duckdbrc, both suites would run under the DEFAULT rule and pass, measuring
-      # nothing. So the step first proves the rule is live, and fails if it is not.
+      # A SYMLINK AND NOT `SET extension_directory`, which is what this step used to do.
+      # DuckDB 2.0 DEPRECATED that setting and its warning goes to STDOUT, three lines
+      # ahead of the data. duckeye parses duckdb's stdout AS DATA, so every query came
+      # back looking non-empty: `duckeye -S nosuchsection` exited 0 instead of 1, and 48
+      # assertions failed in a step whose own subject is lambdas. MEASURED both ways on
+      # one tree: exit 0 with that rc, exit 1 without it.
+      #
+      # Two checks, because the first alone let that through:
+      #   1. the rule is LIVE -- if the CLI ever stopped reading .duckdbrc, both suites
+      #      would run under the DEFAULT rule and pass, measuring nothing.
+      #   2. the rc is SILENT on stdout -- a warning there is indistinguishable from a
+      #      result to every caller in this repo, which is how (1) stayed green while the
+      #      step measured garbage.
       - name: Run tests under DuckDB 2.0's lambda rule
         run: |
           H=$(mktemp -d)
-          printf "SET extension_directory='%s/.duckdb/extensions';\nSET lambda_syntax='DISABLE_SINGLE_ARROW';\n" "$HOME" > "$H/.duckdbrc"
+          printf "SET lambda_syntax='DISABLE_SINGLE_ARROW';\n" > "$H/.duckdbrc"
+          ln -s "$HOME/.duckdb" "$H/.duckdb"
           cp "$HOME/.gitconfig" "$H/" 2>/dev/null || true
           HOME="$H" duckdb -list -noheader -c "SELECT current_setting('lambda_syntax')" | grep -q DISABLE_SINGLE_ARROW \
             || { echo "lambda rule NOT active -- .duckdbrc was not read"; exit 1; }
+          noise=$(HOME="$H" duckdb -list -noheader -c "SELECT 1" 2>/dev/null | grep -vx '1' || true)
+          [ -z "$noise" ] \
+            || { echo "the rc leaks onto stdout, which duckeye reads as data: $noise"; exit 1; }
           HOME="$H" ./test.sh
           HOME="$H" ./integration.sh
 

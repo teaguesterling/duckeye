@@ -1,14 +1,14 @@
 # duckeye
 
 Read documents in the terminal. Markdown, HTML, PDF, DOCX, EPUB, LaTeX, Jupyter notebooks,
-man pages, an offline Wikipedia — parsed by [DuckDB](https://duckdb.org), rendered by
+an offline Wikipedia — parsed by [DuckDB](https://duckdb.org), rendered by
 [`duck_block_utils`](https://github.com/teaguesterling/duckdb_duck_block_utils).
 
 ```console
 $ duckeye README.md                         # render, unpaged (shorthand: de README.md)
 $ dep README.md                             # same, paged through $DUCKEYE_PAGER
 $ der test.py                               # force raw data/AST table mode
-$ zcat ls.1.gz | duckeye -T -               # or read a pipe, format sniffed
+$ curl -s $URL | duckeye -T -               # or read a pipe, format sniffed
 $ duckeye -T spec.md                        # outline a document
 $ duckeye -T server.go                      # outline classes, functions & methods
 $ duckeye -S 'Runbook Steps' spec.md        # one section
@@ -78,27 +78,18 @@ $ duckeye analysis.ipynb                    # notebook prose and code, no Jupyte
 $ duckeye notes.org                         # org-mode without Emacs
 ```
 
-Man page source works too — `.man` and the numbered sections `.1` … `.9` — so you can
-jump straight to the part you wanted:
+Jumping straight to the part you wanted works on any format duckeye reads:
 
 ```console
-$ zcat /usr/share/man/man1/ls.1.gz | duckeye -T -
-NAME
-SYNOPSIS
-DESCRIPTION
-  Exit status:
-AUTHOR
-REPORTING BUGS
-COPYRIGHT
-SEE ALSO
-
-$ zcat /usr/share/man/man1/ls.1.gz | duckeye -S SYNOPSIS
-▍ SYNOPSIS
-
-ls [OPTION]... [FILE]...
+$ duckeye -T notes.rst                      # the outline
+$ duckeye -S Installation notes.rst         # one section
 ```
 
-No temporary file and no `-f`: piped input is sniffed, and roff is recognisable.
+**Man page source is not a format.** `.man` and the numbered sections `.1`–`.9` were
+read through `pandoc(1)` until they were removed; roff has no reader anywhere in the
+stack, so nothing was left for them to fall back to and both spellings now refuse with
+`unsupported extension`. A roff file piped in is no longer sniffed either; with the arm
+gone it falls through to markdown like any other unrecognised text.
 
 ## Standard input, git revisions, and telling duckeye what it's looking at
 
@@ -116,13 +107,13 @@ $ unzip -p archive.zip doc.docx | duckeye -T -        # sniffed as DOCX
 
 Sniffing reads magic bytes first (`%PDF`, and the zip container that `.docx`, `.epub`
 and `.odt` all really are — told apart by their manifests), then falls back to text
-markers: an HTML doctype, a Pandoc AST's `pandoc-api-version`, roff's `.TH`. Anything
+markers: an HTML doctype, a Pandoc AST's `pandoc-api-version`, a shebang. Anything
 else is treated as markdown, which degrades into legible plain text.
 
 When the guess is wrong, or a filename lies, `-f` settles it:
 
 ```console
-$ duckeye -T -f man ls.1                    # a format name is just its extension
+$ duckeye -T -f rst notes.txt               # a format name is just its extension
 $ duckeye -T -f html page.txt               # extension says otherwise
 $ cat data.parquet | duckeye -d -f parquet -    # under -d it names a DuckDB reader
 $ cat log.csv | duckeye -f csv -w "level = 'ERROR'" -
@@ -221,7 +212,7 @@ reader. See [Data files and profiling](#data-files-and-profiling).
 **`-t md` does not shell out.** It calls `duck_blocks_to_md`, one of the
 duck_blocks writers, so *writing* markdown needs no `pandoc` binary and takes no
 round trip through a Pandoc AST. `-t pandoc` is the only format that builds one.
-(Reading `.rst` and `.man` still runs `pandoc` — see below.)
+(Reading `.rst` still runs `pandoc` — see below.)
 
 That matters for more than a dependency. A Pandoc AST has no representation for a
 block that cannot stand at the top level, and `duck_blocks_to_pandoc_ast` drops
@@ -739,14 +730,15 @@ anything, or to convert an AST into blocks; three extensions still use it to
 | ext | why pandoc still reads it |
 |---|---|
 | `.rst` | panduck has fixed table cells, block-quote nesting, the one-line footnote body, numbered section titles and heading ids (the last two in 0.5.5). One defect still holds the route: footnote and citation reference markers stay literal in the prose (`a note [1]_`) with bodies as loose paragraphs carrying no id, where pandoc attaches a note (panduck#85 part 1) |
-| `.man`, `.N` | no extension in the stack reads roff — `panduck_can_read('a.man')` is false — so pandoc is the only route. Whether panduck intends to support it is not recorded either way |
 
 Everything else — `.docx .odt .epub .org .tex .rtf .textile .mediawiki`, plus
 `.md` and `.html` — is read natively, with no pandoc process.
 
-Each of those is one upstream fix away, and `test.sh` carries a guard for each that
-reports `FIXED` when the route can move. That leaves roff as the only format needing
-pandoc; whether panduck ever reads roff is an open question, not a settled one.
+`.rst` is one upstream fix away, and `test.sh` carries guards that report `FIXED` when
+the route can move; at that point nothing needs `pandoc(1)` at all. `.man` and `.1`–`.9`
+used to share this table, on the measurement that nothing in the stack reads roff
+(`panduck_can_read('a.man')` is false). Rather than wait on a reader nobody had promised,
+man page support was removed.
 
 ## Formats
 
@@ -760,13 +752,13 @@ pandoc; whether panduck ever reads roff is an open question, not a settled one.
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | [`sitting_duck`](https://github.com/teaguesterling/duckdb_sitting_duck) (Tree-sitter AST to duck_blocks) |
 | `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` `.ipynb` | `panduck` extension — read natively, no `pandoc(1)`; `.ipynb` expands its markdown cells through `markdown`, and marks cells with `source_type` rather than pandoc's `cell markdown` class names |
 | `.rst` | `pandoc(1)` — panduck reads it, but leaves footnote markers literal with unlinked bodies (panduck#85 part 1) |
-| `.man`, `.1`–`.9` | `pandoc(1)` — man page source |
 | anything DuckDB reads, under `-d` | parquet, csv, json, yaml, toml, xlsx, pdf, zip, git, lines, ast, … |
 | standard input | sniffed (magic bytes, doctypes, shebangs), or named with `-f` |
 
 duckeye names the pandoc reader explicitly rather than letting pandoc infer it from the
-extension — `.man` and `.mediawiki` defeat inference, and `.mediawiki` fails *quietly*,
-falling back to markdown and exiting 0.
+extension. Inference would work for `.rst`, the only format still on that route; the
+explicit name is kept because `.mediawiki` defeats inference and fails *quietly* when
+it does, falling back to markdown and exiting 0.
 
 Need a format that isn't listed? If a DuckDB extension produces duck_blocks for it, add
 it to `DUCKEYE_EXTS`.

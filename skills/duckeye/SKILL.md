@@ -3,7 +3,7 @@ name: duckeye
 description: >-
   Use this skill when the user asks about reading, rendering, searching,
   navigating, or converting documents (markdown, HTML, PDF, DOCX, EPUB, LaTeX,
-  Jupyter notebooks, man pages, ZIM archives) or source code ASTs (Python, Rust,
+  Jupyter notebooks, ZIM archives) or source code ASTs (Python, Rust,
   Go, C/C++, JS/TS, Java, Kotlin, Swift, Ruby, PHP, Lua, Bash, etc. via sitting_duck)
   in the terminal, or when inspecting structured data files (parquet, CSV, JSON,
   YAML, TOML, XLSX, ZIP, git logs). Also activate when querying code by CSS
@@ -227,7 +227,7 @@ duckeye -T --json docs/architecture.md
    sections or functions. This avoids dumping entire large files or codebases into context.
 
 3. **Prefer duckeye over `cat` for non-plaintext files** — PDF, DOCX, EPUB, HTML,
-   LaTeX, notebooks, man pages, and source code files (Python, Rust, Go, JS/TS, etc.)
+   LaTeX, notebooks, and source code files (Python, Rust, Go, JS/TS, etc.)
    are all parsed into clean, structured blocks.
 
 4. **Use `-Q` for code exploration** — CSS selectors (`.func`, `.class#Name`, `.func:async`, `.func[name^=test_]`)
@@ -264,7 +264,7 @@ duckeye -T --json docs/architecture.md
 | `.zim`, `zim://…` | `zim` DuckDB extension (handles HTML, markdown, and embedded PDFs) |
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | `sitting_duck` DuckDB extension (Tree-sitter AST to duck_blocks & CSS selector engine) |
 | `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` `.ipynb` | `panduck` — native, no `pandoc(1)` |
-| `.rst` `.man` `.1`–`.9` | `pandoc(1)` — the only two routes that still need it |
+| `.rst` | `pandoc(1)` — the only route that still needs it |
 | anything under `-d` | DuckDB reader (parquet, csv, json, yaml, xlsx, pdf, zip, git, lines, ast, …; `toml` is unpublished — see above) |
 
 ---

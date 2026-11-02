@@ -5,7 +5,7 @@
 ## Prerequisites
 
 * **DuckDB**: Version 1.1+ (recommended 1.2+ or 1.5+)
-* **Pandoc** *(optional)*: only `.rst` and `.man` still read through `pandoc(1)`; `.docx`, `.epub`, `.odt`, `.tex`, `.org`, `.ipynb`, `.rtf`, `.textile` and `.mediawiki` read through the `panduck` extension.
+* **Pandoc** *(optional)*: only `.rst` still reads through `pandoc(1)`; `.docx`, `.epub`, `.odt`, `.tex`, `.org`, `.ipynb`, `.rtf`, `.textile` and `.mediawiki` read through the `panduck` extension.
 
 ---
 

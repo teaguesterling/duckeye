@@ -173,7 +173,6 @@ Formats:
   .ipynb               panduck extension, natively — panduck 0.5.1 fixed the lambda
                        warning that had kept notebooks on pandoc(1)
   .rst                 via pandoc(1) — panduck reads it, but loses table-cell markup
-  .man .1 ... .9       man page source, via pandoc(1) — roff has no native reader
   .zim  zim://...      zim extension (see ZIM archives below)
   -d bypasses this table entirely and hands FILE to DuckDB, so the format is
   whatever DuckDB's replacement scan makes of the extension. Under -d a .json
@@ -353,7 +352,7 @@ init() {
   done
   printf '%-20s %-10s ' pandoc system
   if command -v pandoc >/dev/null; then echo found
-  else echo 'missing — .rst/.man will not render; the rest use panduck'
+  else echo 'missing — .rst will not render; the rest use panduck'
   fi
   dbu_body_floor
   return $rc
@@ -745,7 +744,8 @@ sniff() {
     '#!'*ruby*)                          echo rb;         return ;;
     '#!'*node*)                          echo js;         return ;;
     *'"pandoc-api-version"'*)            echo pandoc_ast; return ;;   # a Pandoc AST
-    '.TH '*|'.\"'*|"'\\\""*|'.SH '*)     echo man;        return ;;   # roff
+    # No roff arm. Man page support was removed entirely, so a roff file has no reader
+    # to sniff its way to and falls through to md like any other unrecognised text.
     '<?xml'*|'<'*)                       echo html;       return ;;
   esac
   echo md
@@ -1692,6 +1692,18 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
                        lambda acc, x: duck_blocks_merge(acc, x))) AS blocks
          FROM __pg" ;;
   *.json|.pandoc_ast)              # Pandoc AST
+    # panduck, for the same reason `-t pandoc` needs it: duck_block_utils 4.0 moved every
+    # pandoc function out, under the same names. MEASURED on the served pair
+    # (duck_block_utils 65f03cb, spec 1.4, and panduck dc094ee): loading duck_block_utils
+    # alone raises `Catalog Error: Scalar Function with name read_pandoc_ast does not exist!`,
+    # and loading panduck returns the blocks. This branch set no exts at all, so it had been
+    # riding on whatever the default load happened to carry -- which was duck_block_utils.
+    #
+    # The stdin branch below already reads an AST through panduck's read_pandoc_blocks. This
+    # one keeps read_pandoc_ast because it takes a PATH: read_pandoc_blocks is a table
+    # function and the pipe-only workaround there exists for a constant-folding bug on
+    # /dev/stdin, which a real file does not hit.
+    exts="panduck"
     doc="SELECT read_pandoc_ast('$src') AS blocks" ;;
   *.py|*.pyi|*.pyw|*.rs|*.go|*.c|*.h|*.cpp|*.hpp|*.cc|*.cxx|*.c++|*.hh|*.hxx|\
   *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.java|*.kt|*.kts|*.cs|*.swift|*.rb|*.ruby|\
@@ -1800,11 +1812,13 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
       *.ipynb)     exts="panduck markdown"
                    doc="SELECT list(b) AS blocks FROM read_panduck_doc('$src', expand_embedded := true) b" ;;
     esac ;;
-  *.rst|*.man|*.[1-9])
-    # Two formats stay on pandoc(1), each for a measured reason. .ipynb left this list
-    # when panduck 0.5.1 fixed the lambda warning (#65) -- it now reads through panduck
+  *.rst)
+    # ONE format stays on pandoc(1), for a measured reason. .ipynb left this list when
+    # panduck 0.5.1 fixed the lambda warning (#65) -- it now reads through panduck
     # above -- and test.sh carries two guards for .rst that report FIXED when that
-    # route can move too.
+    # route can move too. `.man` and the numbered sections `.1`-`.9` were here too
+    # until man page support was removed entirely; roff has no reader anywhere in the
+    # stack, so nothing was left behind for them to use.
     #
     #   .rst    panduck has now fixed five defects that each held this route: table-cell
     #           markup and block-quote nesting (0.5.1), the one-line footnote body
@@ -1830,27 +1844,17 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
     #           panduck: an `hr` after a BULLETED line is CORRECT -- docutils emits
     #           bullet_list + transition there and panduck matches it; pandoc is the
     #           outlier, so do not file that as a defect.
-    #   .man    panduck_can_read('a.man') is false and no extension in the stack
-    #           reads roff, so pandoc is the only route. WHY panduck does not read
-    #           it is NOT RECORDED -- an earlier version of this comment asserted
-    #           panduck had declined roff deliberately, which panduck checked and
-    #           denied: no mention of roff, troff, groff or man pages exists in its
-    #           README, docs, src or FOLLOWUPS, while its other deliberate declines
-    #           ARE written down. That attribution was invented here. State the
-    #           measurement, not a motive nobody has claimed.
     command -v pandoc >/dev/null ||
       die "${key##*.} needs pandoc, which is not installed" 3
-    # Name the reader rather than letting pandoc infer it: .man, and the numbered
-    # sections, defeat inference.
-    case "$key" in
-      *.rst)         from=rst ;;
-      *.man|*.[1-9]) from=man ;;
-    esac
+    # Name the reader rather than letting pandoc infer it. Inference would work for
+    # .rst alone; the explicit name is kept because it costs nothing and because the
+    # branch used to carry formats that DID defeat inference.
+    from=rst
     via_pandoc=1
     # read_pandoc_ast() silently returns [] on a pipe (constant-folded double-read,
     # teaguesterling/duckdb_duck_block_utils#18), so stdin goes via read_text().
     # panduck's reader, not duck_block_utils' pandoc_ast_to_blocks, which is
-    # deprecated and printed a notice to stderr on every .rst/.ipynb/.man render.
+    # deprecated and printed a notice to stderr on every .rst/.ipynb render.
     # Same blocks out, measured; one less thing duckeye owns.
     exts+=" panduck"
     doc="SELECT list(b) AS blocks FROM read_pandoc_blocks('/dev/stdin') b" ;;
@@ -2218,6 +2222,7 @@ fi
 
 [[ $out_fmt == html ]] && exts+=" webbed"     # duck_blocks_to_html lives there
 [[ $out_fmt == md   ]] && exts+=" markdown"   # duck_blocks_to_md lives there
+[[ $out_fmt == pandoc ]] && exts+=" panduck"  # duck_blocks_to_pandoc_ast lives there from duck_block_utils 4.0
 # -t pandoc needs no macro. duck_block_utils spec 1.2 returns meta and blocks as JSON
 # type rather than VARCHAR holding JSON, so to_json() of the struct IS the Pandoc
 # document -- measured, pandoc 3.1.3 accepts it, hyphenated key and all.
@@ -2229,6 +2234,10 @@ fi
 # 6c1c2e5 duck_blocks_to_pandoc_ast wraps a fragment into its implicit parent while
 # panduck's a57402b still returns [] -- measured on a bare inline run, which is what
 # `-Q a` produces. So the better choice is now the one it used to be.
+#
+# duck_block_utils 4.0 moved that same function, under the same name, to panduck 0.7.0.
+# So the builder this comment chose is still the one in use, but it needs panduck
+# loaded. On 3.5.1 with the old panduck, the name still resolves to duck_block_utils.
 
 load="${prethreads:-}"
 # A Query.Farm extension is installed into its own repository subdirectory, so every

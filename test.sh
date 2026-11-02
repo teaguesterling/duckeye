@@ -789,16 +789,8 @@ ORG
   has 'ipynb renders'   'alpha body'    $DUCKEYE "$TMP/doc.ipynb"
   has 'ipynb toc'       'Alpha'         $DUCKEYE -T "$TMP/doc.ipynb"
 
-  # man page source, both as .man and as a numbered section
-  if [[ -r /usr/share/man/man1/ls.1.gz ]]; then
-    zcat /usr/share/man/man1/ls.1.gz >"$TMP/ls.1" 2>/dev/null
-    cp "$TMP/ls.1" "$TMP/ls.man"
-    has 'man .1 outline'  'SYNOPSIS'   $DUCKEYE -T "$TMP/ls.1"
-    has 'man .1 section'  'ls [OPTION' $DUCKEYE -S SYNOPSIS "$TMP/ls.1"
-    has 'man .man outline' 'SYNOPSIS'  $DUCKEYE -T "$TMP/ls.man"
-  else
-    skipping 'man pages' 'no /usr/share/man/man1/ls.1.gz'
-  fi
+  # No man page assertions. Man support was removed entirely, so `.man` and `.1`-`.9`
+  # are unsupported extensions now and the refusal below is what pins that.
 else
   skipping 'pandoc formats' 'pandoc not installed'
 fi
@@ -1118,17 +1110,23 @@ ok  'docx renders without pandoc(1)' \
     bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -T '$TMP/z.docx'"
 has 'docx content without pandoc(1)' 'Alpha' \
     bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE '$TMP/z.docx'"
-# man is the exception: roff has no native reader anywhere in the stack, so it still
-# needs pandoc(1) and must still say so. Guarded on the fixture EXISTING -- the first
-# version of this pointed at $TMP/doc.1, which is never created, so it passed because
-# the file was missing rather than because pandoc was.
-if [[ -r $TMP/ls.1 ]]; then
-  no  'man still needs pandoc(1)' \
-      bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -T '$TMP/ls.1'"
-  has 'man works when pandoc IS present' 'SYNOPSIS' $DUCKEYE -T "$TMP/ls.1"
-else
-  skipping 'man without pandoc' 'no man fixture'
-fi
+# .rst is now the only format that still shells out to pandoc(1), so it is the one that
+# must still say so when pandoc cannot run. This used to be the man page's job; man
+# support was removed entirely and .rst inherited the assertion, which is the better
+# home for it anyway -- the earlier version pointed at a fixture that is never created,
+# so it passed because the file was missing rather than because pandoc was.
+no  'rst still needs pandoc(1)' \
+    bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -T '$TMP/t.rst'"
+has 'rst works when pandoc IS present' 'Beta' $DUCKEYE -T "$TMP/t.rst"
+
+# And a man page is simply not a format any more. Both spellings refuse, and the refusal
+# is the assertion -- without it, removing the dispatch would read the same as never
+# having had it. dies_with and not has: the refusal goes to stderr, and has() matches
+# stdout only, so a has() here would fail while looking like it tested something.
+printf '.TH LS 1\n.SH SYNOPSIS\nls [OPTION]...\n' > "$TMP/gone.1"
+cp "$TMP/gone.1" "$TMP/gone.man"
+dies_with 'man .1 is unsupported'   'unsupported extension' $DUCKEYE -T "$TMP/gone.1"
+dies_with 'man .man is unsupported' 'unsupported extension' $DUCKEYE -T "$TMP/gone.man"
 
 # -Q on DOCUMENTS. duck_blocks are the same shape as an AST -- depth-first order
 # plus a level column -- so they project into sitting_duck's node schema and its

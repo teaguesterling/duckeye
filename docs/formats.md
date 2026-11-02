@@ -19,7 +19,6 @@
 | **Jupyter Notebook**| `.ipynb` | `panduck` (native) | Markdown cells and executed code cells |
 | **MediaWiki** | `.mediawiki` | `panduck` (native) | Wikipedia markup, templates, section headers |
 | **RTF / Textile** | `.rtf`, `.textile` | `panduck` (native) | Rich text & Textile document structures |
-| **Man Pages** | `.man`, `.1`–`.9` | `pandoc` | Unix roff manual pages with direct section jumping (via pandoc(1)) |
 | **Source Code ASTs**| `.py`, `.rs`, `.go`, `.c`, `.cpp`, `.js`, `.ts`, `.java`, `.kt`, `.cs`, `.swift`, `.rb`, `.php`, `.lua`, `.r`, `.sh`, `.zig`, `.dart`, `.sql`, `.gql`, `.tf`, `.css` (27 languages) | `sitting_duck` DuckDB extension | Tree-sitter AST parsing, class/function hierarchies, definition outlines, doc conversion |
 | **openZIM Archives**| `.zim`, `zim://...` | `zim` DuckDB extension | Multi-gigabyte offline archives, Xapian search, embedded PDFs |
 
@@ -75,7 +74,6 @@ When reading standard input (`cat file | duckeye -` or bare pipes) or extensionl
 * Zip magic bytes (`PK\x03\x04`) + internal manifest check &rarr; DOCX, EPUB, or ODT (or raw ZIP)
 * `<!DOCTYPE html` or `<html>` &rarr; HTML
 * `"pandoc-api-version"` &rarr; Pandoc AST JSON
-* `.TH ` roff macros &rarr; Man page source
 * Shebangs (`#!...python`, `#!...sh`, `#!...ruby`, `#!...node`) &rarr; Source code AST
 * Default fallback &rarr; Markdown
 

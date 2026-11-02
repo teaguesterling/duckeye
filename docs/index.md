@@ -2,7 +2,7 @@
 
 **Pretty-print documents and explore data in the terminal via DuckDB.**
 
-`duckeye` turns your terminal into a universal document reader and structured data explorer. Markdown, HTML, PDF, DOCX, EPUB, LaTeX, Jupyter notebooks, man pages, offline Wikipedia archives (ZIM), 27 programming language source ASTs (Python, Rust, Go, C/C++, JS/TS, etc.), Parquet, CSV, JSON, YAML, TOML, Excel spreadsheets, ZIP archives, and Git logs — parsed natively by DuckDB extensions and rendered with ANSI block formatting.
+`duckeye` turns your terminal into a universal document reader and structured data explorer. Markdown, HTML, PDF, DOCX, EPUB, LaTeX, Jupyter notebooks, offline Wikipedia archives (ZIM), 27 programming language source ASTs (Python, Rust, Go, C/C++, JS/TS, etc.), Parquet, CSV, JSON, YAML, TOML, Excel spreadsheets, ZIP archives, and Git logs — parsed natively by DuckDB extensions and rendered with ANSI block formatting.
 
 ```bash
 # Render documents & source code in terminal (shorthand: de)

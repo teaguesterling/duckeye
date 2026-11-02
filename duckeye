@@ -1692,12 +1692,16 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
                        lambda acc, x: duck_blocks_merge(acc, x))) AS blocks
          FROM __pg" ;;
   *.json|.pandoc_ast)              # Pandoc AST
-    # panduck, for the same reason `-t pandoc` needs it: duck_block_utils 4.0 moved every
-    # pandoc function out, under the same names. MEASURED on the served pair
-    # (duck_block_utils 65f03cb, spec 1.4, and panduck dc094ee): loading duck_block_utils
-    # alone raises `Catalog Error: Scalar Function with name read_pandoc_ast does not exist!`,
-    # and loading panduck returns the blocks. This branch set no exts at all, so it had been
-    # riding on whatever the default load happened to carry -- which was duck_block_utils.
+    # panduck, for the same reason `-t pandoc` needs it. WHICH extension registers
+    # read_pandoc_ast has moved twice, under the same name throughout, so this names panduck
+    # and relies on DUCKEYE_BASE carrying duck_block_utils as well: one of the two has it.
+    # MEASURED 2026-11-01 on duck_block_utils 65f03cb (spec 1.4) and panduck dc094ee: loading
+    # duck_block_utils alone raised `Catalog Error: Scalar Function with name read_pandoc_ast
+    # does not exist!` and loading panduck returned the blocks. MEASURED AGAIN 2026-11-02 on
+    # duck_block_utils e00db69 and panduck 3f8ea38: it is now the REVERSE -- duck_block_utils
+    # has it behind a stderr deprecation notice, panduck has none of the pandoc names. Naming
+    # one extension alone would therefore have broken on the other day. This branch used to
+    # set no exts at all, riding on whatever the default load carried.
     #
     # The stdin branch below already reads an AST through panduck's read_pandoc_blocks. This
     # one keeps read_pandoc_ast because it takes a PATH: read_pandoc_blocks is a table

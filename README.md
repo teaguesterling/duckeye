@@ -881,15 +881,21 @@ against the libraries, not duckeye:
   duckeye no longer hits this: `-t pandoc` uses `duck_blocks_to_pandoc_ast`, whose
   spec 1.2 struct carries `meta` and `blocks` as JSON *type*, so `to_json()` of it
   is the Pandoc document and the macro that used to reassemble one is gone.
-  **Every** pandoc function moved from duck_block_utils to panduck at
-  duck_block_utils 4.0, under the same names — measured on the served pair
-  (duck_block_utils `65f03cb`, spec 1.4, and panduck `dc094ee`): loading
-  duck_block_utils alone provides none of `read_pandoc_ast`,
-  `read_pandoc_blocks`, `pandoc_ast_to_blocks`, `duck_blocks_to_pandoc_ast` or
-  `panduck_blocks_to_pandoc_ast`, and loading panduck provides all five. So both
-  directions need panduck: `-t pandoc` to build an AST, and a `.json` input to
-  read one. Update the two extensions together; 3.5.1 with panduck 0.7.0 fails
-  on `LOAD`.
+  **Which extension owns the pandoc functions has moved twice, so duckeye loads
+  both.** The names are the same in either arrangement — `read_pandoc_ast`,
+  `read_pandoc_blocks`, `pandoc_ast_to_blocks`, `duck_blocks_to_pandoc_ast`,
+  `panduck_blocks_to_pandoc_ast` — only the owner changes. Measured on the pair
+  served 2026-11-01 (duck_block_utils `65f03cb`, spec 1.4, and panduck
+  `dc094ee`): duck_block_utils alone provided none of the five and panduck
+  provided all five. Measured again 2026-11-02 (duck_block_utils `e00db69` and
+  panduck `3f8ea38`): duck_block_utils provides all of them behind a deprecation
+  warning that reads `is DEPRECATED and moves to the panduck extension. It
+  still works in this release.`, and panduck provides none. duckeye is correct
+  either way because it loads `DUCKEYE_BASE` (duck_block_utils) alongside
+  panduck, so each name resolves from whichever extension currently registers
+  it. The deprecation line goes to **stderr**, measured — stdout stays parseable,
+  which matters because duckeye reads duckdb's stdout as data. Update the two
+  extensions together; 3.5.1 with panduck 0.7.0 fails on `LOAD`.
 - **`.textile` table cells kept their alignment modifiers** (`<.`, `>.`, `=.`) and `.rst`
   cells kept literal inline markup. Both are fixed in panduck v0.5.0, served since
   2026-09-14 and measured: `.textile` is read by panduck, so the fix reaches users

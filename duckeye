@@ -16,6 +16,30 @@
 #   DUCKEYE_QUERYFARM_URL  that repo's prefix
 set -uo pipefail
 
+# DuckDB 2.0 turns on "agent mode" BY ITSELF when AI_AGENT or CLAUDECODE is set and its
+# stdout is not a terminal -- which is every call duckeye makes, since duckeye captures
+# that stdout and treats it as data. Agent mode is not cosmetic: it changes the markdown
+# writer, from `| id | name  |` with an aligned rule to `| id:BIGINT | name:VARCHAR |`
+# with an unaligned one, and it re-wraps every ERROR as JSON with escaped quotes.
+#
+# duckeye's output therefore depended on who called it. Measured 2026-11-08 on v2.0.0:
+# `-t md` under `-d` emitted typed headers for an agent and plain ones for a human, and
+# a missing extension's error arrived as JSON, which defeated test.sh's own
+# skip-vs-fail attribution. The suite went 381/2-fail under an agent and 382/0-fail with
+# these two variables cleared -- same commit, same binary, 384 assertions either way.
+# CI never saw it, because a GitHub runner sets neither variable.
+#
+# Cleared here rather than by passing `-no-agent` to each duckdb call, for two reasons:
+# there are 26 such calls and a 27th would silently miss the flag, and `-no-agent` is a
+# 2.0 option while duckeye supports 1.5.x (I could not test 1.5.6 -- no binary on this
+# machine -- so the version-safe choice is the one that needs no version test). Clearing
+# the trigger works on every DuckDB that has ever had this behaviour, and on every one
+# that has not.
+#
+# Scope: this affects the processes duckeye SPAWNS, not the caller's shell. Nothing in
+# duckeye reads either variable itself.
+unset AI_AGENT CLAUDECODE
+
 # duckeye's version, and the ONLY place it is written down: there is no VERSION file and
 # no changelog, so `--version` reads this and the git tag is the only other copy. Assigned
 # plainly rather than through `: "${DUCKEYE_VERSION:=}"` on purpose -- every other setting

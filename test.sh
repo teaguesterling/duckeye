@@ -558,6 +558,21 @@ has '-p keeps the box'            '│'      env DUCKEYE_PAGER=cat $DUCKEYE -p -
 has '-t csv under -d'        'id,has_tab,has_nl'  $DUCKEYE -t csv -d "$TMP/gnarly.csv"
 has '-t json under -d'       '[{'                 $DUCKEYE -t json -d "$TMP/d.csv"
 has '-t md under -d'         '| id |'             $DUCKEYE -t md -d "$TMP/d.csv"
+# DuckDB 2.0 enters "agent mode" by itself when AI_AGENT or CLAUDECODE is set and stdout
+# is not a terminal, and that CHANGES the markdown writer: `| id:BIGINT | name:VARCHAR |`
+# with an unaligned rule instead of `| id | name  |`. duckeye parses and emits duckdb's
+# stdout as data, so its output must not depend on who is calling it. This pins that:
+# the same command under both environments, compared byte for byte.
+#
+# It is asserted on `md` because markdown is the ONE writer that moves -- box, jsonlines,
+# csv and json were measured byte-identical either way on v2.0.0 (2026-11-08). A general
+# claim would be untestable; this is the case that broke.
+#
+# The assertion above it is what FAILED when an agent ran this suite while CI stayed
+# green, because a GitHub runner sets neither variable. That asymmetry is the defect:
+# the gate could not reach it.
+ok  'agent mode does not change -t md under -d' \
+    bash -c "[[ \"\$(AI_AGENT=test CLAUDECODE=1 $DUCKEYE -t md -d '$TMP/d.csv')\" == \"\$(env -u AI_AGENT -u CLAUDECODE $DUCKEYE -t md -d '$TMP/d.csv')\" ]]"
 has '-t box forces the box onto a pipe' '│'       $DUCKEYE -t box -d "$TMP/d.parquet"
 has '-t jsonl under -d'      '{"id":'             $DUCKEYE -t jsonl -d "$TMP/d.csv"
 # DuckDB has no `tsv` mode -- it spells that `tabs` -- but the -o migration guard

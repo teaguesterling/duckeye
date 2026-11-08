@@ -281,6 +281,20 @@ duckeye -T --json docs/architecture.md
 | `DUCKEYE_COMMUNITY` | _(list)_ | Extensions `--init` installs from the community repo |
 | `COLUMNS` | `auto` | Column width for table rendering & profiling |
 | `NO_COLOR` | _(unset)_ | Set to disable colour. Escapes only — never the output format |
+| `DUCKEYE_AGENT` | _(unset)_ | Pass DuckDB's agent mode through instead of clearing it. See below |
+
+**`DUCKEYE_AGENT` — agent mode is opt-in, and off is the right default for most agents.**
+DuckDB 2.0 turns on its own agent mode whenever `AI_AGENT` or `CLAUDECODE` is set and
+stdout is not a terminal, which is every call duckeye makes. duckeye clears those two
+variables by default, so **its output is the same bytes for a human and for an agent** —
+that determinism is what lets you compare a run against a colleague's, or against CI.
+
+Set `DUCKEYE_AGENT=1` to let it through. Then `duckdb` renders as it would if you had
+called it yourself: `-t md -d` labels columns with their types (`| id:BIGINT |` rather
+than `| id |`), and errors arrive as JSON you can parse rather than as prose. Nothing
+else changes — `box`, `jsonlines`, `csv` and `json` are byte-identical either way, and
+document rendering is untouched. `0`, `no`, `false` and `off` read as off. Needs
+DuckDB 2.0+.
 
 ### Configuring `-F` and `-R`
 

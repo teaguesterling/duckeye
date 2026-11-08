@@ -14,6 +14,7 @@
 #   DUCKEYE_COMMUNITY  --init installs these from the community repo
 #   DUCKEYE_QUERYFARM  --init installs these from Query.Farm's repo
 #   DUCKEYE_QUERYFARM_URL  that repo's prefix
+#   DUCKEYE_AGENT      pass DuckDB's agent mode through (default: off)
 set -uo pipefail
 
 # DuckDB 2.0 turns on "agent mode" BY ITSELF when AI_AGENT or CLAUDECODE is set and its
@@ -29,16 +30,35 @@ set -uo pipefail
 # these two variables cleared -- same commit, same binary, 384 assertions either way.
 # CI never saw it, because a GitHub runner sets neither variable.
 #
-# Cleared here rather than by passing `-no-agent` to each duckdb call, for two reasons:
-# there are 26 such calls and a 27th would silently miss the flag, and `-no-agent` is a
-# 2.0 option while duckeye supports 1.5.x (I could not test 1.5.6 -- no binary on this
-# machine -- so the version-safe choice is the one that needs no version test). Clearing
-# the trigger works on every DuckDB that has ever had this behaviour, and on every one
+# Cleared by DEFAULT rather than by passing `-no-agent` to each duckdb call, for two
+# reasons: there are 26 such calls and a 27th would silently miss the flag, and
+# `-no-agent` is a 2.0 option while duckeye supports 1.5.x, which is untested here --
+# so the version-safe choice is the one that needs no version test. Clearing the
+# trigger works on every DuckDB that has ever had this behaviour, and on every one
 # that has not.
 #
+# But OFF is a default, not a policy. duckeye serves humans and agents from the same
+# binary, and an agent may legitimately want DuckDB's agent rendering -- compact
+# results, JSON errors it can parse. DUCKEYE_AGENT is that opt-in: set it and the
+# trigger variables are passed through untouched, so duckdb behaves exactly as it
+# would if the caller had invoked it directly.
+#
+# What the two settings guarantee:
+#   unset (default)  identical bytes whoever calls duckeye, human or agent
+#   set              duckdb's own agent-mode rendering, which CHANGES -t md under -d
+#                    and makes errors JSON
+# The default is the contract the suite pins; the opt-in has its own assertion, so
+# neither can rot into the other.
+#
+# 0, no, false and off read as OFF, because `DUCKEYE_AGENT=0` meaning "on" is the kind
+# of surprise an agent discovers in production. Any other non-empty value is ON.
+#
 # Scope: this affects the processes duckeye SPAWNS, not the caller's shell. Nothing in
-# duckeye reads either variable itself.
-unset AI_AGENT CLAUDECODE
+# duckeye reads AI_AGENT or CLAUDECODE itself.
+: "${DUCKEYE_AGENT:=}"
+case ${DUCKEYE_AGENT,,} in
+  ''|0|no|false|off) unset AI_AGENT CLAUDECODE ;;
+esac
 
 # duckeye's version, and the ONLY place it is written down: there is no VERSION file and
 # no changelog, so `--version` reads this and the git tag is the only other copy. Assigned
@@ -47,7 +67,7 @@ unset AI_AGENT CLAUDECODE
 # can lie about which duckeye you are running, which is the one question it exists to
 # answer. test.sh compares it to the most recent reachable tag, so cutting a release
 # without bumping this fails the suite rather than shipping a stale number.
-DUCKEYE_VERSION=0.24.0
+DUCKEYE_VERSION=0.25.0
 
 : "${DUCKEYE_BASE:=duck_block_utils}"
 : "${DUCKEYE_EXTS:=}"
@@ -71,6 +91,18 @@ DUCKEYE_VERSION=0.24.0
 # reached at all, because `CREATE EXTENSION REPOSITORY` is a PARSER ERROR before 2.0.
 # So the repository is chosen from the running duckdb's major version rather than
 # written into both lists, which would make one of them wrong on every machine.
+#
+# RE-TESTED 2026-11-08 to decide whether Query.Farm is still needed, in a fresh HOME
+# with zero extensions pre-installed -- the only probe that measures the registry
+# rather than the local cache:
+#   INSTALL textplot FROM community; LOAD textplot   -> throws, and the binary's own
+#       message says "distributed from the Query.Farm extension repository, not the
+#       DuckDB community repository"
+#   INSTALL + LOAD FROM query_farm                   -> ok
+# Still needed, so still used. This is upstream's decision, not a transient breakage,
+# which is why --init does not retry community on 2.0+: the refusal is the author's.
+# Re-probe from a CLEAN HOME before changing this. A populated ~/.duckdb answers an
+# unqualified LOAD from the flat path and makes the community build look fine.
 : "${DUCKEYE_QUERYFARM:=textplot}"
 # Documented at https://query.farm/products/extensions/ ("Builds are signed and
 # verified"). A THIRD-PARTY binary source: overridable so a caller who does not want
@@ -238,6 +270,12 @@ Env:
                      lose only -Z sparklines and profile histograms.
   DUCKEYE_QUERYFARM_URL  that repo's prefix
                      (default: https://duckdb-extensions.query.farm)
+  DUCKEYE_AGENT      pass DuckDB's agent mode through instead of clearing it.
+                     OFF by default, so duckeye's output is the same bytes for a
+                     human and for an agent. Set it (0/no/false/off read as off)
+                     and duckdb renders as it would if you had called it directly:
+                     typed column labels under `-t md -d`, errors as JSON.
+                     Needs DuckDB 2.0+; earlier versions have no agent mode.
 
 Examples:
   duckeye README.md                  # render to stdout, unpaged

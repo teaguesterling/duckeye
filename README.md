@@ -812,6 +812,7 @@ it to `DUCKEYE_EXTS`.
 | `DUCKEYE_OFFICIAL` | `--init` installs these from the core repo |
 | `DUCKEYE_COMMUNITY` | `--init` installs these from the community repo |
 | `DUCKEYE_THEME` | `dark` or `light` theme override (default: auto-detected with 50ms probe) |
+| `DUCKEYE_AGENT` | pass DuckDB's agent mode through instead of clearing it (default: off; `0`/`no`/`false`/`off` also off; needs DuckDB 2.0+) |
 | `DUCKEYE_LLM_SOCKET` | Unix socket path for ASTCSS compiler daemon (default `/tmp/woollama.sock`) |
 | `DUCKEYE_LLM_ENDPOINT` | HTTP endpoint URL for ASTCSS compiler (e.g. `http://localhost:11434`) |
 | `DUCKEYE_RERANK_SOCKET` | Unix socket path for cross-encoder reranker daemon (default `/tmp/reranker.sock`) |

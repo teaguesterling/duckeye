@@ -573,6 +573,22 @@ has '-t md under -d'         '| id |'             $DUCKEYE -t md -d "$TMP/d.csv"
 # the gate could not reach it.
 ok  'agent mode does not change -t md under -d' \
     bash -c "[[ \"\$(AI_AGENT=test CLAUDECODE=1 $DUCKEYE -t md -d '$TMP/d.csv')\" == \"\$(env -u AI_AGENT -u CLAUDECODE $DUCKEYE -t md -d '$TMP/d.csv')\" ]]"
+# The assertion above pins the DEFAULT. This one pins the OPT-IN, and the pair is the
+# point: a change that silenced agent mode unconditionally would satisfy the default
+# assertion and fail this one, so neither can quietly become the other.
+#
+# Gated on the DuckDB major, because agent mode arrived in 2.0. On 1.5.x setting
+# DUCKEYE_AGENT changes nothing, so asserting the typed header would fail for a reason
+# that is not duckeye's -- and a failure that blames the wrong component is worse than
+# a skip that names the cause.
+_ddb_major=$(duckdb -version 2>/dev/null | sed -n '1s/^v\([0-9]*\).*/\1/p')
+[[ $_ddb_major =~ ^[0-9]+$ ]] || _ddb_major=0
+if (( _ddb_major >= 2 )); then
+  has 'DUCKEYE_AGENT opts into agent mode' '| id:' \
+      env AI_AGENT=test DUCKEYE_AGENT=1 $DUCKEYE -t md -d "$TMP/d.csv"
+else
+  skipping 'DUCKEYE_AGENT opts into agent mode' "agent mode needs DuckDB 2.0+, found major $_ddb_major"
+fi
 has '-t box forces the box onto a pipe' '│'       $DUCKEYE -t box -d "$TMP/d.parquet"
 has '-t jsonl under -d'      '{"id":'             $DUCKEYE -t jsonl -d "$TMP/d.csv"
 # DuckDB has no `tsv` mode -- it spells that `tabs` -- but the -o migration guard

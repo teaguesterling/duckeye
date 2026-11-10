@@ -151,6 +151,27 @@ DUCKEYE_VERSION=0.25.0
 # toml is unavailable on 1.5.6 too.
 : "${DUCKEYE_UNPUBLISHED:=toml}"
 
+# ---------------------------------------------------------------- the SQL core
+# duckeye's flag-to-SQL logic lives here as macros, ONCE, so that a host that cannot
+# run bash -- the duckdb-wasm Android app -- calls the same code as this script
+# (docs/superpowers/specs/2026-11-10-duckeye-sql-core-design.md). The macros are
+# split into groups by the extensions they call, because DuckDB binds a macro when
+# it is CREATED: MEASURED on 2.0.0, `CREATE MACRO m(x) AS pdf_text(x)` fails unless
+# pdf is loaded. A host creates a group only after loading what the group names.
+#
+# `read -d ''` rather than $(cat <<EOF): --version must work with NOTHING on PATH
+# (test.sh:1511), and these assignments run on every invocation. read is a builtin;
+# it returns 1 at the end of the heredoc, which is expected, hence the `|| :`.
+#
+# Group "pure": DuckDB core only.
+#   duckeye_like(arg) turns a -S/-s glob into an ILIKE pattern: `*` and `?` are the
+#   wildcards, and `%`, `_` and `\` stay literal. The replacement ORDER is the
+#   contract -- backslash first, so the escapes added after it are not doubled.
+IFS= read -r -d '' DUCKEYE_SQL_PURE <<'EOF' || :
+CREATE OR REPLACE MACRO duckeye_like(arg) AS
+  replace(replace(replace(replace(replace(arg, '\', '\\'), '%', '\%'), '_', '\_'), '*', '%'), '?', '_');
+EOF
+
 usage() {
   cat <<'EOF'
 usage: duckeye [OPTION]... [FILE]
@@ -1104,13 +1125,12 @@ if [[ -n $norm && $norm != auto && $f != *\** && $f != *\?* && $f != zim://* && 
 fi
 
 src=$(q "$f")
-pat_sql="${arg//\\/\\\\}"
-pat_sql="${pat_sql//%/\\%}"
-pat_sql="${pat_sql//_/\\_}"
-pat_sql="${pat_sql//\*/%}"
-pat_sql="${pat_sql//\?/_}"
-pat=$(q "$pat_sql")
+# $pat is a SQL EXPRESSION, not a literal: the glob translation is duckeye_like() in
+# the SQL core, so every use splices it unquoted. Only -S and -s read it, so only they
+# create the macro; a mode that never needed it cannot fail on it.
+pat="duckeye_like('$(q "$arg")')"
 exts= doc= via_pandoc= zim_open= premacro=
+[[ $mode == section || $mode == search ]] && premacro=$DUCKEYE_SQL_PURE
 
 # A ZIM entry is whatever its mimetype says, not always HTML: a Gutenberg archive is
 # mostly images, and even a Wikipedia carries CSS and JS. Dispatching on zim_mimetype
@@ -1624,7 +1644,7 @@ if [[ $key == *.zim ]]; then
     exts="$zim_exts"
     premacro+=$zim_macro
     doc="SELECT zim_to_blocks('$src', s.path) AS blocks
-         FROM (SELECT path FROM zim_suggest('$src', '$pat', max_results := 1)) s"
+         FROM (SELECT path FROM zim_suggest('$src', $pat, max_results := 1)) s"
     mode=full zim_open=1        # an opened article renders whole
   else
     # The corpus verbs print tables of archive metadata, not documents, so there are no
@@ -1639,9 +1659,9 @@ if [[ $key == *.zim ]]; then
       toc)    zsql="SELECT path, title FROM (SELECT * FROM read_zim('$src') OFFSET 0)
                     WHERE NOT is_redirect AND mimetype LIKE 'text/html%'
                     ${limit:+LIMIT $limit};" ;;
-      search) zsql="SELECT round(score, 1) AS score, title, path,
+      search) zsql="$DUCKEYE_SQL_PURE SELECT round(score, 1) AS score, title, path,
                            regexp_replace(coalesce(snippet, ''), '<[^>]*>', '', 'g') AS snippet
-                    FROM zim_search('$src', '$pat', max_results := ${limit:-25})
+                    FROM zim_search('$src', $pat, max_results := ${limit:-25})
                     ORDER BY score DESC;" ;;
     esac
     term_cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
@@ -2009,7 +2029,7 @@ section_span_doc() {
            FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
      sec AS (SELECT h1.ord AS s, coalesce(min(h2.ord) - 1, 2147483647) AS e
              FROM h h1 LEFT JOIN h h2 ON h2.ord > h1.ord AND h2.lvl <= h1.lvl
-             WHERE h1.title ILIKE '%$pat%' ESCAPE '\\' OR h1.id = '$pat'
+             WHERE h1.title ILIKE '%' || $pat || '%' ESCAPE '\\' OR h1.id = $pat
              GROUP BY h1.ord),
      -- A substring can match both a chapter and a section inside it. The chapter
      -- already carries the child, so keeping both printed it twice; drop any span
@@ -2053,7 +2073,7 @@ search_span_doc() {
              WINDOW w AS (ORDER BY r.b.element_order, r.i ROWS UNBOUNDED PRECEDING))
            WHERE b.element_order <= e),
      hit AS (SELECT s FROM t GROUP BY s
-             HAVING duck_blocks_to_match_text(list(b ORDER BY i)) ILIKE '%$pat%' ESCAPE '\\')
+             HAVING duck_blocks_to_match_text(list(b ORDER BY i)) ILIKE '%' || $pat || '%' ESCAPE '\\')
      SELECT duck_blocks_reorder(list(b ORDER BY s, i)) AS blocks
      FROM t WHERE s IN (SELECT s FROM hit) HAVING count(*) > 0"
 }
@@ -2319,7 +2339,9 @@ duck+=(-s "$sql")
 # file has to be piped in again, since its blocks arrive on stdin, not from a path.
 # Only ever called on the failure path.
 span_rows() {
-  local q=(duckdb -list -noheader -s "$load" -s "$span_probe")
+  # The probe only exists for -S/-s, whose $doc calls duckeye_like(), so it needs the
+  # "pure" core group -- but not the rest of $premacro, whose -Q tables it never reads.
+  local q=(duckdb -list -noheader -s "$load" -s "$DUCKEYE_SQL_PURE" -s "$span_probe")
   if [[ -n $via_pandoc ]]; then
     pandoc -f "$from" "$f" -t json 2>/dev/null | "${q[@]}" 2>/dev/null
   else

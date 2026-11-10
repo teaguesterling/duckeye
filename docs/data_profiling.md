@@ -29,7 +29,7 @@ $ duckeye -w "category IN ('tools', 'hardware')" catalog.csv
 
 ### Limiting Output (`-n`)
 ```console
-$ duckeye -d -n 10 huge_dataset.parquet
+$ duckeye -d -l 10 huge_dataset.parquet
 ```
 
 ---

@@ -16,7 +16,7 @@ $ duckeye wikipedia.zim
 $ duckeye -T wikipedia.zim
 
 # Full-text ranked search with snippets (uses Xapian index)
-$ duckeye -s "photosynthesis" wikipedia.zim -n 5
+$ duckeye -s "photosynthesis" wikipedia.zim -l 5
 
 # Open and render a specific article by title
 $ duckeye -S "Photosynthesis" wikipedia.zim

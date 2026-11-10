@@ -625,7 +625,7 @@ $ duckeye .git                                     # query git commit history
 $ der script.py                                    # der forces raw AST table mode
 $ duckeye -d -f lines script.sh                    # table with line numbers & offsets
 $ duckeye -w "level = 'ERROR'" events.parquet      # -w implies data mode
-$ duckeye -n 20 huge.csv                           # first 20 rows
+$ duckeye -l 20 huge.csv                           # first 20 rows
 ```
 
 JSON files (`.json`, `.ndjson`, `.jsonl`) default to structured data tables via `read_json()`. If a `.json` file contains a Pandoc AST (identifiable by root key `"pandoc-api-version"`), `duckeye` automatically detects it and renders it as a formatted document.
@@ -686,7 +686,7 @@ $ duckeye wikipedia.zim                                    # 0.10s
 │ entry_count │ article_count │ media_count │ has_fulltext_index │  filesize   │
 │ 19707079    │ 19191219      │ 515775      │ true               │ 52690706555 │
 
-$ duckeye -s "chlorophyll absorption spectrum" -n 5 wikipedia.zim        # 0.14s
+$ duckeye -s "chlorophyll absorption spectrum" -l 5 wikipedia.zim        # 0.14s
 │ score │           title           │ snippet
 │ 100.0 │ Accessory pigment         │ ...spectrum References ^ McElroy, J Scot…
 │  95.0 │ Chlorophyll a             │ ...spectrum.[3] Chlorophyll does not ref…
@@ -793,7 +793,8 @@ it to `DUCKEYE_EXTS`.
 -o, --output FILE      write to FILE instead of stdout (names a FILE, not a format)
     --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies data mode
--n, --limit N          cap rows in any listing (-d, -z, -Z, and .zim -T/-s)
+-n, --number           number source code lines by file line, like cat -n
+-l, --limit N          cap rows in any listing (-d, -z, -Z, and .zim -T/-s)
     --init             install the DuckDB extensions
     --update           update DuckDB extensions and duckeye
 -V, --version          print duckeye's version

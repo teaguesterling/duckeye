@@ -171,6 +171,44 @@ IFS= read -r -d '' DUCKEYE_SQL_PURE <<'EOF' || :
 CREATE OR REPLACE MACRO duckeye_like(arg) AS
   replace(replace(replace(replace(replace(arg, '\', '\\'), '%', '\%'), '_', '\_'), '*', '%'), '?', '_');
 EOF
+#
+# Group "blocks": needs duck_block_utils. Created for code sources only (#14).
+#   duckeye_source_lines(text, s, e) is lines s..e of a file's text, WHOLE lines.
+#     read_ast's peek starts at the node's column, so a node's own text lost the
+#     first line's indentation while the body kept it. Whole lines cannot.
+#   duckeye_code_at(language, content, s) is duck_block_code with the source
+#     position in its attributes, so -t blocks and --json can cite file:line. The end
+#     line is COUNTED from the content, not taken from read_ast: MEASURED, a module
+#     row's end_line is one past the last line when the file ends in a newline.
+#   duckeye_numbered(text, s) prefixes each line with its file line number in
+#     cat -n's layout: the number right-aligned in 6, then a tab. A final newline is
+#     not a line of its own, as in cat -n.
+#   duckeye_number_lines(blocks) numbers every code block that carries start_line
+#     and leaves other blocks alone. The CALLER refuses code blocks without one:
+#     numbering them from 1 would print wrong line numbers, which is worse than none.
+# `lambda x:` rather than `x ->`: MEASURED, DuckDB 2.0 rejects the arrow as deprecated.
+IFS= read -r -d '' DUCKEYE_SQL_BLOCKS <<'EOF' || :
+CREATE OR REPLACE MACRO duckeye_source_lines(text, s, e) AS
+  array_to_string(string_split(text, chr(10))[s:e], chr(10));
+CREATE OR REPLACE MACRO duckeye_code_at(language, content, s) AS
+  list_transform(duck_block_code(language, content), lambda b:
+    struct_update(b, attributes := map_concat(b.attributes,
+      map {'start_line': s::VARCHAR,
+           'end_line': (s + len(string_split(CASE WHEN suffix(content, chr(10))
+                                                  THEN content[1:-2] ELSE content END,
+                                             chr(10))) - 1)::VARCHAR})));
+CREATE OR REPLACE MACRO duckeye_numbered(text, s) AS
+  array_to_string(list_transform(
+      string_split(CASE WHEN suffix(text, chr(10)) THEN text[1:-2] ELSE text END, chr(10)),
+      lambda l, i: printf('%6d', s + i - 1) || chr(9) || l), chr(10))
+  || CASE WHEN suffix(text, chr(10)) THEN chr(10) ELSE '' END;
+CREATE OR REPLACE MACRO duckeye_number_lines(blocks) AS
+  list_transform(blocks, lambda b:
+    CASE WHEN b.element_type = 'code' AND b.attributes['start_line'] IS NOT NULL
+         THEN struct_update(b, content := duckeye_numbered(b.content,
+                                              b.attributes['start_line']::INTEGER))
+         ELSE b END);
+EOF
 
 usage() {
   cat <<'EOF'
@@ -224,7 +262,12 @@ Options:
                          filename: md, html, pdf, rst, docx, tex, zim, ...
                          Under -d, FMT names a DuckDB reader: csv, parquet, json, pdf, yaml, ...
   -w, --where EXPR       SQL WHERE clause for data modes (-d, -z, -Z); implies -d
-  -n, --limit N          cap the rows any listing prints (-d, -z, -Z, and .zim -T/-s)
+  -n, --number           number source code lines by their FILE line, like cat -n, so
+                         a match can be cited as file:line. Code views only: the plain
+                         view and statement -Q matches. Definitions (-Q .func/.class,
+                         -S/-s on code) refuse until sitting_duck's blocks carry lines
+  -l, --limit N          cap the rows any listing prints (-d, -z, -Z, and .zim -T/-s).
+                         Was -n before 0.26; `-n 5` now refuses and names -l
       --color WHEN       auto (default), always, never. auto means colour when
                          stdout is a terminal, or when -p is paging through
                          less -R. $NO_COLOR disables it. Colour only -- it never
@@ -512,7 +555,7 @@ q() { printf '%s' "${1//\'/\'\'}"; }
 [[ ${0##*/} == der ]] && mode=raw || mode=full
 arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 in_file= out_file= data_fmt=
-find_query= rank_criterion= rank_threshold= top_k= dialect= json_out=
+find_query= rank_criterion= rank_threshold= top_k= dialect= json_out= number_lines=
 
 # ---------------------------------------------------------------- intelligence layer
 compile_astcss() {
@@ -915,9 +958,16 @@ while (( $# )); do
     -w|--where)    [[ $# -ge 2 ]] || die '-w needs a WHERE expression' 64
                    [[ $mode == full ]] && setmode raw
                    where=$2; shift ;;
-    -n|--limit)    [[ $# -ge 2 ]] || die '-n needs a row count' 64
-                   [[ $2 =~ ^[0-9]+$ ]] || die "-n needs a non-negative integer, got '$2'" 64
+    -l|--limit)    [[ $# -ge 2 ]] || die '-l needs a row count' 64
+                   [[ $2 =~ ^[0-9]+$ ]] || die "-l needs a non-negative integer, got '$2'" 64
                    limit=$2; shift ;;
+    # -n was the row limit until #14, when it became cat -n's line numbers. A bare
+    # number after it is almost certainly an old `-n 5`, and reading 5 as the FILE
+    # would fail far from the cause -- so refuse and name the new flag. A file that
+    # really is called 5 still works.
+    -n|--number)   [[ $# -ge 2 && $2 =~ ^[0-9]+$ && ! -e $2 ]] &&
+                     die "-n is now line numbers (like cat -n); use -l $2 for the row limit" 64
+                   number_lines=1 ;;
     --)            shift; break ;;
     -)             break ;;                      # the conventional name for stdin
     -*)            die "unknown option: $1" 64 ;;
@@ -1131,6 +1181,12 @@ src=$(q "$f")
 pat="duckeye_like('$(q "$arg")')"
 exts= doc= via_pandoc= zim_open= premacro=
 [[ $mode == section || $mode == search ]] && premacro=$DUCKEYE_SQL_PURE
+# -n numbers source lines in a rendered view. A data mode prints rows, and -T prints
+# headings, so there is nothing to number there; saying so beats silently ignoring it.
+[[ -n $number_lines ]] && case $mode in
+  raw|summary|profile) die "-n numbers source code lines; it does not apply to data modes" 64 ;;
+  toc)                 die "-n numbers source code lines; it does not apply to -T" 64 ;;
+esac
 
 # A ZIM entry is whatever its mimetype says, not always HTML: a Gutenberg archive is
 # mostly images, and even a Wikipedia carries CSS and JS. Dispatching on zim_mimetype
@@ -1797,6 +1853,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
   *.sql|*.gql|*.graphql|*.tf|*.tfvars|*.hcl|*.css|.auto)
     exts="sitting_duck"
     code_src=1     # this reader applies -Q itself; see the -Q block's guard
+    premacro+=$DUCKEYE_SQL_PURE$DUCKEYE_SQL_BLOCKS   # duckeye_code_at & co. (#14)
     if [[ -n $find_query && -z ${selector:-} ]]; then
       lang_hint=${dialect:-auto}
       if [[ $lang_hint == auto ]]; then
@@ -1838,11 +1895,15 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
 CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM ast_select_from('__ast', '$(q "$selector")'); "
       # All definitions: the outline renders them, with their signature headings. Any
       # statement: print each OUTERMOST match as source, in file order -- a nested match
-      # is already inside its ancestor's text.
+      # is already inside its ancestor's text. A statement prints as the WHOLE source
+      # lines it spans, cut from the file's root text, so its first line keeps its
+      # indentation and its block can carry file line numbers (#14).
       doc="SELECT CASE
   WHEN (SELECT coalesce(bool_and(is_definition(semantic_type) AND is_construct(flags) AND name IS NOT NULL), true) FROM __sel)
   THEN (SELECT list(block) FROM ast_to_blocks_from('__sel'))
-  ELSE (SELECT flatten(list(duck_block_code(language, peek) ORDER BY file_path, start_line, node_id)) FROM __sel s
+  ELSE (SELECT flatten(list(duckeye_code_at(s.language, duckeye_source_lines(r.peek, s.start_line, s.end_line), s.start_line)
+                            ORDER BY s.file_path, s.start_line, s.node_id))
+        FROM __sel s JOIN (SELECT file_path, peek FROM __ast WHERE depth = 0) r ON r.file_path = s.file_path
         WHERE NOT EXISTS (SELECT 1 FROM __sel p WHERE p.file_path = s.file_path
                           AND p.node_id < s.node_id AND s.node_id <= p.node_id + p.descendant_count))
 END AS blocks"
@@ -1850,8 +1911,8 @@ END AS blocks"
       premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');
 CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
       # One file: its source. A glob: each file's source under a heading naming it.
-      doc="SELECT flatten(list(CASE WHEN n > 1 THEN list_concat([duck_block_heading(file_path, 1)], duck_block_code(language, peek))
-                              ELSE duck_block_code(language, peek) END ORDER BY file_path)) AS blocks
+      doc="SELECT flatten(list(CASE WHEN n > 1 THEN list_concat([duck_block_heading(file_path, 1)], duckeye_code_at(language, peek, start_line))
+                              ELSE duckeye_code_at(language, peek, start_line) END ORDER BY file_path)) AS blocks
 FROM (SELECT *, count(*) OVER () AS n FROM __ast WHERE depth = 0)"
     else
       premacro+="CREATE OR REPLACE TEMP TABLE __ast AS SELECT * FROM read_ast('$src', peek := 'full');
@@ -2092,6 +2153,19 @@ esac
 # it. Saying "either A or B" was honest; saying which one is useful.
 [[ -n ${selector:-} && $mode != full ]] &&
   span_probe="SELECT count(*) FROM ($doc) WHERE blocks IS NOT NULL;"
+
+# -n (#14): number the code lines the view prints, by their FILE line numbers, so an
+# agent can cite file:line. Only blocks that carry start_line can be numbered. A code
+# block without one comes from sitting_duck's ast_to_blocks (definitions: -Q .func,
+# -S/-s on code), and numbering it from 1 would print WRONG numbers -- so refuse it,
+# loudly, until sitting_duck puts the position on its blocks.
+if [[ -n $number_lines ]]; then
+  [[ -n ${code_src:-} ]] || die "-n numbers source code lines; '$f' is not source code" 64
+  doc="SELECT CASE
+  WHEN len(list_filter(blocks, lambda b: b.element_type = 'code' AND b.attributes['start_line'] IS NULL)) > 0
+  THEN error('-n: line numbers for definitions (-Q .func/.class, -S/-s on code) need sitting_duck''s ast_to_blocks to carry start_line (teaguesterling/duckeye#14)')
+  ELSE duckeye_number_lines(blocks) END AS blocks FROM ($doc)"
+fi
 
 #
 # Until now, -Q on a document was SILENTLY IGNORED: the selector was accepted and

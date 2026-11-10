@@ -40,7 +40,8 @@ usage: duckeye [OPTION]... [FILE]
 | `-t` | `--to FMT` | Output format: `ansi` (default), `text`, `md`, `html`, `pandoc`, `blocks` |
 | `-f` | `--from FMT` | Override format detection, or name the DuckDB reader under `-d` |
 | `-w` | `--where EXPR` | SQL `WHERE` expression for filtering; implies data mode |
-| `-n` | `--limit N` | Cap row count in data modes or ZIM search listings |
+| `-n` | `--number` | Number source code lines by file line, like `cat -n` (code views only) |
+| `-l` | `--limit N` | Cap row count in data modes or ZIM search listings (was `-n` before 0.26) |
 | | `--color WHEN` | Color handling: `auto` (default), `always`, `never` |
 | | `--init` | Install DuckDB extensions and exit |
 | | `--update` | Update DuckDB extensions and duckeye script, then exit |

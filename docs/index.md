@@ -27,7 +27,7 @@ duckeye -Z data.parquet              # Smart profiler with sparklines & category
 duckeye -d -Q ".call#eval" app.js    # Query AST call sites with line numbers & peek text
 
 # Offline ZIM archives (Wikipedia, Stack Exchange, etc.)
-duckeye -s "photosynthesis" wikipedia.zim -n 5
+duckeye -s "photosynthesis" wikipedia.zim -l 5
 duckeye -S "Chlorophyll" wikipedia.zim
 ```
 

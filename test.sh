@@ -490,10 +490,10 @@ no  '-p keeps colour through less' \
     env DUCKEYE_PAGER=cat bash -c "$DUCKEYE -p '$TMP/doc.md' | grep -q '$esc' && exit 1 || exit 0"
 no  '--color rejects a bad value'   $DUCKEYE --color=purple "$TMP/doc.md"
 has 'stripping preserves content'   'alpha body' $DUCKEYE --color=never -S Alpha "$TMP/doc.md"
-ok  'DUCKEYE_THEME=light runs'      env DUCKEYE_THEME=light $DUCKEYE -r -n 1 "$TMP/d.parquet"
-ok  'DUCKEYE_THEME=dark runs'       env DUCKEYE_THEME=dark $DUCKEYE -r -n 1 "$TMP/d.parquet"
-ok  'COLORFGBG dark detection'      env COLORFGBG="15;0" $DUCKEYE -r -n 1 "$TMP/d.parquet"
-ok  'COLORFGBG light detection'     env COLORFGBG="0;15" $DUCKEYE -r -n 1 "$TMP/d.parquet"
+ok  'DUCKEYE_THEME=light runs'      env DUCKEYE_THEME=light $DUCKEYE -r -l 1 "$TMP/d.parquet"
+ok  'DUCKEYE_THEME=dark runs'       env DUCKEYE_THEME=dark $DUCKEYE -r -l 1 "$TMP/d.parquet"
+ok  'COLORFGBG dark detection'      env COLORFGBG="15;0" $DUCKEYE -r -l 1 "$TMP/d.parquet"
+ok  'COLORFGBG light detection'     env COLORFGBG="0;15" $DUCKEYE -r -l 1 "$TMP/d.parquet"
 
 echo 'raw'
 has 'raw parquet'  'name_1' $DUCKEYE -r "$TMP/d.parquet"
@@ -502,8 +502,8 @@ printf 'name: test\nvalue: 42\n' >"$TMP/d.yaml"
 has 'raw yaml'     'test'   $DUCKEYE -r "$TMP/d.yaml"
 printf '[pkg]\nname = "test"\n' >"$TMP/d.toml"
 has 'raw toml'     'test'   $DUCKEYE -r "$TMP/d.toml"
-has 'raw lines'    'line_number' $DUCKEYE -r -f lines -n 2 "$TMP/doc.md"
-has 'raw git'      'commit_hash' $DUCKEYE -r -n 1 "$PWD/.git"
+has 'raw lines'    'line_number' $DUCKEYE -r -f lines -l 2 "$TMP/doc.md"
+has 'raw git'      'commit_hash' $DUCKEYE -r -l 1 "$PWD/.git"
 if command -v zip >/dev/null; then
   (cd "$TMP" && zip -q "$TMP/d.zip" d.yaml d.toml 2>/dev/null)
   has 'raw zip'    'd.yaml' $DUCKEYE -r "$TMP/d.zip"
@@ -513,7 +513,7 @@ if [[ $($DUCKEYE -w 'score > 6' "$TMP/d.parquet") == *'name_1'* ]]; then
   fail=$((fail+1)); echo '  FAIL where excludes non-matches'
 else pass=$((pass+1)); echo '  ok   where excludes non-matches'; fi
 has 'where with quotes' 'name_3' $DUCKEYE -w "name = 'name_3'" "$TMP/d.parquet"
-ok  'limit'                      $DUCKEYE -r -n 2 "$TMP/d.parquet"
+ok  'limit'                      $DUCKEYE -r -l 2 "$TMP/d.parquet"
 has 'raw reads a named parquet from stdin' 'name_1' \
     bash -c "$DUCKEYE -r -f parquet - <'$TMP/d.parquet'"
 has 'raw reads a named csv from stdin'     'name_4' \
@@ -983,6 +983,49 @@ has 'code glob toc'            'execute'        $DUCKEYE -T "$TMP/*.py"
 has 'code glob -Q'             'execute'        $DUCKEYE -Q '.func#execute' "$TMP/*.py"
 has 'code glob -f ast'         'execute'        $DUCKEYE -f ast -T "$TMP/test_code.*"
 
+# #14, second half: line numbers. An agent told to read with duckeye fell back to the
+# Read tool because nothing here could say WHICH line it was looking at, so these pin
+# file line numbers -- what an Edit or Read call needs -- not positions in the output.
+# The -Q text is cut as whole source lines: read_ast's peek starts at the node's
+# column, so the first line lost its indentation while the body kept it (#14 bug).
+# duckeye builds the plain view and STATEMENT matches itself, so those are asserted.
+has 'code -Q statement keeps its indent' '        return True' \
+    $DUCKEYE -Q 'return_statement' -t text "$TMP/test_code.py"
+has 'line numbers: plain code view'  $'     2\t    def execute' \
+    $DUCKEYE -n -t text "$TMP/test_code.py"
+has 'line numbers: -Q statement'     $'     3\t        return True' \
+    $DUCKEYE -n -Q 'return_statement' -t text "$TMP/test_code.py"
+has 'line numbers: --number long form' $'     2\t    def execute' \
+    $DUCKEYE --number -t text "$TMP/test_code.py"
+no_leak 'line numbers are off by default' $'     2\t' \
+    $DUCKEYE -t text "$TMP/test_code.py"
+# The position travels in the block, so --json and -t blocks can cite it with no flag.
+has 'code -Q statement carries start_line' '"start_line":"3"' \
+    $DUCKEYE -Q 'return_statement' -t blocks "$TMP/test_code.py"
+has 'code view carries start_line'     '"start_line":"1"' \
+    $DUCKEYE -t blocks "$TMP/test_code.py"
+# DEFINITIONS (-Q .func, -S/-s/-T on code) come from sitting_duck's ast_to_blocks_from
+# and ast_to_blocks_list. Those macros read start_line/end_line but put neither on the
+# blocks they emit, and use the column-offset peek as the body. Until they do, -n on
+# them refuses (asserted below) and these report "known".
+cause=sitting_duck
+broken 'definition -Q keeps the first line indent' '    def execute(self' \
+    $DUCKEYE -Q '.func#execute' -t text "$TMP/test_code.py"
+broken 'line numbers: definition -Q'  $'     5\t    def cancel' \
+    $DUCKEYE -n -Q '.func#cancel' -t text "$TMP/test_code.py"
+broken 'line numbers: -S on code'     $'     6\t        pass' \
+    $DUCKEYE -n -S cancel -t text "$TMP/test_code.py"
+broken 'definition block carries start_line' '"start_line":"5"' \
+    $DUCKEYE -Q '.func#cancel' -t blocks "$TMP/test_code.py"
+cause=unattributed
+dies_with '-n on definitions refuses until sitting_duck' 'line numbers' \
+    $DUCKEYE -n -Q '.func#cancel' -t text "$TMP/test_code.py"
+# -n USED to be the row limit. Reading `-n 5` as "number lines, file 5" would fail far
+# from the cause, so a bare number after -n refuses and names the new flag.
+dies_with 'old -n N names -l'  'use -l' $DUCKEYE -r -n 2 "$TMP/test_code.py"
+# A document has no source lines to cite; ignoring -n there would be a silent no-op.
+dies_with '-n on a document refuses' 'source code' $DUCKEYE -n "$TMP/doc.md"
+
 echo 'code & document intelligence'
 has 'find ASTCSS mock'            'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE --find "find execute function" "$TMP/test_code.py"
 has 'find -F short flag'          'execute'        env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE -F "find execute function" "$TMP/test_code.py"
@@ -1019,8 +1062,8 @@ echo 'zim'
 if [[ -n ${DUCKEYE_TEST_ZIM:-} && -r ${DUCKEYE_TEST_ZIM:-} ]]; then
   Z=$DUCKEYE_TEST_ZIM
   ok  'zim info'                    $DUCKEYE "$Z"
-  ok  'zim index'                   $DUCKEYE -T -n 3 "$Z"
-  ok  'zim search'                  $DUCKEYE -s the -n 3 "$Z"
+  ok  'zim index'                   $DUCKEYE -T -l 3 "$Z"
+  ok  'zim search'                  $DUCKEYE -s the -l 3 "$Z"
   no  'zim missing article exits 1' $DUCKEYE -S Zzzqqqxyz "$Z"
   # A `no` assertion passes on ANY non-zero exit, so it cannot tell "no such
   # article" from "the SQL does not compile". Opening an article by title was

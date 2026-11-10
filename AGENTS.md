@@ -142,6 +142,39 @@ duckeye -Q '.func' -R "handles background execution" --top-k 1 --json src/worker
 ]
 ```
 
+Only `-R` returns these candidate rows. Without `-R`, `-Q --json` returns duck_blocks,
+like the section JSON below. A code block from the plain code view, or from a
+statement match, carries its file position in `attributes`:
+
+```sh
+duckeye -Q 'return_statement' --json src/worker.py
+```
+```json
+[{"kind":"block","element_type":"code","content":"        return True","level":1,
+  "encoding":"text","attributes":{"language":"python","start_line":"3","end_line":"3"},
+  "element_order":0}]
+```
+
+Definition matches (`-Q '.func'`, `-Q '.class'`) and `-S`/`-s` on code do not carry
+`start_line` yet. Those blocks come from sitting_duck's `ast_to_blocks`, which does not
+put positions on them (duckeye#14). Until it does, use `-R --json` above, or `-d -Q`
+for the raw AST rows with `start_line` and `end_line`.
+
+### Line numbers for citing `file:line` (`-n`)
+
+`-n` (`--number`) prefixes each code line with its **file** line number, as `cat -n`
+does. So a match can go straight to an Edit or Read call as `file:line`:
+
+```sh
+duckeye -n src/worker.py                       # the whole file, numbered from 1
+duckeye -n -Q 'return_statement' src/worker.py
+#      3	        return True
+```
+
+`-n` refuses on documents, on `-T`, on data modes, and on definition matches, until
+sitting_duck carries their lines. It does not print wrong numbers. Before #14, `-n` was
+the row limit. That flag is now `-l`, and `-n 5` refuses and names `-l`.
+
 ### Document Section JSON (`-S` / `-s` `--json`)
 ```sh
 duckeye -S "Security" --json spec.md

@@ -35,6 +35,8 @@ der FILE                            # force raw data / tabular AST output
 duckeye 'git://README.md@v0.12.0'   # read historical version from git
 duckeye -P 1-5 manual.pdf           # page range of a PDF
 duckeye main.py                     # render Python AST with syntax code blocks
+duckeye -n main.py                  # same, each line prefixed with its FILE line (cat -n)
+duckeye -n -Q 'return_statement' main.py   # statement matches, cited as file:line
 cat FILE | duckeye -                # read from stdin (sniffs format, shebangs, & PDF magic)
 duckeye -f html page.txt            # override format detection
 duckeye -d -D FILE                  # -D undoes an earlier -d (e.g. set by der)
@@ -104,7 +106,7 @@ duckeye archive.zip                 # inspect zip archive contents
 duckeye .git                        # inspect git commit log
 duckeye -d -f lines script.sh       # inspect file with line numbers & offsets
 duckeye -w "score > 90" data.parquet  # -w implies data mode, full SQL WHERE syntax
-duckeye -n 20 huge.csv              # limit rows
+duckeye -l 20 huge.csv              # limit rows
 ```
 
 `.toml` is in the table above but **does not read on the shipped DuckDB** — the `toml`

@@ -52,6 +52,12 @@ and `?`. Escaping the backslash first means the escapes added after it are not d
 These results are the same as the bash translation it replaces (measured,
 2026-11-10).
 
+Known oddity, kept for byte-identity: the zim corpus paths pass `duckeye_like(arg)`
+to `zim_suggest` and `zim_search`. Neither is a LIKE engine (one walks the title index,
+the other is Xapian), so a glob means nothing there. Measured 2026-11-10:
+`-S 'Chloro*' fixtures/test.zim` prints `no article matching`, on main and on this
+branch alike. Probably wrong, and older than the refactor.
+
 Known oddity, kept for byte-identity: `-S` also compares the heading's slug id with
 `= duckeye_like(arg)`, the escaped pattern. So `-S my_id` compares the id with
 `my\_id`. Probably a bug, not fixed in a refactor.

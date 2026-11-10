@@ -78,7 +78,15 @@ Task 1 owns the test for each of these five.
 - [ ] **Step 3: Verify.** Run `scripts/parity.sh $T/base ./duckeye`. Expected: PASS.
 - [ ] **Step 4: Commit:** `refactor: glob-to-LIKE translation moves into duckeye_like()`.
 
-### Task 4: `duckeye_section` and `duckeye_search`
+### Task 4: `duckeye_section` and `duckeye_search` — SUPERSEDED 2026-11-10
+
+> Teague ruled that panduck is the core. panduck's `doc_section`/`doc_search_sections`
+> already give identical output, so duckeye does not write these macros. The work moves
+> to panduck (`docs/briefs/2026-11-10-panduck-as-duckeye-core.md`, asks 1-4). duckeye's
+> switch to the panduck functions is a new plan, written after panduck ships them.
+> Tasks 5 and 6 below are superseded with it. The text is kept for the record.
+
+### (original) Task 4: `duckeye_section` and `duckeye_search`
 
 **Files:**
 - Modify: `duckeye:2005-2059`, and `DUCKEYE_CORE_SQL`.

@@ -15,6 +15,7 @@ scripts/*
 !scripts/check_block_functions.sh
 !scripts/check_skill_flags.sh
 !scripts/parity.sh
+!scripts/panduck-deviations.sh
 DUCK_BLOCK_RENAME.md
 
 # Worktrees created under the repo for isolated work; never part of a commit.

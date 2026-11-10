@@ -83,6 +83,15 @@ extensions) that every host reads. (Inferred. Phase 3 tests it first.)
 
 ### Where the SQL lives
 
+> **Superseded in part, 2026-11-10.** Teague: "leverage panduck heavily", then
+> "Panduck is the core". Measured the same day: panduck 0.7.0's `doc_section` gives
+> output identical to `-S`, and `doc_search_sections` gives output identical to `-s`
+> (but 5.6× slower at 72,000 rows). So the narrow and read layers live in **panduck**,
+> not in a duckeye heredoc. duckeye keeps a heredoc only for glue that panduck does
+> not own, such as `duckeye_like` until panduck has a glob mode. The four panduck asks
+> are in `docs/briefs/2026-11-10-panduck-as-duckeye-core.md`. The text below is the
+> original decision, kept for the record.
+
 The macros live in heredocs inside the script. A new flag,
 `duckeye --emit-sql`, prints them and exits. The app's build runs it, so the
 app ships the same text. This keeps the one-file deploy, and there is one copy.

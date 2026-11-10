@@ -26,6 +26,7 @@ Android app, must run the same SQL as the CLI. The design is in
 | Group | Bash variable | Needs | Created when |
 |---|---|---|---|
 | pure | `DUCKEYE_SQL_PURE` | DuckDB core only | mode is `section` or `search` (`-S`, `-s`), and in the zim `-s` corpus query |
+| blocks | `DUCKEYE_SQL_BLOCKS` | duck_block_utils | every code source (sitting_duck reader), with `pure` before it |
 
 ## Macros
 
@@ -68,6 +69,50 @@ Use in a host (duckdb-wasm or plain duckdb):
 -- run the DUCKEYE_SQL_PURE text first
 SELECT title FROM headings WHERE title ILIKE '%' || duckeye_like('Al*a') || '%' ESCAPE '\';
 ```
+
+### `duckeye_source_lines(text, s, e) -> VARCHAR`
+
+Group: blocks (it needs nothing beyond core, but it ships with its users). Lines `s..e`
+of `text`, as WHOLE lines, joined with `\n`. A statement `-Q` match prints these lines,
+not the node's `peek`. `peek` starts at the node's column, so the first line lost its
+indentation while the body kept it (#14).
+
+### `duckeye_code_at(language, content, s) -> blocks`
+
+Group: blocks. `duck_block_code(language, content)` with `start_line` and `end_line`
+added to `attributes`, as VARCHAR. The end line is counted from `content`, not taken from
+`read_ast`. Measured: the module row's `end_line` is one past the last line when the
+file ends in a newline. Used by the plain code view and by statement `-Q` matches.
+
+### `duckeye_numbered(text, s) -> VARCHAR` and `duckeye_number_lines(blocks) -> blocks`
+
+Group: blocks. They implement `-n`/`--number`, in `cat -n`'s layout: `printf('%6d', n)`,
+a tab, then the line. A final newline is not a numbered line. `duckeye_number_lines`
+numbers each code block that has `start_line`, and leaves every other block alone. The
+caller (bash) refuses `-n` when a code block has no `start_line`. Numbering such a block
+from 1 would print wrong line numbers.
+
+Use in a host:
+
+```sql
+-- run DUCKEYE_SQL_PURE, then DUCKEYE_SQL_BLOCKS, after LOAD duck_block_utils
+SELECT duck_blocks_to_text(duckeye_number_lines(
+         duckeye_code_at('python', 'def f():' || chr(10) || '    pass' || chr(10), 10)));
+--     10	def f():
+--     11	    pass
+```
+
+Which code views carry positions (2026-11-10):
+
+| View | Built by | `start_line` on blocks | `-n` |
+|---|---|---|---|
+| plain code view | duckeye (`duckeye_code_at`) | yes | numbers |
+| `-Q` statement match | duckeye (`duckeye_code_at` + `duckeye_source_lines`) | yes | numbers |
+| `-Q '.func'` / `'.class'` | sitting_duck `ast_to_blocks_from` | no | refuses |
+| `-S`/`-s`/`-T` on code | sitting_duck `ast_to_blocks_list` | no | refuses |
+| `-R --json` candidates | duckeye `rerank_candidates` | as `start_line`/`end_line` fields | n/a. Its `content` still has the dedent bug |
+
+The sitting_duck ask is in `docs/briefs/2026-11-10-sitting-duck-block-positions.md`.
 
 ## panduck functions duckeye can call instead of its own SQL
 

@@ -24,6 +24,13 @@ does LOAD for duck_block_utils, markdown, webbed, zim and sitting_duck.
 
 ## The asks
 
+Suggested order: **2 first**, then 1, then 3 and 4. Ask 2 carries the load: four routes
+duckeye already ships (a zim entry, stdin, a Pandoc AST, a code AST) are not file paths,
+so path-only functions cannot serve them. panduck already has a door for rows that do
+not come from a file: `panduck_pandoc_ast_to_blocks(VARCHAR)` is a scalar over AST text,
+measured by the duckeye-mlang-plan session on 2026-11-10. So ask 2 may be smaller than it
+looks.
+
 1. **A glob match mode.** Add `match := 'glob'` to `doc_section` and
    `doc_search_sections`. `*` matches any run and `?` matches one character. `%`, `_`
    and `\` stay literal, and the match is case-insensitive and substring. duckeye's

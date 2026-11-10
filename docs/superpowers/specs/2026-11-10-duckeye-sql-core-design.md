@@ -1,6 +1,7 @@
 # duckeye SQL core: one implementation, two front ends
 
-Status: design, waiting for Teague's approval. Nothing is built.
+Status: approved by Teague 2026-11-10, then superseded in part the same day: panduck is
+the core (see "Where the SQL lives"). Phase-1 glue (`duckeye_like`) shipped in `bb06ad2`.
 Date: 2026-11-10. Author: Claude Opus 5.5, in the session that assessed Android
 (artifact: https://claude.ai/artifact/KYVUeoahMdLFNyY3f2Bxr9).
 

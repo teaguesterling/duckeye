@@ -27,6 +27,7 @@ Android app, must run the same SQL as the CLI. The design is in
 |---|---|---|---|
 | pure | `DUCKEYE_SQL_PURE` | DuckDB core only | mode is `section` or `search` (`-S`, `-s`), and in the zim `-s` corpus query |
 | blocks | `DUCKEYE_SQL_BLOCKS` | duck_block_utils | every code source (sitting_duck reader), with `pure` before it |
+| toc | `DUCKEYE_SQL_TOC` | duck_block_utils | mode is `toc` (`-T`) |
 
 ### Get the text: `duckeye --emit-sql`
 
@@ -147,6 +148,28 @@ Which code views carry positions (2026-11-10):
 | `-R --json` candidates | duckeye `rerank_candidates` | as `start_line`/`end_line` fields | n/a. Its `content` still has the dedent bug |
 
 The sitting_duck ask is in `docs/briefs/2026-11-10-sitting-duck-block-positions.md`.
+
+### `duckeye_toc_text(blocks)` and `duckeye_toc_json(blocks)`: table macros
+
+Group: toc. `-T` and `-T --json`. Each is a table macro over duck_block_utils'
+`duck_blocks_toc_rows(blocks)`, so it takes a column and works on every route.
+`duckeye_toc_text` gives one row: each title, indented two spaces per level of
+`indent`, joined with `\n`. `duckeye_toc_json` gives one row: a JSON array of
+`{title, level, indent, element_order}`. A document with no headings gives zero rows,
+and the caller (bash) prints `no headings in FILE` and exits 1.
+
+The outline itself is duck_block_utils' work. panduck's `doc_toc` takes only a path,
+so duckeye does not use it.
+
+Use in a host:
+
+```sql
+-- run DUCKEYE_SQL_TOC after LOAD duck_block_utils
+SELECT toc FROM (SELECT [duck_block_heading('Top', 1), duck_block_heading('Sub', 2)] AS blocks) d,
+                duckeye_toc_text(d.blocks);
+-- Top
+--   Sub
+```
 
 ## panduck functions duckeye can call instead of its own SQL
 

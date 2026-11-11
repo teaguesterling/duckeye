@@ -153,6 +153,15 @@ wasm spike proved the share sheet), and copy. **My call:** no outline or search 
 Rust (`ureq` in the spike) with a desktop-browser user agent and a timeout. No cookies.
 A page that needs a login shows the error, not a half page.
 
+**The browser view (Teague, 2026-11-11).** Medium answered the fetch with 403. That is a
+bot screen (inferred, not measured: the probe was refused as bot-check circumvention). The
+app does not disguise its fetch to pass such a screen. On 401, 403, 429 or 503 the error
+offers "Load in browser view": a visible WebView where the reader sees the real page and
+passes any challenge or login. "Read in duckeye" saves the loaded DOM, as UTF-8 with a
+BOM, and opens it like a fetched page. The "no cookies" rule now covers the plain fetch
+only, because the browser view is a browser. duckeye-android `9d14ad1`. Phone test
+2026-11-11: the Medium article opened through the browser view (Teague: "worked great").
+
 ### Where the code lives (Teague, 2026-11-10)
 
 A new repo. It pins a duckeye commit, and its build runs that commit's `duckeye --emit-sql`.
@@ -184,6 +193,47 @@ Each phase ends with a test on the phone.
    that the app's embedded SQL matches the script.
 6. **PDF** (later). The pdf extension, with poppler, tesseract, leptonica, libharu and qpdf
    from vcpkg.
+
+**Added to phase 2 (Teague, 2026-11-11):** an output switch (HTML, text, markdown source, rendered
+markdown), three stylesheets, and light, dark or auto. Text and markdown match `duckeye -t text` and
+`-t md` (measured on the phase 1 page: `2be13cfe…` and `b86cf504…`). The identifier is
+`com.teaguesterling.duckeyedroid`. Pages and files may exceed 20 MiB; the guard is 256 MiB (my call).
+
+**Phase 2 gate passed on the phone (2026-11-11).** Self-test matches native (150 ms) with six
+extensions `STATICALLY_LINKED`, including json and parquet. A Chrome share (github.com) and a file
+from Files rendered; the output and style switches work.
+
+**Phase 2b (Teague, 2026-11-11, after the first phone run):**
+
+- **Links open in duckeye, with Back.** A tap converts the linked page; a history stack and Back
+  (on screen and Android's back gesture) return. An address row shows the URL; it can be copied,
+  edited to go somewhere, or opened in the browser.
+- **Toolbar: an address row and an actions row.** Row 1: Back, the address, Share, ⋯. Row 2: the
+  output switch (HTML, Text, MD, Rendered, Source) and Copy. ⋯ holds Open…, Open with…, Open in
+  browser, Style, Theme and Self-test.
+- **A Source output:** the bytes as fetched or shared, shown as text.
+- **Themes:** Deep Field (Teague's house style, the default), a duck theme, and common reading
+  themes (Sepia, GitHub-like, Solarized, high contrast), plus Mono. Fonts ship in the APK.
+- **The view survives leaving the app** (it cleared on return), and the title is the file's name.
+- **Export as** every panduck format comes in phase 3, with panduck.
+- **Upstream:** stray indentation and blank lines in the markdown (indented HTML text becomes
+  code blocks when the markdown is rendered), and a `viewport` meta in markdown front matter.
+  Which extension causes each is not yet known.
+
+**Later (Teague's ideas, 2026-11-11; not designed):**
+
+- **A setting to enable more extensions.** Teague says panduck supports this. Every extension in
+  the app is linked in at build time, so a setting can only switch on what the build contains, or
+  load extension files. Loading files needs Android builds and a trust rule (the anti-goal on
+  unsigned extensions applies). No community extension is published for Android (measured
+  2026-11-10).
+- **Data mode** (duckeye's tables for CSV, JSON, parquet). It needs json and parquet linked in;
+  csv is in the core. **Inferred:** each adds a few MB.
+- **Data summary mode** (duckeye `-Z`). It is SQL over the same tables, so it follows data mode.
+- **A SQL console, or the DuckDB UI.** A small console (a text box and a result table) runs on the
+  same engine. **Inferred, not checked:** the `ui` extension serves its web app from
+  `ui.duckdb.org` through a local HTTP server, so it would need the network and an Android build of
+  that extension.
 
 ## Risks
 

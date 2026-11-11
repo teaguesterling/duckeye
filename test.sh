@@ -361,6 +361,33 @@ has 'md toc depth'    '    Alpha Child' $DUCKEYE -T "$TMP/doc.md"
 has 'html renders'    'html body text' $DUCKEYE "$TMP/doc.html"
 ok  'html toc'                   $DUCKEYE -T "$TMP/doc.html"
 
+echo 'reader mode (--reader)'
+# Page chrome a browser's reading mode removes: header, nav, aside, footer, and
+# everything outside <main> (else outside the <article>s). A header inside an article
+# is the article's own title block, so it stays. Presentation <meta> stays out.
+cat >"$TMP/chrome.html" <<'HTML'
+<html><head><title>Chrome Test</title><meta name="viewport" content="width=device-width"><meta name="author" content="A. Writer"></head><body>
+<header><nav><a href="/">Home</a> <a href="/signin">Sign in here</a></nav><h2>Site banner</h2></header>
+<main><article><header><p>By the byline</p></header><h1>Article title</h1><p>Article body text.</p><h2>Second part</h2><p>More body.</p></article></main>
+<aside><h2>Related rail</h2></aside>
+<footer><p>Copyright notice</p></footer>
+</body></html>
+HTML
+has     'reader keeps the article'        'Article body text.' $DUCKEYE --reader "$TMP/chrome.html"
+has     'reader keeps an article header'  'By the byline'      $DUCKEYE --reader "$TMP/chrome.html"
+no_leak 'reader drops the nav'            'Sign in here'       $DUCKEYE --reader "$TMP/chrome.html"
+no_leak 'reader drops the page header'    'Site banner'        $DUCKEYE --reader "$TMP/chrome.html"
+no_leak 'reader drops the aside'          'Related rail'       $DUCKEYE --reader "$TMP/chrome.html"
+no_leak 'reader drops the footer'         'Copyright notice'   $DUCKEYE --reader "$TMP/chrome.html"
+no_leak 'reader drops presentation meta'  'viewport'           $DUCKEYE --reader -t md "$TMP/chrome.html"
+has     'reader keeps the author'         'A. Writer'          $DUCKEYE --reader -t md "$TMP/chrome.html"
+no_leak 'reader toc has no chrome'        'Related rail'       $DUCKEYE --reader -T "$TMP/chrome.html"
+has     'reader toc has the article'      'Second part'        $DUCKEYE --reader -T "$TMP/chrome.html"
+# Opt-in: without the flag the page is untouched.
+has     'no reader keeps the nav'         'Sign in here'       $DUCKEYE "$TMP/chrome.html"
+# A page with no named sections passes through whole.
+has     'reader on a plain page'          'html body text'     $DUCKEYE --reader "$TMP/doc.html"
+
 echo 'sections'
 # a parent section carries its children, and stops before the next same-level heading
 has 'S parent keeps child' 'child body with widget' $DUCKEYE -S Alpha "$TMP/doc.md"

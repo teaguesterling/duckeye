@@ -266,7 +266,8 @@ EOF
 # load all four on every run, and a macro per extension would only rename one function.
 # docs/dev/sql-core.md has the table a host uses instead.
 emit_sql() {
-  printf -- '-- duckeye %s SQL core: the macros duckeye creates, as text a host runs.\n' "$DUCKEYE_VERSION"
+  printf -- '-- duckeye %s SQL core: its shared macro groups, as text a host runs.\n' "$DUCKEYE_VERSION"
+  printf -- '-- Not here: SQL that duckeye builds per run, such as zim_to_blocks and -Q tables.\n'
   printf -- '-- Create each group after loading the extensions on its needs line.\n\n'
   printf -- '-- group: pure\n-- needs: (DuckDB core only)\n%s\n' "$DUCKEYE_SQL_PURE"
   printf -- '-- group: blocks\n-- needs: duck_block_utils\n%s' "$DUCKEYE_SQL_BLOCKS"

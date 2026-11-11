@@ -1,7 +1,8 @@
 # duckeye for Android: design
 
-**Status:** draft, 2026-11-10. Waiting for Teague's review. Nothing in this document is built
-yet, except the throwaway spikes it cites.
+**Status:** approved by Teague, 2026-11-11. Phase 1 gate passed on the phone, 2026-11-11.
+The app lives in `teaguesterling/duckeye-android` (private, created 2026-11-11). Nothing of the
+real app is built yet, except the throwaway spikes this document cites.
 
 ## Intent
 
@@ -15,16 +16,19 @@ like duckeye in a terminal, without the terminal.
 |---|---|
 | DuckDB v2.0.0 cross-compiles for Android arm64 (NDK r27c, `DUCKDB_PLATFORM=android_arm64`, `ANDROID_PLATFORM=android-28`) | stage 1 and stage 2 builds on longbottom |
 | The Android CLI with duck_block_utils, read_lines and sitting_duck gives the same results as native DuckDB on longbottom, on the phone, in 430 ms for the whole test | stage 1 test, Termux (proot Debian) |
-| markdown, webbed, panduck 0.7.0, yaml and zipfs build for Android through vcpkg (`arm64-android` triplet, 18 packages) | stage 2 build. The phone test has not run yet |
+| markdown, webbed, panduck 0.7.0, yaml and zipfs build for Android through vcpkg (`arm64-android` triplet, 18 packages) | stage 2 build. Its phone test was dropped (my call, when Teague asked whether it was needed, 2026-11-10): the Tauri spike and the later phases cover it |
 | A Tauri 2 app links the Android `libduckdb.so` through the `duckdb` crate `=1.20000.1`, loads extensions shipped inside the APK, fetches in Rust and converts | spike APK, on the phone |
 | Wikipedia "Python" (882,401 B HTML) converts to 166,433 B markdown. open 149 ms, fetch 506 ms, convert 129 ms | spike APK, on the phone |
 | The Rust fetch reads example.com. The wasm spike could not, because of CORS | spike APK |
 | In `EXTENSION_STATIC_BUILD` mode, each loadable extension carries its own copy of DuckDB's core: 10-70 MB stripped | stage 1 and 2 builds |
 | The wasm path: 1.7 s cold start, 84 ms for the same page, byte-identical to native | wasm phone spike |
+| One `libduckdb.so` with duck_block_utils, webbed and markdown linked in (`STATICALLY_LINK_EXTENSIONS`) converts the same page, with no LOAD and autoload off, to the same sha256 as native: `b86cf504…23b2e6`. `duckdb_extensions()` reports all three as `STATICALLY_LINKED` | phase 1 APK, on the phone, 2026-11-11 |
+| Phase 1 on the phone: engine open 95 ms in a fresh process, convert 177 ms. The library is 65.2 MB stripped; the debug APK is 105.7 MB | phase 1 APK |
+| The linked build needed a rename: webbed and markdown both define `duckdb::DuckBlockFunctions::Register` (different classes). ld.lld refuses the duplicate. It is the only strong symbol the archives share | phase 1 build, try 1; `llvm-nm` over the three archives |
 
-Not measured: whether the spike's markdown is byte-identical (166,433 B against 166,434 B
-from the CLI, which adds a newline; inferred to be identical). Also not measured: why native
-converts more slowly than wasm (129 ms against 84 ms), and whether 149 ms was a cold start.
+Settled by phase 1: the output is byte-identical (hash on the phone). Not measured: why
+native converts more slowly than wasm (177 ms linked, 129 ms with loadable files, 84 ms wasm).
+Also not measured: the time from app launch to the first screen.
 
 ## Goals
 
@@ -94,15 +98,18 @@ loadable extensions against a prebuilt core (`.github/workflows/OSX.yml:239`). A
 reviewer found this by reading the source, before any build.
 
 v1 links: duck_block_utils, webbed (HTML), markdown, panduck v0.8.0 (docx, epub, odt, org,
-tex and the rest), sitting_duck (code). The core already links json, parquet, icu and
-core_functions.
+tex and the rest), sitting_duck (code). **Corrected:** an earlier draft said the core already
+links json, parquet and icu. It links only `core_functions` by default (`Makefile:158`). The
+others build as loadable files, and the app does not ship them unless a phase adds them.
 
 ### Dependencies: vcpkg, one baseline
 
 Spack has no Android platform. vcpkg's `arm64-android` triplet built all 18 stage 2 packages.
 One binary can hold one copy of each library, so the linked build uses one vcpkg baseline:
 DuckDB's `cd61e1e2`. The solo builds use the same baseline, so a solo pass predicts a linked
-pass. A library that two extensions need (libxml2, for webbed and panduck) resolves once.
+pass. A library that two extensions need resolves once. **Corrected 2026-11-11:** this said
+libxml2 serves webbed and panduck. panduck v0.8.0's `vcpkg.json` lists pugixml, miniz and
+yyjson; only webbed uses libxml2. miniz is shared, with zipfs, if zipfs is ever linked.
 
 ### The logic: the same SQL as the terminal
 
@@ -149,7 +156,7 @@ A page that needs a login shows the error, not a half page.
 ### Where the code lives (Teague, 2026-11-10)
 
 A new repo. It pins a duckeye commit, and its build runs that commit's `duckeye --emit-sql`.
-**My call:** the name `duckeye-android`. Creating the repo on GitHub waits for Teague. This
+**My call:** the name `duckeye-android`. Teague approved; the repo is private. This
 design stays in the duckeye repo, because it changes what duckeye must provide
 (`--emit-sql`). The plan and the code go in the new repo.
 
@@ -180,15 +187,21 @@ Each phase ends with a test on the phone.
 
 ## Risks
 
-- **Static linking of out-of-tree extensions on Android is not yet tested.** Stage 1 linked
-  only in-tree ones (json, parquet, icu, core_functions). Fallback: loadable files with the
-  store-trust patch (spack-packages#7513).
+- **Static linking of out-of-tree extensions: tested for three in phase 1.** panduck and
+  sitting_duck are not yet tested. Fallback: loadable files with the store-trust patch
+  (spack-packages#7513).
+- **Class names shared between extensions.** Measured in phase 1: webbed and markdown both
+  define `duckdb::DuckBlockFunctions`. Loadable files never meet, so only a linked build
+  fails. The spike renames webbed's class in a scratch clone and builds with
+  `DUCKDB_SKIP_APPLYING_PATCHES=1`. The upstream fix is Teague's call. Each new linked
+  extension can clash the same way; its solo build does not show it.
 - **The APK size.** sitting_duck carries 28 grammars. **Inferred:** about 60-120 MB in the
   APK. Measure it in phase 4.
 - **Static linking of the vcpkg libraries** (libxml2, cmark-gfm, pugixml, yaml-cpp) into one
   library can clash on symbols. A loadable `.so` hides its symbols, but a static archive hides
-  nothing. One vcpkg baseline removes version clashes. Clashes between libraries remain
-  possible. Measure them in phase 1.
+  nothing. One vcpkg baseline removes version clashes. Measured in phase 1: libxml2 (webbed),
+  cmark-gfm (markdown) and zlib from vcpkg linked into one library with no clash. Each later
+  phase adds libraries (panduck: pugixml, miniz, yyjson), so each linked build re-checks.
 - **duckdb-rs pins a DuckDB version** (`1.20000.1` = v2.0.0). A DuckDB update needs a matching
   crate.
 

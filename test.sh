@@ -508,6 +508,34 @@ if command -v zip >/dev/null; then
   (cd "$TMP" && zip -q "$TMP/d.zip" d.yaml d.toml 2>/dev/null)
   has 'raw zip'    'd.yaml' $DUCKEYE -r "$TMP/d.zip"
 fi
+# -Q ON A MAPPING (#24). The defect was SILENT, not loud: the data path has no
+# selector engine, so `-Q '#accent' theme.json` printed the whole file and exited 0,
+# which a caller cannot tell apart from a selector that matched everything.
+#
+# WHICH OF THESE ACTUALLY GUARD IT, measured by running them against the duckeye
+# before the fix: 4 of the 7 -Q assertions failed, and the other 3 PASSED VACUOUSLY,
+# because a whole-file dump contains every match too. So a `has` on rendered text is
+# a render check, not a guard. The guards are the two `no_leak`s (a narrowed result
+# must not contain its siblings), the `no` (a miss must exit 1), and the two that
+# assert a dotted path, which only the key route emits.
+#
+# The last two assertions are the opposite case: they SHOULD pass before and after,
+# because they pin behaviour this change must not touch.
+printf 'terms:\n  strength:\n    values: [nudge, must]\n  tone:\n    values: [plain]\n' >"$TMP/keys.yaml"
+printf '{"accent":"#c33","radius":4}\n' >"$TMP/keys.json"
+has     '-Q yaml key selects its subtree' 'nudge'  $DUCKEYE -Q '#strength' -t text "$TMP/keys.yaml"
+has     '-Q json key selects its value'   '#c33'   $DUCKEYE -Q '#accent'   -t text "$TMP/keys.json"
+no_leak '-Q yaml key drops its sibling'   'plain'  $DUCKEYE -Q '#strength' -t text "$TMP/keys.yaml"
+no_leak '-Q json key drops its sibling'   'radius' $DUCKEYE -Q '#accent'   -t text "$TMP/keys.json"
+has     '-Q child combinator on keys' 'terms.strength' $DUCKEYE -Q '#terms > #strength' --json "$TMP/keys.yaml"
+no      '-Q key miss exits 1'                      $DUCKEYE -Q '#nosuchkey' "$TMP/keys.yaml"
+has     '-Q keys carry a dotted path'  'terms.strength' $DUCKEYE -Q '#strength' --json "$TMP/keys.yaml"
+# SCOPED TO -Q. The force-raw rule gained ONE exception; without a selector these are
+# still data files, and the second assertion is what catches the exception widening --
+# a block element_type can only appear if the document route took the file.
+has     'yaml without -Q is a data table' 'nudge'   $DUCKEYE "$TMP/keys.yaml"
+no_leak 'yaml without -Q yields no blocks' 'mapping' $DUCKEYE "$TMP/keys.yaml"
+
 has 'where filters' 'name_7' $DUCKEYE -w 'score > 6' "$TMP/d.parquet"
 if [[ $($DUCKEYE -w 'score > 6' "$TMP/d.parquet") == *'name_1'* ]]; then
   fail=$((fail+1)); echo '  FAIL where excludes non-matches'

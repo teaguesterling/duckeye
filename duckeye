@@ -84,13 +84,13 @@ DUCKEYE_VERSION=0.25.0
 # empty and was red the whole time, was not being read.
 : "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs sitting_duck panduck}"
 
-# textplot is NOT in the list above, and which list serves it depends on the DuckDB
-# line. MEASURED 2026-10-29: on 2.0.0 the community registry still serves a binary
-# whose init throws, naming Query.Farm as the new home; Query.Farm's own repository
-# serves a working one. On 1.5.6 the community copy loads and Query.Farm cannot be
-# reached at all, because `CREATE EXTENSION REPOSITORY` is a PARSER ERROR before 2.0.
-# So the repository is chosen from the running duckdb's major version rather than
-# written into both lists, which would make one of them wrong on every machine.
+# textplot is NOT in the list above: Query.Farm's own repository serves it.
+# MEASURED 2026-10-29 on 2.0.0: the community registry still serves a binary whose
+# init throws, naming Query.Farm as the new home, and Query.Farm's own repository
+# serves a working one. duckeye once chose the repository from the running duckdb's
+# major version, because on 1.5.6 the community copy loaded and `CREATE EXTENSION
+# REPOSITORY` was a PARSER ERROR. The DuckDB floor is 2.0.0, so Query.Farm is the
+# only answer, and the choice is written into the list instead of probed.
 #
 # RE-TESTED 2026-11-08 to decide whether Query.Farm is still needed, in a fresh HOME
 # with zero extensions pre-installed -- the only probe that measures the registry
@@ -108,14 +108,14 @@ DUCKEYE_VERSION=0.25.0
 # verified"). A THIRD-PARTY binary source: overridable so a caller who does not want
 # it can set DUCKEYE_QUERYFARM= and lose only -Z.
 #
-# WHICH repository serves a DUCKEYE_QUERYFARM name is answered lazily, and that is not
-# tidiness. `--version` must work, and stay silent, with NOTHING else on PATH:
-# test.sh:1511 runs it under an empty bin dir precisely so a stray helper cannot leak.
-# A probe at load time broke it -- `duckdb --version 2>/dev/null | sed ...` redirects
-# duckdb's stderr and NOT sed's, so `sed: command not found` reached stderr on every
-# invocation. MEASURED: 375 passed, 1 failed, and the one was that assertion. So the
-# probe runs only when a query_farm name is actually about to be installed or loaded,
-# and it uses shell builtins alone -- no sed, no cut, nothing to be missing.
+# duckeye runs NO probe to answer this, and that is not tidiness. `--version` must
+# work, and stay silent, with NOTHING else on PATH: test.sh:1511 runs it under an
+# empty bin dir precisely so a stray helper cannot leak. A probe at load time broke
+# it -- `duckdb --version 2>/dev/null | sed ...` redirects duckdb's stderr and NOT
+# sed's, so `sed: command not found` reached stderr on every invocation. MEASURED:
+# 375 passed, 1 failed, and the one was that assertion. A later version probe ran
+# lazily, from shell builtins alone, for the same reason. The DuckDB 2.0.0 floor
+# removed the question it answered, so nothing is probed now. Do not add one back.
 : "${DUCKEYE_QUERYFARM_URL:=https://duckdb-extensions.query.farm}"
 # Extensions the community registry does not currently BUILD for every DuckDB version.
 # `--init` reports a 404 for these and keeps going, because an artifact that does not
@@ -378,8 +378,7 @@ Env:
                      (default: duck_block_utils markdown webbed zim pdf yaml
                       toml read_lines duck_tails zipfs sitting_duck panduck)
   DUCKEYE_QUERYFARM  --init installs these from Query.Farm's repo, a THIRD-PARTY
-                     source (default on DuckDB 2.0+: textplot; empty before that,
-                     where the community copy works). Set empty to decline it and
+                     source (default: textplot). Set empty to decline it and
                      lose only -Z sparklines and profile histograms.
   DUCKEYE_QUERYFARM_URL  that repo's prefix
                      (default: https://duckdb-extensions.query.farm)
@@ -422,19 +421,6 @@ dbu_body_floor() {
   fi
 }
 
-# 0 when duckdb cannot be run at all, which makes every caller below take the
-# community path rather than guess at a repository that may not exist.
-duckeye_ddb_major() {
-  if [[ -z ${_ddb_major_cached-} ]]; then
-    local v
-    v=$(duckdb --version 2>/dev/null) || v=''
-    v=${v#v}; v=${v%%.*}
-    [[ -z $v || $v == *[!0-9]* ]] && v=0
-    _ddb_major_cached=$v
-  fi
-  printf '%s' "$_ddb_major_cached"
-}
-
 # Build the LOAD prelude for an extension list. A Query.Farm extension is installed
 # into its own repository subdirectory, and an unqualified LOAD does NOT fall back to
 # it -- MEASURED 2026-10-29: with the flat-path copy moved aside, `LOAD textplot` fails
@@ -447,13 +433,10 @@ duckeye_ddb_major() {
 # LOAD -- and a clean CI runner failed nine -Z assertions. One builder, four callers,
 # so the next extension that moves repository cannot land half-applied.
 duckeye_load_sql() {
-  local e out='' major=''
+  local e out=''
   for e in "$@"; do
     if [[ -n ${DUCKEYE_QUERYFARM-} && " $DUCKEYE_QUERYFARM " == *" $e "* ]]; then
-      # Probed only when a query_farm name is really in the list, and at most once per
-      # call. No cache outlives this: every caller runs it in a command substitution.
-      [[ -n $major ]] || major=$(duckeye_ddb_major)
-      (( major >= 2 )) && { out+="LOAD $e FROM query_farm; "; continue; }
+      out+="LOAD $e FROM query_farm; "; continue
     fi
     out+="LOAD $e; "
   done
@@ -468,10 +451,8 @@ init() {
   for repo in core community query_farm; do
     case $repo in
       core)       list=$DUCKEYE_OFFICIAL ;;
-      community)  list=$DUCKEYE_COMMUNITY
-                  (( $(duckeye_ddb_major) < 2 )) && list+=" $DUCKEYE_QUERYFARM" ;;
-      query_farm) list=''
-                  (( $(duckeye_ddb_major) >= 2 )) && list=$DUCKEYE_QUERYFARM ;;
+      community)  list=$DUCKEYE_COMMUNITY ;;
+      query_farm) list=$DUCKEYE_QUERYFARM ;;
     esac
     for e in $list; do
       printf '%-20s %-10s ' "$e" "$repo"

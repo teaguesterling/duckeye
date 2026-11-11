@@ -203,9 +203,11 @@ One risk stays, and it is about panduck's version, not DuckDB's. A DuckDB 2.0 us
 still has the registry's panduck v0.7.0 gets the same bind error until `duckeye
 --update`. That is why the merge waits for the registry to serve panduck v0.8.0.
 
-`duckeye_ddb_major()` (`duckeye:378`) and the three branches at `duckeye:407`, `423` and
-`425` choose an extension repository by major version. They are dead under this ruling,
-and they are left in place for a separate change.
+`duckeye_ddb_major()` and its three callers chose an extension repository by major
+version. They are dead under this ruling, and they are now REMOVED.
+`duckeye_load_sql()` qualifies every `DUCKEYE_QUERYFARM` name with `FROM query_farm`,
+and `--init` installs that list from Query.Farm's repository without a condition.
+duckeye now runs no `duckdb --version` probe of its own at all.
 
 Measured again 2026-11-10, on branch `feat/panduck-section-search`, against panduck
 main `0559559d33` on DuckDB v2.0.0, with duckeye's implementation still unchanged:

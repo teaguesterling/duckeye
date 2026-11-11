@@ -43,12 +43,12 @@ for f in nest.md ids.md flat.md; do
   for p in "${pats[@]}"; do
     a=$("$de" -S "$p" -t text "$f" 2>&1); arc=$?
     b=$(pd "SELECT duck_blocks_to_text(list($ROW ORDER BY element_order))
-            FROM doc_section('$f', '$(sq "$p")', format := 'markdown', match := 'contains',
+            FROM doc_section('$f', '$(sq "$p")', format := 'markdown', match := 'glob',
                              expand_embedded := false)")
     report "-S/doc_section        " "$f $(printf %q "$p")" "$a" "$arc" "$b"
     a=$("$de" -s "$p" -t text "$f" 2>&1); arc=$?
     b=$(pd "SELECT duck_blocks_to_text(list($ROW ORDER BY element_order))
-            FROM doc_search_sections('$f', '$(sq "$p")', format := 'markdown',
+            FROM doc_search_sections('$f', '$(sq "$p")', format := 'markdown', match := 'glob',
                                      expand_embedded := false)")
     report "-s/doc_search_sections" "$f $(printf %q "$p")" "$a" "$arc" "$b"
   done

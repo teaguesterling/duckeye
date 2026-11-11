@@ -1153,8 +1153,30 @@ is_data_file() {
   return 1
 }
 
-# Data files default to raw table mode
-if [[ $mode == full ]] && is_data_file; then
+# True when -Q should read a mapping as a tree of keys rather than as a table.
+# A Pandoc AST `.json` is a DOCUMENT already, with its own reader, so it is excluded
+# here rather than losing that reader to this one.
+is_key_query() {
+  [[ -n ${selector:-} ]] || return 1
+  case "$fmt" in
+    yaml|yml)   return 0 ;;
+    json)       is_pandoc_json "$f" && return 1 || return 0 ;;
+    '')         ;;
+    *)          return 1 ;;
+  esac
+  case "$key" in
+    *.yaml|*.yml) return 0 ;;
+    *.json)       is_pandoc_json "$f" && return 1 || return 0 ;;
+  esac
+  return 1
+}
+
+# Data files default to raw table mode. ONE exception: `-Q` asks a STRUCTURAL
+# question, and the data path has no selector engine at all -- it printed the whole
+# file and exited 0, which a caller cannot tell apart from a selector that matched
+# everything (#24). Silent ignore is the same failure the block near the -Q rewrite
+# below was written to end; it survived here because this path never reaches it.
+if [[ $mode == full ]] && is_data_file && ! is_key_query; then
   mode=raw
 fi
 
@@ -1735,6 +1757,67 @@ if [[ $key == *.zim ]]; then
   fi
 fi
 
+
+# A mapping as duck_blocks, one block per key, so the ordinary -Q engine applies.
+#
+# WHY A BLOCK PER KEY, AND NOT A PATH LOOKUP: `level` IS the nesting depth, so the
+# node table's parent/span pass gives `#terms > #strength` and every other combinator
+# for free, and selecting a key returns its SUBTREE because the span cover already
+# includes the deeper blocks that follow it. A `yaml_extract_path` translation would
+# have handled `#strength` alone and silently dropped the combinators.
+#
+# ORDERING IS BY PATH, NOT row_number(). A recursive CTE does not expand in document
+# order: MEASURED on `values: [nudge, must]`, a bare `row_number() OVER ()` emitted
+# `must` before `nudge`. The zero-padded path sorts siblings by position at every
+# depth, so document order survives nesting.
+#
+# `attributes['path']` IS THE DOTTED KEY PATH, not the sort path. The zero-padded
+# path above exists only to order siblings; what a caller needs back is `terms.strength`,
+# which is the locator it would use to find the region again.
+#
+# yaml() READS BOTH FORMATS -- YAML is a JSON superset -- so `.json` needs no second
+# arm here, and a scalar's value becomes a child `code` block at depth+1 so that a
+# selected key renders as `key` then its value.
+key_blocks_doc() {
+  printf '%s\n' "WITH RECURSIVE walk AS (
+      SELECT 0 AS depth, ''::VARCHAR AS path, ''::VARCHAR AS kpath, ''::VARCHAR AS key,
+             yaml_to_json(yaml(content)) AS val, true AS is_root
+        FROM read_text('$src')
+      UNION ALL
+      SELECT w.depth + 1, w.path || '/' || lpad(e.rn::VARCHAR, 6, '0'),
+             CASE WHEN w.kpath = '' THEN e.key ELSE w.kpath || '.' || e.key END,
+             e.key, e.value, false
+        FROM walk w, (SELECT key, value, row_number() OVER () AS rn FROM json_each(w.val)) e
+       WHERE json_type(w.val) IN ('OBJECT','ARRAY')
+    ),
+    flat AS (
+      SELECT row_number() OVER (ORDER BY path) AS ord, depth, path, kpath, key, val,
+             CASE json_type(val) WHEN 'OBJECT' THEN 'mapping'
+                                 WHEN 'ARRAY'  THEN 'sequence'
+                                 ELSE 'scalar' END AS ty
+        FROM walk WHERE NOT is_root
+    )
+    SELECT list(b ORDER BY o) AS blocks FROM (
+      SELECT ord * 2 AS o,
+             struct_pack(kind := 'block', element_type := ty, content := key,
+               level := depth, encoding := NULL::VARCHAR,
+               attributes := MAP {'path': kpath},
+               element_order := (ord * 2)::INTEGER) AS b
+        FROM flat
+      UNION ALL
+      SELECT ord * 2 + 1 AS o,
+             struct_pack(kind := 'block', element_type := 'code',
+               content := json_extract_string(val, '\$'), level := depth + 1,
+               encoding := NULL::VARCHAR, attributes := MAP {},
+               element_order := (ord * 2 + 1)::INTEGER) AS b
+        FROM flat WHERE ty = 'scalar'
+    )"
+}
+
+if [[ -z $doc ]] && is_key_query; then
+  exts="yaml"
+  doc=$(key_blocks_doc)
+fi
 
 [[ -n $doc ]] ||                   # already resolved above (an opened zim article)
 case "$key" in                     # NB: patterns unquoted, or globbing is disabled

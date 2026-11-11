@@ -158,8 +158,12 @@ returns empty, is PLUMBING and not a deviation.
 
 Run the check with `scripts/panduck-deviations.sh [DUCKEYE]`. It uses the fixtures in
 `scripts/parity.sh` and 11 patterns. It runs `-S`, `-s`, `-T` and `-t md|html|text`
-against `doc_section`, `doc_search_sections`, `doc_toc` and `doc_render`. It exits 0
-only when nothing deviates, so it is the gate for switching duckeye to panduck.
+against `doc_section`, `doc_search_sections`, `doc_toc` and `doc_render`. For `-S` and
+`-s` it also runs the `blocks` variants, `doc_section_blocks` and
+`doc_search_sections_blocks`, on the same cases. Those are the functions duckeye calls,
+because both duckeye macros narrow a `blocks` list and never a path, so a gate that
+tested only the path functions could stay green while the real call was broken. It
+exits 0 only when nothing deviates, so it is the gate for switching duckeye to panduck.
 
 Measured 2026-11-10 (duckeye `main` at `97ce1a3`, panduck v0.7.0, DuckDB v2.0.0):
 **25 SAME, 43 PLUMBING, 10 DEVIATION**. Every deviation is about what a pattern means:
@@ -183,3 +187,23 @@ Plumbing that duckeye keeps:
 
 Not covered by the check yet: zim entries, stdin, and code sources. The speed gap
 is withdrawn: see the correction above.
+
+Measured again 2026-11-10, on branch `feat/panduck-section-search`, against panduck
+main `0559559d33` on DuckDB v2.0.0, with duckeye's implementation still unchanged:
+
+| Gate run | Cases | Result |
+|---|---|---|
+| glob mode, path functions only | 78 | **35 SAME, 43 PLUMBING, 0 DEVIATION**, exit 0 |
+| glob mode, plus the `blocks` variants | 144 | **59 SAME, 85 PLUMBING, 0 DEVIATION**, exit 0 |
+
+All 10 deviations of the v0.7.0 run are gone, and the 66 `blocks` cases add none. So
+duckeye's own `-S` and `-s` and panduck's narrow functions agree on every fixture case
+before the switch, which is what licenses the switch.
+
+Two limits of these numbers. Both runs preload panduck through a wrapper, which makes
+`LOAD panduck` a no-op on every route, so they cannot see a route that fails to load
+panduck. Order is the other limit: on a two-file code glob the input list holds 10
+blocks with only 5 distinct `element_order` values, one pair per file, and the `blocks`
+functions return no position column. duckeye's own macros break that tie on the list
+position. A caller must therefore pass the list through `duck_blocks_reorder` first,
+which makes `element_order` unique (measured: 10 distinct from 5).

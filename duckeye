@@ -212,6 +212,26 @@ CREATE OR REPLACE MACRO duckeye_number_lines(blocks) AS
                                               b.attributes['start_line']::INTEGER))
          ELSE b END);
 EOF
+#
+# Group "toc": needs duck_block_utils. Created for -T.
+#   duckeye_toc_text(blocks) is -T's outline: each heading title, indented two spaces per
+#     level of indent. duckeye_toc_json(blocks) is -T --json's array. Both are TABLE
+#     macros over duck_blocks_toc_rows, which takes a column -- so `FROM doc,
+#     duckeye_toc_text(doc.blocks)` works on every route, zim entries and stdin included.
+#     No headings gives zero rows, which is what "no headings in FILE" tests for.
+#   duck_blocks_toc_rows, not duck_blocks_toc: toc_rows is the row-shaped accessor BY
+#     RULING (an outline is an index, not an extract), while duck_blocks_toc is slated to
+#     return blocks. When that lands, `indent` and `title` stop existing and these fail
+#     to BIND, which is the loud failure.
+IFS= read -r -d '' DUCKEYE_SQL_TOC <<'EOF' || :
+CREATE OR REPLACE MACRO duckeye_toc_text(blocks) AS TABLE
+  SELECT string_agg(repeat('  ', t.indent) || t.title, chr(10) ORDER BY t.element_order) AS toc
+  FROM duck_blocks_toc_rows(blocks) t HAVING count(*) > 0;
+CREATE OR REPLACE MACRO duckeye_toc_json(blocks) AS TABLE
+  SELECT to_json(list(struct_pack(title := t.title, level := t.level, indent := t.indent,
+                                  element_order := t.element_order))) AS toc
+  FROM duck_blocks_toc_rows(blocks) t HAVING count(*) > 0;
+EOF
 
 # Group "reader": DuckDB core only. --reader, and the Android app's reading mode.
 #   duckeye_reader(blocks) removes NAMED page structure, never content it judges to be
@@ -270,7 +290,8 @@ emit_sql() {
   printf -- '-- Not here: SQL that duckeye builds per run, such as zim_to_blocks and -Q tables.\n'
   printf -- '-- Create each group after loading the extensions on its needs line.\n\n'
   printf -- '-- group: pure\n-- needs: (DuckDB core only)\n%s\n' "$DUCKEYE_SQL_PURE"
-  printf -- '-- group: blocks\n-- needs: duck_block_utils\n%s' "$DUCKEYE_SQL_BLOCKS"
+  printf -- '-- group: blocks\n-- needs: duck_block_utils\n%s\n' "$DUCKEYE_SQL_BLOCKS"
+  printf -- '-- group: toc\n-- needs: duck_block_utils\n%s' "$DUCKEYE_SQL_TOC"
 }
 
 usage() {
@@ -1240,6 +1261,7 @@ pat="duckeye_like('$(q "$arg")')"
 pat_raw="'$(q "$arg")'"
 exts= doc= via_pandoc= zim_open= premacro=
 [[ $mode == section || $mode == search ]] && premacro=$DUCKEYE_SQL_PURE
+[[ $mode == toc ]] && premacro=$DUCKEYE_SQL_TOC
 # -n numbers source lines in a rendered view. A data mode prints rows, and -T prints
 # headings, so there is nothing to number there; saying so beats silently ignoring it.
 [[ -n $number_lines ]] && case $mode in
@@ -2456,9 +2478,7 @@ cte="WITH doc AS MATERIALIZED ($doc)"
 if [[ -n $json_out && -z $rank_criterion ]]; then
   case $mode in
     toc)
-      sql="$cte, t AS (SELECT r.* FROM doc, duck_blocks_toc_rows(doc.blocks) r)
-           SELECT to_json(list(struct_pack(title := t.title, level := t.level, indent := t.indent, element_order := t.element_order)))
-           FROM t HAVING count(*) > 0;" ;;
+      sql="$cte SELECT toc FROM doc, duckeye_toc_json(doc.blocks);" ;;
     full|section|search)
       out_fmt=blocks
       sql="$cte SELECT $(emit 'blocks') FROM doc WHERE blocks IS NOT NULL;" ;;
@@ -2476,18 +2496,12 @@ else
       # output and tripped the guard below. Dropping the row makes every writer agree.
       sql="$cte SELECT $(emit 'blocks') FROM doc WHERE blocks IS NOT NULL;" ;;
     toc)
-      # duck_blocks_toc_rows, not duck_blocks_toc. Both return the same five columns
-      # today, but toc_rows is the row-shaped accessor BY RULING -- a table of contents
-      # is an index, not an extract, so it stays metadata-only -- while duck_blocks_toc
-      # is slated to return blocks. When that lands, `e.indent` and `e.title` stop
-      # existing and this fails to BIND, which is the loud failure and still a failure.
-      #
-      # It is a table MACRO, so it takes a column. That distinction is the whole reason
-      # this migration is possible: a table FUNCTION rejects `doc.blocks` outright, which
-      # is how parse_html_blocks silently broke -S on ZIM archives for weeks.
-      sql="$cte, t AS (SELECT r.* FROM doc, duck_blocks_toc_rows(doc.blocks) r)
-           SELECT string_agg(repeat('  ', t.indent) || t.title, chr(10) ORDER BY t.element_order)
-           FROM t HAVING count(*) > 0;" ;;
+      # The outline is duckeye_toc_text, in the "toc" group (see the heredoc for why
+      # duck_blocks_toc_rows). It is a table MACRO, so it takes a column. That is the
+      # whole reason this works on every route: a table FUNCTION rejects `doc.blocks`
+      # outright, which is how parse_html_blocks silently broke -S on ZIM archives for
+      # weeks.
+      sql="$cte SELECT toc FROM doc, duckeye_toc_text(doc.blocks);" ;;
   esac
 fi
 

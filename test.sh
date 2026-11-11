@@ -1748,8 +1748,16 @@ has '--emit-sql: duckeye_number_lines runs in a bare duckdb' $'    10\tdef f():'
     env -u AI_AGENT -u CLAUDECODE duckdb -list -noheader \
       -s "LOAD duck_block_utils; $(cat "$TMP/core.sql")" \
       -s "SELECT duck_blocks_to_text(duckeye_number_lines(duckeye_code_at('python', 'def f():' || chr(10) || '    pass' || chr(10), 10)));"
+has '--emit-sql: duckeye_toc_text runs in a bare duckdb' $'Top\n  Sub' \
+    env -u AI_AGENT -u CLAUDECODE duckdb -list -noheader \
+      -s "LOAD duck_block_utils; $(cat "$TMP/core.sql")" \
+      -s "SELECT toc FROM (SELECT [duck_block_heading('Top', 1), duck_block_heading('Sub', 2)] AS blocks) d, duckeye_toc_text(d.blocks);"
 # Like --version, it prints text the script already holds, so it must not need duckdb.
-ok  '--emit-sql needs nothing else' env PATH="$TMP/empty" "$BASH" "$DUCKEYE" --emit-sql
+# `has`, not `ok`: rc 0 with empty or broken output would pass `ok`. And the stderr check,
+# for the reason the --version pair above gives: a missing tool can complain and still exit 0.
+has '--emit-sql needs nothing else' '-- group: toc' env PATH="$TMP/empty" "$BASH" "$DUCKEYE" --emit-sql
+ok  '--emit-sql is silent on stderr' \
+    bash -c "[[ -z \$(env PATH='$TMP/empty' '$BASH' '$DUCKEYE' --emit-sql 2>&1 >/dev/null) ]]"
 # The pin must never be OLDER than the latest tag. --version is duckeye's ONLY version
 # surface -- no VERSION file, no changelog -- so a stale pin is invisible until someone
 # reports the wrong number.

@@ -50,8 +50,10 @@ Measured 2026-11-10, on longbottom, by the session that wrote this brief.
   checkout is `~/Projects/duckeye`.
 - The `duckeye` script needs `duckdb` on `PATH`. `duckeye --init` installs the
   extensions from the DuckDB core repository and the community repository.
-- `pandoc(1)` is needed for two formats only: `.rst` and man pages. DOCX, ODT,
-  EPUB, LaTeX, Org, RTF and `.ipynb` parse natively through `panduck`.
+- `pandoc(1)` is needed for ONE format: `.rst`. DOCX, ODT, EPUB, LaTeX, Org, RTF
+  and `.ipynb` parse natively through `panduck`. (Corrected 2026-11-11: this line
+  said "two formats only: `.rst` and man pages". Man page support was removed
+  before this brief was written, so `.man` and `.1`-`.9` already refused then.)
 - An HTML page to markdown needs `duck_block_utils` plus `webbed`, and nothing
   else.
 - `~/Projects/Android/CLIApp` exists, and is **not** prior art. It is an ant

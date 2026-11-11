@@ -335,9 +335,10 @@ duckeye --init      # installs DuckDB extensions
 duckeye --update    # updates DuckDB extensions and duckeye
 ```
 
-Requires `duckdb` on `PATH`. `pandoc` is optional, and now needed only for `.rst` and man
-pages — DOCX, ODT, EPUB, LaTeX, Org, RTF, Textile, MediaWiki and `.ipynb` all read
-natively through `panduck`.
+Requires `duckdb` on `PATH`. `pandoc` is optional, and now needed for `.rst` alone —
+DOCX, ODT, EPUB, LaTeX, Org, RTF, Textile, MediaWiki and `.ipynb` all read natively
+through `panduck`. Man page source is **not a format**: `.man` and `.1`-`.9` refuse with
+`unsupported extension`, because roff has no reader anywhere in the stack.
 
 `duckeye -V` prints the running version — check it against this skill's `version:` if
 something here does not match what you observe.

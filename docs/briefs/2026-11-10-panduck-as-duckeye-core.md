@@ -1,4 +1,4 @@
-# panduck becomes duckeye's SQL core: four asks
+# panduck becomes duckeye's SQL core: five asks (the fifth added 2026-11-11)
 
 Status: approved direction (Teague, 2026-11-10: "leverage panduck heavily", then
 "Panduck is the core"). Nothing in panduck is specced or built. Run
@@ -61,14 +61,35 @@ looks.
    whether `doc_section` does the same. A panduck miss returns NULL today, and duckeye
    expects zero rows or a NULL it can test. Either is fine, but write it down.
 
+5. **Take reading mode, so there is one copy (added 2026-11-11).** duckeye now has
+   `duckeye_reader(blocks)`, behind the opt-in `--reader` flag (branch
+   `feat/reader-mode`). The Android app embeds the same text, and a test proves the two
+   copies are byte-identical. Teague ruled on 2026-11-11 that it moves to panduck, by
+   the same path as ask 1: panduck takes it, then duckeye and the app switch. The
+   app's switch waits until panduck is linked into the app's engine (its phase 3).
+   - **The rule** (cordexa's: remove named structure only, never judge content). webbed
+     gives `<header>`, `<nav>`, `<main>`, `<article>`, `<aside>` and `<footer>` as
+     `section` blocks with a `role`. Keep the `<main>`, else every `<article>`, else
+     everything. From that, drop `nav` and `aside`, and a `header` or `footer` unless it
+     is inside an article. Keep the metadata keys `title`, `author` and `description`.
+   - **The shape is the performance.** Measured on a 7,335-block Wikipedia page, DuckDB
+     2.0: an `EXISTS` or self-join over the unnested blocks inside a macro took 43 s.
+     `blocks[i]` in a per-block lambda took 23 s. Spans passed as macro arguments took
+     34 s. Spans computed once in a subquery took 0.3 s for the whole query. The
+     comment above `DUCKEYE_SQL_READER` in the script has the details.
+   - **Wanted:** `doc_reader(src)`, and a blocks variant per ask 2 (a table macro). The
+     namespace doc puts blocks-only functions in duck_block_utils (`db_*`). Ask 2
+     already bends that rule, so say where this one lands, and why.
+   - **Done when:** `duckeye --reader` gives byte-identical output through panduck's
+     function, measured on `test.sh`'s "reader mode" fixture and on the Wikipedia page.
+
 ## Coming next, leave room for it
 
 Teague wants chrome removal for shared web pages: include or exclude parts by CSS
-selector, for example `--only article` and `--drop nav,aside,footer`. Today
-Wikipedia's "Duck" article starts at line 276 of 969 after conversion. Ask 2's `blocks`
-input is what lets a selector filter compose with section and search. Prior art he
-named is in `grimoire-kb/docs/SOURCE-ACCEPTANCE-CRITERIA.md` and `ATLAS.md` (not read
-by me).
+selector, for example `--only article` and `--drop nav,aside,footer`. Ask 5's rule is
+the default of that feature. Ask 2's `blocks` input is what lets a selector filter
+compose with section and search. Prior art he named is in
+`grimoire-kb/docs/SOURCE-ACCEPTANCE-CRITERIA.md` and `ATLAS.md` (not read by me).
 
 ## Limits
 

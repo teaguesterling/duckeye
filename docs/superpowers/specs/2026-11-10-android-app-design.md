@@ -220,6 +220,20 @@ from Files rendered; the output and style switches work.
   code blocks when the markdown is rendered), and a `viewport` meta in markdown front matter.
   Which extension causes each is not yet known.
 
+**Phase 2c (Teague, 2026-11-11, after the 2b phone run):**
+
+- **Style and Theme fold** into collapsed rows in ⋯.
+- **Reading mode**, on by default for web pages, with a toggle; files are not affected. It
+  removes named page structure only (cordexa's rule): header, nav, aside, footer, and all
+  outside `<main>`, else outside the `<article>`s. A header or footer inside an article stays.
+  Metadata keeps title, author and description. The SQL is a duckeye macro behind a new
+  opt-in `--reader` flag, so the terminal and the app run the same SQL.
+- **A Contents drawer** at the left, like Acrobat's, from the SQL of `duckeye -T --json`.
+- **The browser view by default** on 401/403/429/503. It returns to duckeye by itself once a
+  main-frame load ends without an HTTP error and the page stays settled for 1.5 s. A touch
+  turns the automatic return off.
+- Plan: duckeye-android `docs/superpowers/plans/2026-11-11-phase2c-reader-toc-menus.md`.
+
 **Later (Teague's ideas, 2026-11-11; not designed):**
 
 - **A setting to enable more extensions.** Teague says panduck supports this. Every extension in

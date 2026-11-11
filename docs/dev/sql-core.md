@@ -122,13 +122,32 @@ means the same `duck_blocks_to_text` output as duckeye's own path.
 | duckeye path | panduck function | Same output? | Speed, 72,000-row `big.md` | Gap |
 |---|---|---|---|---|
 | `-S` (`section_span_doc`) | `doc_section(src, section, format, match := 'contains', expand_embedded)` | yes: 4/4 plain patterns on the parity fixture, and `-S 'Section 7'` on big.md (md5 `e40f58a9`) | 1.45 s (duckeye 2.21 s) | no glob: `Al*a` differs. Takes a path, not a `blocks` list. A miss returns NULL |
-| `-s` (`search_span_doc`) | `doc_search_sections(src, pattern, format, expand_embedded)` | yes: 3/3 on the parity fixture, and `-s b7777` on big.md (md5 `0a0bf963`) | **13.16 s** (duckeye 2.35 s) | slow at scale. Takes a path, not a `blocks` list |
+| `-s` (`search_span_doc`) | `doc_search_sections(src, pattern, format, expand_embedded)` | yes: 3/3 on the parity fixture, and `-s b7777` on big.md (md5 `0a0bf963`) | withdrawn, see the correction below (duckeye 2.35 s) | slow at scale. Takes a path, not a `blocks` list |
 | `-T` | `doc_toc(src, format, expand_embedded)` | not measured | not measured | |
 | render (`emit()`) | `doc_render(src, output_format, format)` | not measured | not measured | md, html and text only |
 | format routing | `read_panduck_doc`, `panduck_format_for`, `panduck_reader_registry()` | not measured | | |
 
 Not measured: how a `blocks` list from zim, stdin or a code AST could reach these
 functions, since they take a path.
+
+### Correction, 2026-11-10: the speed gap and the path-only limit
+
+Two facts in the table above come from panduck v0.7.0. panduck main (`0559559`) changes
+both.
+
+**The 13.16 s is withdrawn.** It did not reproduce, and panduck#165 was closed as not
+reproducible. A re-measurement of `-s b7777` on `big.md` (474,465 bytes), three runs
+each, gave panduck 1.29 / 1.60 / 1.95 s against duckeye 1.89 / 2.42 / 1.54 s. The md5
+was `0a0bf963` for all six runs. Loadavg was 21 to 28, so the runs are noisy and
+neither side is clearly faster. The duckeye session that ran the Android spike measured
+this, not this branch. A bench on this branch is still open.
+
+**The `blocks` variants exist.** `doc_section_blocks(blocks, section, match)` and
+`doc_search_sections_blocks(blocks, pattern, match)` are table macros in panduck main.
+Claude measured both signatures in the CI build `0559559d33`, with `duckdb_functions()`.
+They return the seven block columns as rows, which `struct_pack` repacks into the
+`blocks` list that duckeye's own macros produce. `doc_toc` has no `_blocks` variant, so
+`-T` keeps duckeye's own SQL.
 
 ## Deviations: duckeye (bash) against panduck
 
@@ -162,5 +181,5 @@ Plumbing that duckeye keeps:
 | `-T` on a file with no headings: `no headings in <file>`, exit 1 | empty result |
 | `-T` indents two spaces for each level of `indent` | rows of `level`, `title`, `id`, `indent` |
 
-Not covered by the check yet: the speed gap (`doc_search_sections` takes 13.16 s
-against 2.35 s on the 72,000-row file), zim entries, stdin, and code sources.
+Not covered by the check yet: zim entries, stdin, and code sources. The speed gap
+is withdrawn: see the correction above.

@@ -188,6 +188,25 @@ Plumbing that duckeye keeps:
 Not covered by the check yet: zim entries, stdin, and code sources. The speed gap
 is withdrawn: see the correction above.
 
+### The DuckDB floor, ruled 2026-11-10
+
+Teague dropped DuckDB 1.5.x ("No duckdb 1.5"). duckeye requires DuckDB 2.0.0 or newer.
+
+This was a merge question, and the ruling answers it. panduck's narrow functions arrive
+in v0.8.0, the 1.5.x track stays on panduck v0.7.0, and v0.7.0 has neither
+`match := 'glob'` nor the `blocks` variants. So a 1.5.x user would have met a bind error
+on every `-S` and `-s`. `.github/workflows/test.yml` installs only v2.0.0, so CI could
+never have caught it. The alternatives were a version gate or a refusal message; both
+are now unnecessary.
+
+One risk stays, and it is about panduck's version, not DuckDB's. A DuckDB 2.0 user who
+still has the registry's panduck v0.7.0 gets the same bind error until `duckeye
+--update`. That is why the merge waits for the registry to serve panduck v0.8.0.
+
+`duckeye_ddb_major()` (`duckeye:378`) and the three branches at `duckeye:407`, `423` and
+`425` choose an extension repository by major version. They are dead under this ruling,
+and they are left in place for a separate change.
+
 Measured again 2026-11-10, on branch `feat/panduck-section-search`, against panduck
 main `0559559d33` on DuckDB v2.0.0, with duckeye's implementation still unchanged:
 

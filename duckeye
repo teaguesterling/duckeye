@@ -30,12 +30,12 @@ set -uo pipefail
 # these two variables cleared -- same commit, same binary, 384 assertions either way.
 # CI never saw it, because a GitHub runner sets neither variable.
 #
-# Cleared by DEFAULT rather than by passing `-no-agent` to each duckdb call, for two
-# reasons: there are 26 such calls and a 27th would silently miss the flag, and
-# `-no-agent` is a 2.0 option while duckeye supports 1.5.x, which is untested here --
-# so the version-safe choice is the one that needs no version test. Clearing the
-# trigger works on every DuckDB that has ever had this behaviour, and on every one
-# that has not.
+# Cleared by DEFAULT rather than by passing `-no-agent` to each duckdb call, because
+# there are 26 such calls and a 27th would silently miss the flag. Clearing the trigger
+# also needs no version test: it works on every DuckDB that has ever had this
+# behaviour, and on every one that has not. (It was once also the 1.5.x-safe choice.
+# Teague dropped 1.5.x on 2026-11-10, so duckeye requires DuckDB 2.0.0 or newer, and
+# that reason no longer applies.)
 #
 # But OFF is a default, not a policy. duckeye serves humans and agents from the same
 # binary, and an agent may legitimately want DuckDB's agent rendering -- compact

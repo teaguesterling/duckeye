@@ -1733,6 +1733,23 @@ ok  'version needs nothing else' env PATH="$TMP/empty" "$BASH" "$DUCKEYE" --vers
 ok  'version is silent on stderr' \
     bash -c "[[ -z \$(env PATH='$TMP/empty' '$BASH' '$DUCKEYE' --version 2>&1 >/dev/null) ]]"
 no_leak 'version is not the help' 'usage:' $DUCKEYE --version
+# --emit-sql prints duckeye's SQL core for a host that cannot run bash, such as the planned
+# duckdb-wasm app. The point is ONE copy: the host runs this text and keeps none of its own.
+# So these assert that the text WORKS in a bare duckdb, with only the extensions each group
+# names loaded, and not merely that it contains the right words.
+has '--emit-sql names the pure group'   '-- group: pure' $DUCKEYE --emit-sql
+has '--emit-sql names what blocks needs' '-- needs: duck_block_utils' $DUCKEYE --emit-sql
+$DUCKEYE --emit-sql >"$TMP/core.sql" 2>/dev/null
+# env -u: DuckDB 2.0's agent mode would change this bare call's output (see duckeye:20).
+has '--emit-sql: duckeye_like runs in a bare duckdb' 'Al%a' \
+    env -u AI_AGENT -u CLAUDECODE duckdb -list -noheader \
+      -s "LOAD duck_block_utils; $(cat "$TMP/core.sql")" -s "SELECT duckeye_like('Al*a');"
+has '--emit-sql: duckeye_number_lines runs in a bare duckdb' $'    10\tdef f():' \
+    env -u AI_AGENT -u CLAUDECODE duckdb -list -noheader \
+      -s "LOAD duck_block_utils; $(cat "$TMP/core.sql")" \
+      -s "SELECT duck_blocks_to_text(duckeye_number_lines(duckeye_code_at('python', 'def f():' || chr(10) || '    pass' || chr(10), 10)));"
+# Like --version, it prints text the script already holds, so it must not need duckdb.
+ok  '--emit-sql needs nothing else' env PATH="$TMP/empty" "$BASH" "$DUCKEYE" --emit-sql
 # The pin must never be OLDER than the latest tag. --version is duckeye's ONLY version
 # surface -- no VERSION file, no changelog -- so a stale pin is invisible until someone
 # reports the wrong number.

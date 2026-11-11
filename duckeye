@@ -257,6 +257,21 @@ CREATE OR REPLACE MACRO duckeye_reader(blocks) AS (
                                       duckeye_reader_named(blocks)) AS spans)));
 EOF
 
+# --emit-sql prints the groups above as one script, so a host that cannot run bash (the
+# planned duckdb-wasm app) ships THIS text rather than a copy of it. Each group says what
+# it needs, because DuckDB binds a macro when it is created: a host loads those extensions
+# first. No -t emit macro joins them. MEASURED 2026-11-10: the six -t formats come from
+# four extensions (render_ansi and to_text from duck_block_utils, to_md from markdown,
+# to_html from webbed, to_pandoc_ast from panduck), so one macro over all of them would
+# load all four on every run, and a macro per extension would only rename one function.
+# docs/dev/sql-core.md has the table a host uses instead.
+emit_sql() {
+  printf -- '-- duckeye %s SQL core: the macros duckeye creates, as text a host runs.\n' "$DUCKEYE_VERSION"
+  printf -- '-- Create each group after loading the extensions on its needs line.\n\n'
+  printf -- '-- group: pure\n-- needs: (DuckDB core only)\n%s\n' "$DUCKEYE_SQL_PURE"
+  printf -- '-- group: blocks\n-- needs: duck_block_utils\n%s' "$DUCKEYE_SQL_BLOCKS"
+}
+
 usage() {
   cat <<'EOF'
 usage: duckeye [OPTION]... [FILE]
@@ -328,6 +343,8 @@ Options:
                          changes which format the output is in
       --init             install the DuckDB extensions duckeye needs, then exit
       --update           update DuckDB extensions and duckeye, then exit
+      --emit-sql         print duckeye's SQL macros, grouped by the extensions
+                         each group needs, then exit
   -V, --version          print duckeye's version, then exit
   -h, --help             show this help
 
@@ -933,6 +950,7 @@ while (( $# )); do
     # Before --help, and before anything that needs duckdb: --version is what you run to
     # find out what you have when the rest is broken.
     -V|--version)  printf 'duckeye %s\n' "$DUCKEYE_VERSION"; exit 0 ;;
+    --emit-sql)    emit_sql; exit 0 ;;   # text the script holds: needs no duckdb either
     -h|--help)     usage; exit 0 ;;
     --init)        init; exit $? ;;
     --update)      update; exit $? ;;

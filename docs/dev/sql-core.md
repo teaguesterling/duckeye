@@ -28,6 +28,40 @@ Android app, must run the same SQL as the CLI. The design is in
 | pure | `DUCKEYE_SQL_PURE` | DuckDB core only | mode is `section` or `search` (`-S`, `-s`), and in the zim `-s` corpus query |
 | blocks | `DUCKEYE_SQL_BLOCKS` | duck_block_utils | every code source (sitting_duck reader), with `pure` before it |
 
+### Get the text: `duckeye --emit-sql`
+
+`duckeye --emit-sql` prints every group as one SQL script and exits. Each group starts
+with a `-- group:` line and a `-- needs:` line. A host loads the extensions on the
+`needs` line, then runs that group. The flag needs no duckdb, so a build can run it
+anywhere the script is.
+
+```sh
+duckeye --emit-sql > duckeye-core.sql
+duckdb -s "LOAD duck_block_utils; $(cat duckeye-core.sql)" -s "SELECT duckeye_like('Al*a');"
+# Al%a
+```
+
+test.sh runs the emitted text in a bare duckdb, so the text a host gets is the text
+that works.
+
+### Output formats (`-t`): a table, not a macro
+
+`-t` has no macro. Its six formats come from four extensions (measured 2026-11-10,
+DuckDB v2.0.0). One macro over all six would have to load all four extensions on
+every run. A macro per extension would only rename one function. So a host maps the
+format name to the function itself:
+
+| `-t` | Call | Extension |
+|---|---|---|
+| `ansi` | `duck_blocks_render_ansi(blocks)` | duck_block_utils |
+| `text` | `duck_blocks_to_text(blocks)` | duck_block_utils |
+| `md` | `duck_blocks_to_md(blocks)` | markdown |
+| `html` | `duck_blocks_to_html(blocks)` | webbed |
+| `pandoc` | `to_json(duck_blocks_to_pandoc_ast(blocks))` | panduck |
+| `blocks` | `to_json(blocks)` | DuckDB core |
+
+The source is `emit()` in `duckeye`. A change there changes this table.
+
 ## Macros
 
 ### `duckeye_like(arg VARCHAR) -> VARCHAR`

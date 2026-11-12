@@ -280,6 +280,10 @@ printf '<html><body><h1>Head</h1><p>html body text</p><h2>Sub</h2><p>sub text</p
 # nesting is what breaks.
 printf '<html><body><h1>H</h1><ul><li>L1<ul><li>L2<ul><li>L3</li></ul></li></ul></li></ul></body></html>\n' >"$TMP/nest.html"
 printf '<html><body><h1>H</h1><ul><li>alpha</li><li>beta</li></ul></body></html>\n' >"$TMP/flat.html"
+# Two sections carrying ids, for the -Q '#id' cases. markdown gives every heading a
+# slug id, so doc.md covers the "block has BOTH a text and an id" case; HTML gives
+# an id only where the author wrote one, which is the case #23 was reported from.
+printf '<html><body><h2>Alpha</h2><section id="week"><p>week body</p></section><section id="other"><p>other body</p></section></body></html>\n' >"$TMP/ids.html"
 
 duckdb -dark-mode -noheader -c "COPY (SELECT i::INTEGER AS id, 'name_'||i AS name, repeat('long_description_', i) AS descr, i*1.5 AS score,
                       ('2026-01-01'::DATE + i::INTEGER) AS created_date,
@@ -1216,6 +1220,25 @@ has 'doc -Q carries the subtree'   'alpha body' $DUCKEYE -Q 'paragraph' "$TMP/do
 # attributes, from the duck_block attributes MAP
 has 'doc -Q attribute filters'     'Alpha'   $DUCKEYE -Q 'heading[heading_level=2]' "$TMP/doc.md"
 no_leak 'doc -Q attribute excludes' 'Title'  $DUCKEYE -Q 'heading[heading_level=2]' "$TMP/doc.md"
+# `#x` matches the block's TEXT *or* its attributes['id'] -- the either-match rule
+# -S already uses in section_span_doc(): `h1.title ILIKE '%pat%' OR h1.id = pat`.
+# Before this, `#` read the text alone, so an id the reader HAD captured was
+# unreachable, and only `[id=…]` could get at it (#23). The five below all fail
+# against the pre-fix script.
+has 'doc -Q # matches an html id'     'week body'   $DUCKEYE -Q 'section#week' "$TMP/ids.html"
+has 'doc -Q # id with no type'        'week body'   $DUCKEYE -Q '#week' "$TMP/ids.html"
+has 'doc -Q # id on a context node'   'week body'   $DUCKEYE -Q 'section#week > p' "$TMP/ids.html"
+has 'doc -Q # matches a heading slug' 'Alpha'       $DUCKEYE -Q 'heading#alpha' "$TMP/doc.md"
+has 'doc -Q # matches a nested slug'  'Alpha Child' $DUCKEYE -Q 'heading#alpha-child' "$TMP/doc.md"
+# GUARDS, not fix detectors: all four below also pass against the pre-fix script,
+# because a no-match prints nothing and nothing leaks. They pin what the two-pass
+# union exists to protect. The first is the load-bearing one: a markdown heading
+# carries BOTH spellings -- content `Alpha` and slug id `alpha` -- so one pass that
+# let the id win would take the documented text spelling away (README.md:163).
+has 'doc -Q # keeps the text spelling'       'Alpha'       $DUCKEYE -Q 'heading#Alpha' "$TMP/doc.md"
+no_leak 'doc -Q # id is exact, not a prefix' 'Alpha Child' $DUCKEYE -Q 'heading#alpha' "$TMP/doc.md"
+no_leak 'doc -Q # id excludes its sibling'   'other body'  $DUCKEYE -Q 'section#week' "$TMP/ids.html"
+no  'doc -Q # id miss still exits 1'         $DUCKEYE -Q 'section#nope' "$TMP/ids.html"
 # An attribute on a context node cannot be honoured by a post-filter, so it must
 # refuse rather than quietly return nothing. See teaguesterling/sitting_duck#117.
 no  'doc -Q refuses context attrs'  $DUCKEYE -Q 'heading[heading_level=2] ~ code' "$TMP/doc.md"

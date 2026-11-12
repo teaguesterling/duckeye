@@ -298,10 +298,18 @@ GMD
       $DUCKEYE -S 'Setup' -t md "$TMP/tree/**/*.md"
   has 'README 9: #name exact match' 'Installation' \
       $DUCKEYE -Q 'heading#Installation' -t text "$TMP/guide.md"
-  # ...and #name is EXACT and case-sensitive, unlike -S. If it ever loosened, the
-  # README's reason for preferring it over -S would be gone.
-  no  'README 9: #name is case-sensitive' \
-      $DUCKEYE -Q 'heading#installation' -t text "$TMP/guide.md"
+  # ...and neither key is matched LOOSELY, which is the part that distinguishes `#`
+  # from -S: a prefix and a different casing both still exit 1.
+  #
+  # This replaces an assertion that required `heading#installation` to exit 1, as a
+  # proxy for "not case-insensitive". The proxy no longer holds: `#` matches the text
+  # OR the id (#23), and markdown makes a heading's slug id the lowercased, hyphenated
+  # text, so #installation now matches the ID, exactly. README example 9 says so.
+  # What survives is pinned below, including positively.
+  no  'README 9: #name takes no prefix'    $DUCKEYE -Q 'heading#install' -t text "$TMP/guide.md"
+  no  'README 9: #name takes no case fold' $DUCKEYE -Q 'heading#INSTALLATION' -t text "$TMP/guide.md"
+  has 'README 9: #name reaches a slug id'  'Field Guide' \
+      $DUCKEYE -Q 'heading#field-guide' -t text "$TMP/guide.md"
   has 'README 10: -S then -Q in one command' 'curl -sL' \
       $DUCKEYE -S 'Install' -Q 'code' -t text "$TMP/guide.md"
   ok  'README 10: -S piped into -Q still works' bash -c \

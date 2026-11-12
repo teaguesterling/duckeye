@@ -2202,6 +2202,37 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
   # present. sitting_duck#117 ask 2 would remove this.
   qself=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || printf '%s' "$0")
   qsel=$(q "$(css_alias "$selector")")
+  # `#x` matches the block's TEXT. It must match the block's id as well, which is
+  # what -S already does -- `h1.title ILIKE '%pat%' OR h1.id = pat` in
+  # section_span_doc(). sitting_duck's `#` is one exact, case-sensitive match on
+  # `name`, and a node has one name, so either-match needs TWO passes over the same
+  # node table and the UNION of what each selects. Pass 2 replaces only `name`, with
+  # coalesce(attributes['id'], name): a block with no id then behaves identically in
+  # both passes, so the union only ever ADDS matches.
+  #
+  # One pass with that coalesce was the obvious shape and is WRONG. A markdown
+  # heading carries both: content `Alpha` and slug id `alpha`. Letting the id win
+  # would have made `-Q 'heading#Alpha'` stop matching, and the README documents the
+  # text spelling. MEASURED on h.md (`## Alpha`): with the union, `heading#Alpha`,
+  # `heading#alpha` and `heading#week-one` all match; `#` stays case-sensitive.
+  #
+  # __qb, __qn and __qe are built once either way, so what pass 2 adds is one more
+  # run of the selector engine over the same rows. MEASURED on a 72,000-block
+  # markdown file, three runs each: `-Q 'heading'` is unchanged at 3.2 s, and
+  # `-Q 'heading#section-7'` goes from 2.7-3.0 s to 5.1-5.2 s -- about +2.4 s.
+  # So pass 2 runs ONLY when the selector carries a `#`. With `[...]` stripped
+  # before the selector runs, `#` is the only syntax left that reads `name`, so for
+  # every other selector that second run would return the same set for nothing.
+  qidtab='' qidpass=''
+  if [[ $aliased == *'#'* ]]; then
+    qidtab="CREATE OR REPLACE TEMP TABLE __qi AS
+      SELECT a.* REPLACE (coalesce(b.atr['id'], a.name) AS name)
+      FROM __qa a LEFT JOIN __qb b ON b.ord + 1 = a.node_id;
+    "
+    qidpass="
+               UNION SELECT node_id FROM ast_select_from('__qi',
+                 regexp_replace('$qsel', '\\[[^\\]]*\\]', '', 'g'))"
+  fi
   premacro+="CREATE OR REPLACE TEMP TABLE __qb AS
       SELECT row_number() OVER () AS ord, b.level AS lvl, b.element_type AS ty,
              b.kind AS knd,
@@ -2270,9 +2301,10 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
                WHERE v.parent_id = an.parent_id
                  AND v.type IN ('integer_value','plain_value','string_value') LIMIT 1) AS value
       FROM parse_ast_list_table('$qsel','css') an WHERE an.type = 'attribute_name';
-    CREATE OR REPLACE TEMP TABLE __qs AS
-      SELECT b.node_id FROM ast_select_from('__qa',
-               regexp_replace('$qsel', '\[[^\]]*\]', '', 'g')) b
+    ${qidtab}CREATE OR REPLACE TEMP TABLE __qs AS
+      SELECT b.node_id FROM (
+               SELECT node_id FROM ast_select_from('__qa',
+                 regexp_replace('$qsel', '\[[^\]]*\]', '', 'g'))$qidpass) b
       WHERE NOT EXISTS (SELECT 1 FROM __qc c WHERE NOT EXISTS (
               SELECT 1 FROM __qat a WHERE a.node_id = b.node_id AND a.key = c.key
                 AND (c.value IS NULL OR a.value = c.value)));

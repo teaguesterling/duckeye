@@ -239,7 +239,7 @@ from Files rendered; the output and style switches work.
 - **Chrome:** the output picker is a dropdown; the chrome takes the Style's palette; the find
   field spans the bottom with an enlarge toggle; prev/next sit in the modes row; selector
   suggestions (the page's tags, classes, ids); the Android share glyph; ⋯ → Help.
-- **A Doc / Data / Vis mode toggle.** Data is a table; Vis is charts of that table (Teague:
+- **A Doc / Data / Vis mode toggle** (first built, then replaced by row 2 below). Data is a table; Vis is charts of that table (Teague:
   "Charts of the data"). Both work on documents too (Teague: "Yes, docs too"): a document's
   table is its duck_blocks, one row per block.
 - **Data files:** CSV/TSV, JSON/JSONL/NDJSON and parquet, by MIME type and suffix, as duckeye
@@ -249,7 +249,14 @@ from Files rendered; the output and style switches work.
   Markdown is a plain GFM table; duckeye's (the DuckDB CLI's) pads and aligns its columns.
   **Deviation, flagged:** `duckeye -d` refuses a document ("No extension found that is
   capable of reading"); the app's Data on a document has no terminal equal yet.
-- **Vis:** one card per column. Numbers, dates and times: a 20-bin histogram with min, max,
+- **Row 2 (Teague, 2026-11-11, replacing the toggle):** `[☰] [Mode] [Format] [Variant]`.
+  Mode: Doc | Data | Viz (Viz not designed yet). Doc formats: 👁 (rendered) | HTML | Text |
+  MD | Raw. Data formats: 👁 | CSV | JSON | YAML | Raw. Doc variants: 📖 reader | normal |
+  "something for toc/collapsing" (built as 🗂 Outline: sections fold under their headings).
+  Data variants: table | `.columns` | record cards | summary (`-Z`): the column cards below
+  are the summary. "Docs can get a viz and summary or something too": a document's Data
+  mode has all four variants over its blocks.
+- **Summary (was Vis):** one card per column. Numbers, dates and times: a 20-bin histogram with min, max,
   mean and nulls. Text and other types: the 10 most frequent values as bars, and the distinct
   count; long free text (most values distinct, mean length 30 or more) charts its lengths.
   The SQL counts; Rust draws static SVG; the view still runs no script.

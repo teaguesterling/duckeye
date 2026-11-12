@@ -90,6 +90,11 @@ duckeye -o install.txt -S Install FILE       # -o picks the destination
 
 Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode without needing `-d`!
 
+`-d` on a **document** gives that document's duck_blocks as rows — `kind`, `element_type`,
+`content`, `level`, `encoding`, `attributes`, `element_order` — which is how you query a
+page's structure with SQL rather than read it. `-z` and `-Z` still refuse a document, and
+`.pdf` under `-d` stays pages, not blocks.
+
 ```sh
 duckeye data.parquet                # auto-detects data mode (DuckDB box renderer)
 duckeye data.csv
@@ -98,6 +103,8 @@ duckeye -z data.parquet             # quick column summary (min, max, avg, quant
 duckeye -Z data.parquet             # smart column profile (sparklines, category frequencies, null %)
 duckeye -Z -w "category = 'tools'" products.parquet  # profile filtered subset
 der app.js                          # force raw AST table mode
+duckeye -d notes.md                 # a document's duck_blocks, one row per block
+duckeye -d -w "element_type = 'heading'" notes.md  # just its headings
 duckeye -d -Q '.call#eval' app.js   # query code AST nodes as table with line numbers & peek text
 duckeye config.yaml                 # YAML as data table
 duckeye spreadsheet.xlsx            # Excel spreadsheet

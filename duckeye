@@ -210,6 +210,50 @@ CREATE OR REPLACE MACRO duckeye_number_lines(blocks) AS
          ELSE b END);
 EOF
 
+# Group "reader": DuckDB core only. --reader, and the Android app's reading mode.
+#   duckeye_reader(blocks) removes NAMED page structure, never content it judges to be
+#   junk (the cordexa rule: remove named structural non-content, keep the rest). webbed
+#   gives <header>, <nav>, <main>, <article>, <aside> and <footer> as section blocks with
+#   a role. Kept: the <main>, else every <article>, else the whole document. Dropped from
+#   what is kept: nav and aside, and a header or footer unless it sits inside an article
+#   (the article's own title block or byline). Metadata keeps title, author and
+#   description; the rest of <meta> is presentation (viewport, twitter:*, react-*).
+#   A section's subtree is the blocks after it, up to the next block at its level or above.
+#
+#   The shape is the performance. MEASURED on a 7,335-block Wikipedia page, DuckDB 2.0:
+#   - an EXISTS or self-join over the unnested blocks inside the macro: 43 s;
+#   - blocks[i] inside a per-block lambda: 23 s (the captured list is copied per call);
+#   - spans passed to the per-block lambda as macro ARGUMENTS: 34 s (macro expansion
+#     inlines them, so they are recomputed for every block);
+#   - spans computed once in a subquery, then passed as values: 0.3 s for the whole query.
+#   So: index with `lambda b, i`, and keep the per-block lambda free of anything that
+#   mentions `blocks`.
+IFS= read -r -d '' DUCKEYE_SQL_READER <<'EOF' || :
+CREATE OR REPLACE MACRO duckeye_reader_named(blocks) AS
+  list_filter(list_transform(blocks, lambda b, i: {'i': i, 'lv': b.level, 'role': b.attributes['role'],
+                                                   'section': b.kind = 'block' AND b.element_type = 'section'}),
+              lambda s: s.section AND s.role IN ('main', 'article', 'header', 'nav', 'aside', 'footer'));
+CREATE OR REPLACE MACRO duckeye_reader_spans(levels, named) AS
+  list_transform(named, lambda s: {'i': s.i, 'role': s.role,
+    'stop': coalesce(s.i + list_position(list_transform(levels[s.i + 1:], lambda l: l <= s.lv), true),
+                     len(levels) + 1)});
+CREATE OR REPLACE MACRO duckeye_reader_cut(blocks, keep, chrome) AS
+  list_filter(blocks, lambda b, i:
+      CASE WHEN b.kind = 'value' THEN b.attributes['key'] IN ('title', 'author', 'description')
+           ELSE (len(keep) = 0 OR len(list_filter(keep, lambda k: i >= k.i AND i < k.stop)) > 0)
+                AND len(list_filter(chrome, lambda c: i >= c.i AND i < c.stop)) = 0 END);
+CREATE OR REPLACE MACRO duckeye_reader(blocks) AS (
+  SELECT duckeye_reader_cut(blocks, keep, chrome) FROM (
+    SELECT CASE WHEN len(list_filter(spans, lambda s: s.role = 'main')) > 0
+                THEN list_filter(spans, lambda s: s.role = 'main')
+                ELSE list_filter(spans, lambda s: s.role = 'article') END AS keep,
+           list_filter(spans, lambda c: c.role IN ('nav', 'aside')
+             OR (c.role IN ('header', 'footer')
+                 AND len(list_filter(spans, lambda a: a.role = 'article' AND c.i > a.i AND c.i < a.stop)) = 0)) AS chrome
+    FROM (SELECT duckeye_reader_spans(list_transform(blocks, lambda b: b.level),
+                                      duckeye_reader_named(blocks)) AS spans)));
+EOF
+
 usage() {
   cat <<'EOF'
 usage: duckeye [OPTION]... [FILE]
@@ -238,6 +282,9 @@ Options:
       --top-k N          limit output to top N highest-scoring results
       --dialect LANG     dialect hint for ASTCSS compilation (auto, python, rust, cpp, etc.)
       --json             emit machine-readable JSON array
+      --reader           reading mode: drop page chrome (header, nav, aside, footer,
+                         and all outside <main> or the <article>s) and keep only
+                         title, author and description from the page's metadata
   -d, --data             read FILE as data, not prose: SELECT * FROM FILE
                          (parquet, csv, json, xlsx, ...). Piped, it emits JSONL
   -D, --document         undo an earlier -d and read FILE as prose. Data files
@@ -555,7 +602,7 @@ q() { printf '%s' "${1//\'/\'\'}"; }
 [[ ${0##*/} == der ]] && mode=raw || mode=full
 arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 in_file= out_file= data_fmt=
-find_query= rank_criterion= rank_threshold= top_k= dialect= json_out= number_lines=
+find_query= rank_criterion= rank_threshold= top_k= dialect= json_out= number_lines= reader=
 
 # ---------------------------------------------------------------- intelligence layer
 compile_astcss() {
@@ -938,6 +985,7 @@ while (( $# )); do
                    dialect=$2; shift ;;
     --dialect=*)   dialect=${1#--dialect=} ;;
     --json)        json_out=1 ;;
+    --reader)      reader=1 ;;
     -f|--from|--format) [[ $# -ge 2 ]] || die '-f needs an input format' 64; fmt=$(lower "$2"); shift ;;
     -t|--to)       [[ $# -ge 2 ]] || die '-t needs an output format' 64; out_fmt=$(lower "$2"); shift ;;
     -i|--input)    [[ $# -ge 2 ]] || die '-i needs a FILE' 64; in_file=$2; shift ;;
@@ -2141,6 +2189,12 @@ search_span_doc() {
 
 # Narrow BEFORE selecting. mode is left alone: it still names what the user asked for,
 # which is what the empty-result messages below report against.
+# Reading mode narrows the document first, so -S, -s, -T and every -t see the same page.
+if [[ -n $reader ]]; then
+  premacro+=$DUCKEYE_SQL_READER
+  doc="SELECT duckeye_reader(blocks) AS blocks FROM ($doc)"
+fi
+
 span_probe=
 case $mode in
   section) doc=$(section_span_doc "$doc") ;;

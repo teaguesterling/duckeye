@@ -189,6 +189,10 @@ extension-ci-tools' practice.)
 - The solo builds use the instance's pinned DuckDB with `patches/` applied.
   They do not use an extension's own `duckdb` submodule. A solo build against a
   different DuckDB says nothing about the linked build.
+- Whatever the patch method, the build reports the pin's tag as its version. A
+  copy has no `.git` for `git describe`. v2.0.0 accepts `OVERRIDE_GIT_DESCRIBE`
+  (`CMakeLists.txt:489-495`), as the Android spike used. (Measured from the
+  code.)
 - A copy for `patch` costs disk, not correctness. The builder may use
   `git worktree` or another clean method instead. The rule is that a build
   never leaves `duckdb/` dirty. (My call.)
@@ -206,7 +210,10 @@ extension-ci-tools' practice.)
   as extension-ci-tools does, so the binary runs on any current Linux, not only
   on the build host. (Teague, 2026-11-11: "Any Linux".) This applies to local
   builds and to the release workflow. The image choice is left to the builder.
-  The image is in the solo cache key.
+  The image is in the solo cache key. On longbottom, `podman` is at
+  `/usr/bin/podman`, also inside an `srun` job. Docker, apptainer and
+  singularity are absent. (Measured 2026-11-11. Running a container inside a
+  Slurm job is not yet tested. It is the first thing the plan must prove.)
 
 ### Launcher
 
@@ -228,13 +235,18 @@ A linked build passes only when every item gives positive evidence.
    `SELECT extension_name, install_mode FROM duckdb_extensions() WHERE loaded`
    lists every extension in the instance as `STATICALLY_LINKED`.
 2. **Same output.** One query file per instance, in the instance repo, gives
-   the same output hash in two runs. The reference run uses a shell from a solo
-   build, with every extension LOADed from the loadable `.duckdb_extension`
-   files that the solo builds produce (`allow_unsigned_extensions`). The second
-   run uses the linked build. Both runs then use the same DuckDB commit, the
-   same `patches/` and the same extension commits. The only difference is
-   linking. (My call. Community-repo binaries can come from other commits, and
-   a patch that changes output would fail a stock reference on purpose.)
+   the same output hash in two runs. The reference run uses a **base build**: the
+   patched tree with `core_functions` and the in-tree extensions only. It LOADs
+   every extension from the loadable `.duckdb_extension` files that the solo
+   builds produce (`allow_unsigned_extensions`). The second run uses the linked
+   build. Both runs then use the same DuckDB commit, the same `patches/` and the
+   same extension commits. The only difference is linking. (My call.
+   Community-repo binaries can come from other commits, and a patch that changes
+   output would fail a stock reference on purpose. A solo-build shell is not
+   used, because it already has one extension linked in.)
+   - The base build is cached under the solo key without the extension commit.
+   - So the reference works from the cache, the solo cache stores each solo
+     build's loadable `.duckdb_extension`, not only a pass record.
 3. **Extension tests.** `unittest --require <ext>` per extension, against the
    linked build. The check reads the test count. Zero tests run for an
    extension is a failure, not a pass.
@@ -324,7 +336,8 @@ works on native Linux.
 - Solo build order and parallel count.
 - The name of the tools repo, until Teague names it.
 
-- The storage for the solo cache, and the manylinux image.
+- The storage for the solo cache (it holds pass records and loadable
+  extensions), and the manylinux image.
 
 ## Open, for Teague
 

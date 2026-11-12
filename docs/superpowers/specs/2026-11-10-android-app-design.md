@@ -234,6 +234,27 @@ from Files rendered; the output and style switches work.
   turns the automatic return off.
 - Plan: duckeye-android `docs/superpowers/plans/2026-11-11-phase2c-reader-toc-menus.md`.
 
+**Phase 2d (Teague, 2026-11-11, after the find-bar phone run):**
+
+- **Chrome:** the output picker is a dropdown; the chrome takes the Style's palette; the find
+  field spans the bottom with an enlarge toggle; prev/next sit in the modes row; selector
+  suggestions (the page's tags, classes, ids); the Android share glyph; ⋯ → Help.
+- **A Doc / Data / Vis mode toggle.** Data is a table; Vis is charts of that table (Teague:
+  "Charts of the data"). Both work on documents too (Teague: "Yes, docs too"): a document's
+  table is its duck_blocks, one row per block.
+- **Data files:** CSV/TSV, JSON/JSONL/NDJSON and parquet, by MIME type and suffix, as duckeye
+  picks `read_csv`, `read_json`, `read_parquet`. They open in Data; Doc is off for them.
+- **Data outputs:** Table, CSV, JSON, Markdown. The table shows the first 1,000 rows and the
+  total. CSV and JSON equal `duckeye -d -t csv|json` byte for byte. **Deviation, flagged:**
+  Markdown is a plain GFM table; duckeye's (the DuckDB CLI's) pads and aligns its columns.
+  **Deviation, flagged:** `duckeye -d` refuses a document ("No extension found that is
+  capable of reading"); the app's Data on a document has no terminal equal yet.
+- **Vis:** one card per column. Numbers, dates and times: a 20-bin histogram with min, max,
+  mean and nulls. Text and other types: the 10 most frequent values as bars, and the distinct
+  count; long free text (most values distinct, mean length 30 or more) charts its lengths.
+  The SQL counts; Rust draws static SVG; the view still runs no script.
+- Plan: duckeye-android `docs/superpowers/plans/2026-11-11-phase2d-data-vis.md`.
+
 **Later (Teague's ideas, 2026-11-11; not designed):**
 
 - **A setting to enable more extensions.** Teague says panduck supports this. Every extension in

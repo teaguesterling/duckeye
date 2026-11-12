@@ -1,6 +1,7 @@
 # Static DuckDB builder: a template and a tools submodule
 
-Status: draft for Teague's approval. Not approved. No code before approval.
+Status: approved by Teague, 2026-11-11 ("Looks good"). Next: implementation
+plan.
 
 Location: this file is in the duckeye repo, beside its brief
 (`docs/briefs/2026-11-11-static-duckdb-builder.md`), because the new repos do

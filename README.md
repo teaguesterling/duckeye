@@ -626,7 +626,7 @@ Errors are separated too: `64` for a usage mistake, `2` for an unsupported exten
 
 ## Data files and profiling
 
-Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode — no `-d` flag required! Use `-d` or the `der` alias to force raw mode on code ASTs or plain text:
+Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode — no `-d` flag required! A document under `-d` is its duck_blocks, one row per block: `kind`, `element_type`, `content`, `level`, `encoding`, `attributes`, `element_order`. `-z` and `-Z` still refuse a document. Use `-d` or the `der` alias to force raw mode on code ASTs or plain text:
 
 ```console
 $ duckeye events.parquet                           # auto-detects data mode
@@ -795,7 +795,7 @@ it to `DUCKEYE_EXTS`.
     --top-k N          limit output to top N highest-scoring results
     --dialect LANG     dialect hint for ASTCSS compilation (auto, python, rust, cpp, etc.)
     --json             emit machine-readable JSON array
--d, --data             read as data: SELECT * FROM FILE (reads AST on code files)
+-d, --data             read as data: SELECT * FROM FILE (AST on code, duck_blocks on a document)
 -D, --document         undo an earlier -d (data files still route to data)
 -z, --summary          native column summary (DuckDB SUMMARIZE)
 -Z, --profile          smart column profile with sparklines & category frequencies

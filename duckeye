@@ -286,7 +286,9 @@ Options:
                          and all outside <main> or the <article>s) and keep only
                          title, author and description from the page's metadata
   -d, --data             read FILE as data, not prose: SELECT * FROM FILE
-                         (parquet, csv, json, xlsx, ...). Piped, it emits JSONL
+                         (parquet, csv, json, xlsx, ...). On a document it is
+                         that document's duck_blocks, one row per block.
+                         Piped, it emits JSONL
   -D, --document         undo an earlier -d and read FILE as prose. Data files
                          (parquet, csv, ...) still route to data: use -f to name
                          a document reader if sniffing picks the wrong one

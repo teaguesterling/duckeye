@@ -1384,6 +1384,40 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
         exts="zipfs"
       elif [[ $key == *.json || $key == *.ndjson || $key == *.jsonl ]]; then
         from="read_json('$src')"
+      # `mode == raw` restricts this to -d and der. -z and -Z share this reader
+      # selection, so without the guard they began working on documents too -- which
+      # nobody asked for, and which test.sh:1725 pins as a refusal. Teague deferred the
+      # document profile ("a future state", 2026-11-12). Lifting it is this one word.
+      # Documents: the prose path's by-path readers below are TABLE functions returning
+      # one duck_block per row, so data mode reuses the very same reader and simply drops
+      # prose's `list(b) AS blocks` wrapper. No new SQL, and the key -> reader mapping is
+      # the one the document case already uses -- keep the two in step.
+      #
+      # .pdf and .json are deliberately NOT here. Both already resolve under -d, to pages
+      # and to JSON data, and both are documented that way; routing them to blocks instead
+      # would change behaviour that works.
+      elif [[ $mode == raw && ( $key == *.md || $key == *.markdown ) ]]; then
+        from="read_markdown_blocks('$src')"; exts="markdown"
+      elif [[ $mode == raw && ( $key == *.htm || $key == *.html ) ]]; then
+        from="read_html_blocks('$src')"; exts="webbed"
+      elif [[ $mode == raw && ( $key == *.docx || $key == *.odt || $key == *.epub || $key == *.org || \
+              $key == *.tex || $key == *.rtf || $key == *.textile || \
+              $key == *.mediawiki || $key == *.ipynb ) ]]; then
+        exts="panduck"
+        case $key in
+          *.docx)      from="read_docx_blocks('$src')" ;;
+          *.odt)       from="read_odt_blocks('$src')" ;;
+          *.epub)      from="read_epub_blocks('$src')" ;;
+          *.org)       from="read_org_blocks('$src')" ;;
+          *.tex)       from="read_latex_blocks('$src')" ;;
+          *.rtf)       from="read_rtf_blocks('$src')" ;;
+          *.textile)   from="read_textile_blocks('$src')" ;;
+          *.mediawiki) from="read_mediawiki_blocks('$src')" ;;
+          # A notebook's markdown cells are parsed by the markdown extension through
+          # panduck's expand_embedded, so markdown joins the load list for this one.
+          *.ipynb)     from="read_panduck_doc('$src', expand_embedded := true)"
+                       exts="panduck markdown" ;;
+        esac
       elif [[ $key == *.git || $key == */.git || $key == .git ]]; then
         local_repo=${src%/.git}
         local_repo=${local_repo%.git}

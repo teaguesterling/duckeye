@@ -1638,7 +1638,14 @@ has '-d is data mode'             'name_1'        $DUCKEYE -d "$TMP/d.parquet"
 # asserted `-D -T doc.md`, which passes whether or not -D does anything at all.
 has '-D undoes an earlier -d'     '▍ Title'   bash -c "$DUCKEYE -d -D '$TMP/doc.md' | head -1"
 has '-D undoes -d (content)'      'Alpha'         bash -c "$DUCKEYE -d -D '$TMP/doc.md'"
-no  '-d alone on md is not prose' bash -c "$DUCKEYE -d '$TMP/doc.md' 2>/dev/null | grep -q Alpha"
+# Until 2026-11-12 this asserted that `-d doc.md | grep -q Alpha` found NOTHING, which
+# held only because -d on a document was a Binder Error. -d now emits the document's
+# blocks, and the content column carries the heading text, so `Alpha` IS present and that
+# mechanism stopped testing anything. The intent survives unchanged -- -d gives the block
+# TABLE, not the prose rendering -- so assert it against a column name the renderer never
+# emits. MEASURED: the prose render of doc.md contains no `element_type`.
+has '-d alone on md is not prose' 'element_type' $DUCKEYE -d -t csv "$TMP/doc.md"
+no_leak '-d on md is not the renderer' 'element_type' $DUCKEYE -t text "$TMP/doc.md"
 # -D undoes -d; it does NOT override the data-file auto-route. A .parquet stays data
 # even under -D, because there is no document reader for one. The help says so; this
 # pins the behaviour the help describes, since an overstated flag is how -D got

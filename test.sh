@@ -696,6 +696,29 @@ else
 fi
 no  'raw stdin refuses to guess'           bash -c "$DUCKEYE -r - <'$TMP/d.parquet'"
 
+echo 'data mode on documents (-d)'
+# A document under -d gives its duck_blocks as ROWS. The prose path's by-path readers
+# (read_markdown_blocks, read_html_blocks, the panduck family) are TABLE functions that
+# already return one row per block -- prose wraps them in `list(b) AS blocks`, and data
+# mode wants the same reader without that wrapper. So this adds no SQL, only routing.
+#
+# Before it, every document fell through to DuckDB's replacement scan, which has no
+# reader for .md and died: `Binder Error: No extension found that is capable of reading
+# the file`. MEASURED on origin/main before the change, for all four positive cases.
+has 'doc -d markdown gives block rows'   'heading'        $DUCKEYE -d -t csv "$TMP/doc.md"
+has 'doc -d markdown gives prose rows'   'paragraph'      $DUCKEYE -d -t csv "$TMP/doc.md"
+has 'doc -d names the block columns'     'element_order'  $DUCKEYE -d -t csv "$TMP/doc.md"
+has 'doc -d html gives block rows'       'paragraph'      $DUCKEYE -d -t csv "$TMP/doc.html"
+# -w implies data mode, so it has to reach a document too and filter on block columns.
+has 'doc -d filters on a block column'   'Alpha'          $DUCKEYE -w "element_type = 'heading'" -t csv "$TMP/doc.md"
+no_leak 'doc -d filter drops prose rows' 'alpha body'     $DUCKEYE -w "element_type = 'heading'" -t csv "$TMP/doc.md"
+# -n limits rows, and doc.md's first block is its title heading, so one row cannot be prose.
+no_leak 'doc -d row limit applies'       'paragraph'      $DUCKEYE -d -n 1 -t csv "$TMP/doc.md"
+# GUARDS, not fix detectors: both pass against the pre-change script as well. They pin the
+# boundary -- that adding a document route to data mode leaves prose mode and -D alone.
+has 'doc default render stays prose'     'alpha body'     $DUCKEYE -t text "$TMP/doc.md"
+has 'doc -D forces prose on a document'  'alpha body'     $DUCKEYE -d -D -t text "$TMP/doc.md"
+
 echo 'pandoc formats'
 if command -v pandoc >/dev/null; then
   printf 'Alpha\n=====\n\nintro text\n\nBeta\n----\n\nbeta body with widget\n' >"$TMP/t.rst"

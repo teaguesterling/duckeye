@@ -373,13 +373,28 @@ setup_b()
 ```
 
 **9 — An exact heading rather than a phrase.** `#name` matches the block's text
-exactly and case-sensitively, and returns only the heading — where `-S` matches
-loosely and returns the body too. Use it when a phrase would be ambiguous:
+**or its id**, each exactly and case-sensitively, and returns only the heading —
+where `-S` matches loosely and returns the body too. Use it when a phrase would
+be ambiguous:
 
 ```console
 $ duckeye -Q 'heading#Installation' -t text guide.md
 Installation
 ```
+
+markdown gives every heading a slug id, so the lowercase, hyphenated spelling
+reaches the same heading. It is also the only `#` spelling available for a
+heading whose text contains a space:
+
+```console
+$ duckeye -Q 'heading#installation' -t text guide.md
+Installation
+```
+
+In HTML the id is whatever the author wrote, so `-Q 'section#week'` reaches
+`<section id="week">`. Neither key is matched loosely — `heading#install` and
+`heading#INSTALLATION` both exit 1 — which is still what distinguishes `#` from
+`-S`.
 
 **10 — Narrow to a section, then select inside it.** `-S`/`-s` run **first** and
 `-Q` selects within what is left, so the two compose in one command:

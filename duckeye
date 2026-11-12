@@ -2214,7 +2214,8 @@ if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
   # heading carries both: content `Alpha` and slug id `alpha`. Letting the id win
   # would have made `-Q 'heading#Alpha'` stop matching, and the README documents the
   # text spelling. MEASURED on h.md (`## Alpha`): with the union, `heading#Alpha`,
-  # `heading#alpha` and `heading#week-one` all match; `#` stays case-sensitive.
+  # `heading#alpha` and `heading#week-one` all match, and neither key is matched
+  # loosely -- `heading#install` and `heading#INSTALLATION` still exit 1.
   #
   # __qb, __qn and __qe are built once either way, so what pass 2 adds is one more
   # run of the selector engine over the same rows. MEASURED on a 72,000-block

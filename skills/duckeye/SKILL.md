@@ -92,7 +92,8 @@ Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zi
 
 `-d` on a **document** gives that document's duck_blocks as rows — `kind`, `element_type`,
 `content`, `level`, `encoding`, `attributes`, `element_order` — which is how you query a
-page's structure with SQL rather than read it. `-z` and `-Z` still refuse a document, and
+page's structure with SQL rather than read it. `-z` and `-Z` read a document the same way,
+so `duckeye -z notes.md` summarizes those columns and `duckeye -Z notes.md` profiles them.
 `.pdf` under `-d` stays pages, not blocks.
 
 ```sh

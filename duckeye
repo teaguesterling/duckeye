@@ -292,8 +292,10 @@ Options:
   -D, --document         undo an earlier -d and read FILE as prose. Data files
                          (parquet, csv, ...) still route to data: use -f to name
                          a document reader if sniffing picks the wrong one
-  -z, --summary          summarize data columns via DuckDB SUMMARIZE; implies -d
-  -Z, --profile          smart column profile with sparklines & category frequencies
+  -z, --summary          summarize data columns via DuckDB SUMMARIZE; implies -d.
+                         On a document it summarizes the duck_blocks columns
+  -Z, --profile          smart column profile with sparklines & category
+                         frequencies. On a document it profiles the duck_blocks
   -i, --input FILE       the input file; the same as giving FILE positionally.
                          Giving both is an error
   -o, --output FILE      write to FILE instead of stdout (escapes are stripped).

@@ -626,7 +626,7 @@ Errors are separated too: `64` for a usage mistake, `2` for an unsupported exten
 
 ## Data files and profiling
 
-Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode — no `-d` flag required! A document under `-d` is its duck_blocks, one row per block: `kind`, `element_type`, `content`, `level`, `encoding`, `attributes`, `element_order`. `-z` and `-Z` still refuse a document. Use `-d` or the `der` alias to force raw mode on code ASTs or plain text:
+Data files (`.parquet`, `.csv`, `.tsv`, `.json`, `.yaml`, `.toml`, `.xlsx`, `.zip`, `.git`) automatically default to raw table mode — no `-d` flag required! A document under `-d` is its duck_blocks, one row per block: `kind`, `element_type`, `content`, `level`, `encoding`, `attributes`, `element_order`. `-z` and `-Z` read a document through the same reader, so they summarize and profile those columns. Use `-d` or the `der` alias to force raw mode on code ASTs or plain text:
 
 ```console
 $ duckeye events.parquet                           # auto-detects data mode

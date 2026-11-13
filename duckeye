@@ -1386,10 +1386,13 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
         exts="zipfs"
       elif [[ $key == *.json || $key == *.ndjson || $key == *.jsonl ]]; then
         from="read_json('$src')"
-      # `mode == raw` restricts this to -d and der. -z and -Z share this reader
-      # selection, so without the guard they began working on documents too -- which
-      # nobody asked for, and which test.sh:1725 pins as a refusal. Teague deferred the
-      # document profile ("a future state", 2026-11-12). Lifting it is this one word.
+      # All three data modes (-d, -z, -Z) share this one reader selection, so a document
+      # routed here is readable by all three. That was guarded to `mode == raw` when #27
+      # landed, because Teague had deferred the document profile ("a future state",
+      # 2026-11-12); he lifted the deferral on 2026-11-13, and removing the guard is the
+      # whole change. MEASURED: -z and -Z then return rc 0 on .md, .html, .docx and
+      # .ipynb, and the profile needs no new code for the MAP attributes column -- it
+      # reports entry counts. test.sh pins both modes on .md and -z on .html.
       # Documents: the prose path's by-path readers below are TABLE functions returning
       # one duck_block per row, so data mode reuses the very same reader and simply drops
       # prose's `list(b) AS blocks` wrapper. No new SQL, and the key -> reader mapping is
@@ -1398,13 +1401,13 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
       # .pdf and .json are deliberately NOT here. Both already resolve under -d, to pages
       # and to JSON data, and both are documented that way; routing them to blocks instead
       # would change behaviour that works.
-      elif [[ $mode == raw && ( $key == *.md || $key == *.markdown ) ]]; then
+      elif [[ $key == *.md || $key == *.markdown ]]; then
         from="read_markdown_blocks('$src')"; exts="markdown"
-      elif [[ $mode == raw && ( $key == *.htm || $key == *.html ) ]]; then
+      elif [[ $key == *.htm || $key == *.html ]]; then
         from="read_html_blocks('$src')"; exts="webbed"
-      elif [[ $mode == raw && ( $key == *.docx || $key == *.odt || $key == *.epub || $key == *.org || \
+      elif [[ $key == *.docx || $key == *.odt || $key == *.epub || $key == *.org || \
               $key == *.tex || $key == *.rtf || $key == *.textile || \
-              $key == *.mediawiki || $key == *.ipynb ) ]]; then
+              $key == *.mediawiki || $key == *.ipynb ]]; then
         exts="panduck"
         case $key in
           *.docx)      from="read_docx_blocks('$src')" ;;

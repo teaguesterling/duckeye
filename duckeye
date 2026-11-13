@@ -109,8 +109,9 @@ DUCKEYE_VERSION=0.25.0
 # it can set DUCKEYE_QUERYFARM= and lose only -Z.
 #
 # duckeye runs NO probe to answer this, and that is not tidiness. `--version` must
-# work, and stay silent, with NOTHING else on PATH: test.sh:1614 runs it under a
-# genuinely empty bin dir, and test.sh:1618 asserts its stderr is EMPTY, precisely
+# work, and stay silent, with NOTHING else on PATH: test.sh's `version needs nothing
+# else` runs it under a genuinely empty bin dir, and `version is silent on stderr`
+# asserts its stderr is EMPTY, precisely
 # so a stray helper cannot leak. A probe at load time broke
 # it -- `duckdb --version 2>/dev/null | sed ...` redirects duckdb's stderr and NOT
 # sed's, so `sed: command not found` reached stderr on every invocation. MEASURED:
@@ -161,7 +162,8 @@ DUCKEYE_VERSION=0.25.0
 # pdf is loaded. A host creates a group only after loading what the group names.
 #
 # `read -d ''` rather than $(cat <<EOF): --version must work with NOTHING on PATH
-# (test.sh:1614), and these assignments run on every invocation. read is a builtin;
+# (test.sh, `version needs nothing else`), and these assignments run on every
+# invocation. read is a builtin;
 # it returns 1 at the end of the heredoc, which is expected, hence the `|| :`.
 #
 # Group "pure": DuckDB core only.

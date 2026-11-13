@@ -38,6 +38,18 @@ jobs:
       - name: Initialize duckeye extensions
         run: ./duckeye --init
 
+      # DuckDB is pinned above; its EXTENSIONS are not, on purpose -- duckeye is a
+      # dispatcher, and a pin would hide an upstream fix or regression until someone
+      # bumped it. The cost is that this workflow's behaviour can move with no commit,
+      # so the versions go ON THE RECORD in every run and two runs can be diffed.
+      #
+      # This is a RECORD, not a gate: it exits 0 whatever it finds. It was added the day
+      # panduck went v0.7.0 -> v0.10.0 mid-session, which changed main's own test output
+      # (`5 known-broken` -> `4 known-broken, 1 NOW FIXED`) with nothing failing and no
+      # commit. Nothing in CI had said which version produced any earlier number.
+      - name: Record the installed extension versions
+        run: ./scripts/extension_versions.sh
+
       - name: Run tests
         run: ./test.sh
 

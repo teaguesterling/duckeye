@@ -5,7 +5,7 @@
 ## Prerequisites
 
 * **DuckDB**: Version 2.0.0 or newer. Teague dropped DuckDB 1.5.x on 2026-11-10,
-  when `-S` and `-s` moved onto panduck's narrow functions. Those need panduck v0.8.0,
+  when `-S` and `-s` moved onto panduck's narrow functions. Those need panduck v0.10.0,
   and the 1.5.x track stays on panduck v0.7.0, which has neither `match := 'glob'` nor
   the `blocks` variants.
 * **Pandoc** *(optional)*: only `.rst` still reads through `pandoc(1)`; `.docx`, `.epub`, `.odt`, `.tex`, `.org`, `.ipynb`, `.rtf`, `.textile` and `.mediawiki` read through the `panduck` extension.

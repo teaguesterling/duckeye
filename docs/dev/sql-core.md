@@ -192,8 +192,9 @@ is withdrawn: see the correction above.
 
 Teague dropped DuckDB 1.5.x ("No duckdb 1.5"). duckeye requires DuckDB 2.0.0 or newer.
 
-This was a merge question, and the ruling answers it. panduck's narrow functions arrive
-in v0.8.0, the 1.5.x track stays on panduck v0.7.0, and v0.7.0 has neither
+This was a merge question, and the ruling answers it. panduck's narrow functions arrived
+in v0.10.0 (released 2026-11-12, registry PR merged 2026-11-13; the plan said v0.8.0 and
+the release went past it), the 1.5.x track stays on panduck v0.7.0, and v0.7.0 has neither
 `match := 'glob'` nor the `blocks` variants. So a 1.5.x user would have met a bind error
 on every `-S` and `-s`. `.github/workflows/test.yml` installs only v2.0.0, so CI could
 never have caught it. The alternatives were a version gate or a refusal message; both
@@ -201,7 +202,7 @@ are now unnecessary.
 
 One risk stays, and it is about panduck's version, not DuckDB's. A DuckDB 2.0 user who
 still has the registry's panduck v0.7.0 gets the same bind error until `duckeye
---update`. That is why the merge waits for the registry to serve panduck v0.8.0.
+--update`. That is why the merge waits for the registry to serve panduck v0.10.0.
 
 `duckeye_ddb_major()` and its three callers chose an extension repository by major
 version. They are dead under this ruling, and they are now REMOVED.

@@ -719,6 +719,23 @@ no_leak 'doc -d row limit applies'       'paragraph'      $DUCKEYE -d -n 1 -t cs
 has 'doc default render stays prose'     'alpha body'     $DUCKEYE -t text "$TMP/doc.md"
 has 'doc -D forces prose on a document'  'alpha body'     $DUCKEYE -d -D -t text "$TMP/doc.md"
 
+echo 'summary and profile on documents (-z, -Z)'
+# All three data modes share one `from=` reader selection, so once -d routed documents
+# the only thing keeping -z and -Z off them was a `mode == raw` guard. Teague lifted that
+# deferral on 2026-11-13. These assert the two modes reach a document's duck_blocks:
+# SUMMARIZE's own column names for -z, the profile's for -Z. MEASURED before the change:
+# -z died with `Binder Error: No extension found ...` and -Z with `duckeye: failed to
+# inspect columns for profiling`, on .md, .html, .docx and .ipynb alike.
+has 'doc -z summarizes the blocks'       'element_order'  $DUCKEYE -z -t csv "$TMP/doc.md"
+has 'doc -z names SUMMARIZE columns'     'approx_unique'  $DUCKEYE -z -t csv "$TMP/doc.md"
+has 'doc -z html summarizes'             'element_order'  $DUCKEYE -z -t csv "$TMP/doc.html"
+has 'doc -Z profiles the blocks'         'null_pct'       $DUCKEYE -Z -t csv "$TMP/doc.md"
+# attributes is MAP(VARCHAR, VARCHAR). A profile over a MAP column is the one thing here
+# that could have needed new code; it does not -- the profile reports entry counts.
+has 'doc -Z handles the MAP column'      'attributes'     $DUCKEYE -Z -t csv "$TMP/doc.md"
+# -D still wins: it undoes the implied -d, so a document renders as prose.
+has 'doc -z -D is still prose'           'alpha body'     $DUCKEYE -z -D -t text "$TMP/doc.md"
+
 echo 'pandoc formats'
 if command -v pandoc >/dev/null; then
   printf 'Alpha\n=====\n\nintro text\n\nBeta\n----\n\nbeta body with widget\n' >"$TMP/t.rst"
@@ -1729,7 +1746,11 @@ cp "$(canonical_path "$DUCKEYE")" "$TMP/upd" && chmod +x "$TMP/upd"
 ok  'update'                     env HOME="$TMP/home" "$TMP/upd" --update
 no  'mode exclusivity'           $DUCKEYE -r -t "$TMP/d.parquet"
 no  'limit validates'            $DUCKEYE -n abc "$TMP/d.parquet"
-no  'unknown option'             $DUCKEYE -z "$TMP/doc.md"
+# This was `-z "$TMP/doc.md"` and was named for a refusal it never measured: -z is a
+# defined flag, and it failed only because no reader claimed .md. Now that -z reads a
+# document, the name needs a genuinely undefined flag, or the suite would have no
+# unknown-option coverage at all.
+no  'unknown option'             $DUCKEYE --nosuchflag "$TMP/doc.md"
 no  'unsupported extension'      $DUCKEYE "$TMP/nope.xyz"
 no  'unreadable file'            $DUCKEYE /nope/nope.md
 no  'no arguments'               $DUCKEYE

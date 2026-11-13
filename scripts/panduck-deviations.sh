@@ -43,14 +43,26 @@ for f in nest.md ids.md flat.md; do
   for p in "${pats[@]}"; do
     a=$("$de" -S "$p" -t text "$f" 2>&1); arc=$?
     b=$(pd "SELECT duck_blocks_to_text(list($ROW ORDER BY element_order))
-            FROM doc_section('$f', '$(sq "$p")', format := 'markdown', match := 'contains',
+            FROM doc_section('$f', '$(sq "$p")', format := 'markdown', match := 'glob',
                              expand_embedded := false)")
     report "-S/doc_section        " "$f $(printf %q "$p")" "$a" "$arc" "$b"
+    # The path functions are not what duckeye will call: both duckeye macros narrow a
+    # `blocks` list, never a path. So compare the `_blocks` variants on the same case,
+    # fed from the same reader duckeye uses. Without this the gate stays green while
+    # the call duckeye actually makes is broken.
+    b=$(pd "WITH doc AS MATERIALIZED (SELECT list(x) AS blocks FROM read_markdown_blocks('$f') x)
+            SELECT duck_blocks_to_text(list($ROW ORDER BY element_order))
+            FROM doc_section_blocks((SELECT blocks FROM doc), '$(sq "$p")', match := 'glob')")
+    report "-S/doc_section_blocks " "$f $(printf %q "$p")" "$a" "$arc" "$b"
     a=$("$de" -s "$p" -t text "$f" 2>&1); arc=$?
     b=$(pd "SELECT duck_blocks_to_text(list($ROW ORDER BY element_order))
-            FROM doc_search_sections('$f', '$(sq "$p")', format := 'markdown',
+            FROM doc_search_sections('$f', '$(sq "$p")', format := 'markdown', match := 'glob',
                                      expand_embedded := false)")
     report "-s/doc_search_sections" "$f $(printf %q "$p")" "$a" "$arc" "$b"
+    b=$(pd "WITH doc AS MATERIALIZED (SELECT list(x) AS blocks FROM read_markdown_blocks('$f') x)
+            SELECT duck_blocks_to_text(list($ROW ORDER BY element_order))
+            FROM doc_search_sections_blocks((SELECT blocks FROM doc), '$(sq "$p")', match := 'glob')")
+    report "-s/doc_search_sections_blocks" "$f $(printf %q "$p")" "$a" "$arc" "$b"
   done
   # -T prints each title indented two spaces per level of indent; that layout is
   # duckeye plumbing, so panduck's rows are laid out the same way before comparing.

@@ -30,12 +30,12 @@ set -uo pipefail
 # these two variables cleared -- same commit, same binary, 384 assertions either way.
 # CI never saw it, because a GitHub runner sets neither variable.
 #
-# Cleared by DEFAULT rather than by passing `-no-agent` to each duckdb call, for two
-# reasons: there are 26 such calls and a 27th would silently miss the flag, and
-# `-no-agent` is a 2.0 option while duckeye supports 1.5.x, which is untested here --
-# so the version-safe choice is the one that needs no version test. Clearing the
-# trigger works on every DuckDB that has ever had this behaviour, and on every one
-# that has not.
+# Cleared by DEFAULT rather than by passing `-no-agent` to each duckdb call, because
+# there are 26 such calls and a 27th would silently miss the flag. Clearing the trigger
+# also needs no version test: it works on every DuckDB that has ever had this
+# behaviour, and on every one that has not. (It was once also the 1.5.x-safe choice.
+# Teague dropped 1.5.x on 2026-11-10, so duckeye requires DuckDB 2.0.0 or newer, and
+# that reason no longer applies.)
 #
 # But OFF is a default, not a policy. duckeye serves humans and agents from the same
 # binary, and an agent may legitimately want DuckDB's agent rendering -- compact
@@ -84,13 +84,13 @@ DUCKEYE_VERSION=0.25.0
 # empty and was red the whole time, was not being read.
 : "${DUCKEYE_COMMUNITY:=duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs sitting_duck panduck}"
 
-# textplot is NOT in the list above, and which list serves it depends on the DuckDB
-# line. MEASURED 2026-10-29: on 2.0.0 the community registry still serves a binary
-# whose init throws, naming Query.Farm as the new home; Query.Farm's own repository
-# serves a working one. On 1.5.6 the community copy loads and Query.Farm cannot be
-# reached at all, because `CREATE EXTENSION REPOSITORY` is a PARSER ERROR before 2.0.
-# So the repository is chosen from the running duckdb's major version rather than
-# written into both lists, which would make one of them wrong on every machine.
+# textplot is NOT in the list above: Query.Farm's own repository serves it.
+# MEASURED 2026-10-29 on 2.0.0: the community registry still serves a binary whose
+# init throws, naming Query.Farm as the new home, and Query.Farm's own repository
+# serves a working one. duckeye once chose the repository from the running duckdb's
+# major version, because on 1.5.6 the community copy loaded and `CREATE EXTENSION
+# REPOSITORY` was a PARSER ERROR. The DuckDB floor is 2.0.0, so Query.Farm is the
+# only answer, and the choice is written into the list instead of probed.
 #
 # RE-TESTED 2026-11-08 to decide whether Query.Farm is still needed, in a fresh HOME
 # with zero extensions pre-installed -- the only probe that measures the registry
@@ -108,14 +108,16 @@ DUCKEYE_VERSION=0.25.0
 # verified"). A THIRD-PARTY binary source: overridable so a caller who does not want
 # it can set DUCKEYE_QUERYFARM= and lose only -Z.
 #
-# WHICH repository serves a DUCKEYE_QUERYFARM name is answered lazily, and that is not
-# tidiness. `--version` must work, and stay silent, with NOTHING else on PATH:
-# test.sh:1511 runs it under an empty bin dir precisely so a stray helper cannot leak.
-# A probe at load time broke it -- `duckdb --version 2>/dev/null | sed ...` redirects
-# duckdb's stderr and NOT sed's, so `sed: command not found` reached stderr on every
-# invocation. MEASURED: 375 passed, 1 failed, and the one was that assertion. So the
-# probe runs only when a query_farm name is actually about to be installed or loaded,
-# and it uses shell builtins alone -- no sed, no cut, nothing to be missing.
+# duckeye runs NO probe to answer this, and that is not tidiness. `--version` must
+# work, and stay silent, with NOTHING else on PATH: test.sh's `version needs nothing
+# else` runs it under a genuinely empty bin dir, and `version is silent on stderr`
+# asserts its stderr is EMPTY, precisely
+# so a stray helper cannot leak. A probe at load time broke
+# it -- `duckdb --version 2>/dev/null | sed ...` redirects duckdb's stderr and NOT
+# sed's, so `sed: command not found` reached stderr on every invocation. MEASURED:
+# 375 passed, 1 failed, and the one was that assertion. A later version probe ran
+# lazily, from shell builtins alone, for the same reason. The DuckDB 2.0.0 floor
+# removed the question it answered, so nothing is probed now. Do not add one back.
 : "${DUCKEYE_QUERYFARM_URL:=https://duckdb-extensions.query.farm}"
 # Extensions the community registry does not currently BUILD for every DuckDB version.
 # `--init` reports a 404 for these and keeps going, because an artifact that does not
@@ -160,7 +162,8 @@ DUCKEYE_VERSION=0.25.0
 # pdf is loaded. A host creates a group only after loading what the group names.
 #
 # `read -d ''` rather than $(cat <<EOF): --version must work with NOTHING on PATH
-# (test.sh:1511), and these assignments run on every invocation. read is a builtin;
+# (test.sh, `version needs nothing else`), and these assignments run on every
+# invocation. read is a builtin;
 # it returns 1 at the end of the heredoc, which is expected, hence the `|| :`.
 #
 # Group "pure": DuckDB core only.
@@ -378,8 +381,7 @@ Env:
                      (default: duck_block_utils markdown webbed zim pdf yaml
                       toml read_lines duck_tails zipfs sitting_duck panduck)
   DUCKEYE_QUERYFARM  --init installs these from Query.Farm's repo, a THIRD-PARTY
-                     source (default on DuckDB 2.0+: textplot; empty before that,
-                     where the community copy works). Set empty to decline it and
+                     source (default: textplot). Set empty to decline it and
                      lose only -Z sparklines and profile histograms.
   DUCKEYE_QUERYFARM_URL  that repo's prefix
                      (default: https://duckdb-extensions.query.farm)
@@ -422,19 +424,6 @@ dbu_body_floor() {
   fi
 }
 
-# 0 when duckdb cannot be run at all, which makes every caller below take the
-# community path rather than guess at a repository that may not exist.
-duckeye_ddb_major() {
-  if [[ -z ${_ddb_major_cached-} ]]; then
-    local v
-    v=$(duckdb --version 2>/dev/null) || v=''
-    v=${v#v}; v=${v%%.*}
-    [[ -z $v || $v == *[!0-9]* ]] && v=0
-    _ddb_major_cached=$v
-  fi
-  printf '%s' "$_ddb_major_cached"
-}
-
 # Build the LOAD prelude for an extension list. A Query.Farm extension is installed
 # into its own repository subdirectory, and an unqualified LOAD does NOT fall back to
 # it -- MEASURED 2026-10-29: with the flat-path copy moved aside, `LOAD textplot` fails
@@ -447,13 +436,10 @@ duckeye_ddb_major() {
 # LOAD -- and a clean CI runner failed nine -Z assertions. One builder, four callers,
 # so the next extension that moves repository cannot land half-applied.
 duckeye_load_sql() {
-  local e out='' major=''
+  local e out=''
   for e in "$@"; do
     if [[ -n ${DUCKEYE_QUERYFARM-} && " $DUCKEYE_QUERYFARM " == *" $e "* ]]; then
-      # Probed only when a query_farm name is really in the list, and at most once per
-      # call. No cache outlives this: every caller runs it in a command substitution.
-      [[ -n $major ]] || major=$(duckeye_ddb_major)
-      (( major >= 2 )) && { out+="LOAD $e FROM query_farm; "; continue; }
+      out+="LOAD $e FROM query_farm; "; continue
     fi
     out+="LOAD $e; "
   done
@@ -468,10 +454,8 @@ init() {
   for repo in core community query_farm; do
     case $repo in
       core)       list=$DUCKEYE_OFFICIAL ;;
-      community)  list=$DUCKEYE_COMMUNITY
-                  (( $(duckeye_ddb_major) < 2 )) && list+=" $DUCKEYE_QUERYFARM" ;;
-      query_farm) list=''
-                  (( $(duckeye_ddb_major) >= 2 )) && list=$DUCKEYE_QUERYFARM ;;
+      community)  list=$DUCKEYE_COMMUNITY ;;
+      query_farm) list=$DUCKEYE_QUERYFARM ;;
     esac
     for e in $list; do
       printf '%-20s %-10s ' "$e" "$repo"
@@ -1229,6 +1213,10 @@ src=$(q "$f")
 # the SQL core, so every use splices it unquoted. Only -S and -s read it, so only they
 # create the macro; a mode that never needed it cannot fail on it.
 pat="duckeye_like('$(q "$arg")')"
+# panduck does its own glob translation under `match := 'glob'`, so its narrow
+# functions take the pattern RAW. Translating first would make `Al*a` the literal
+# `Al%a`. $pat stays for zim_suggest and zim_search, which still match in SQL.
+pat_raw="'$(q "$arg")'"
 exts= doc= via_pandoc= zim_open= premacro=
 [[ $mode == section || $mode == search ]] && premacro=$DUCKEYE_SQL_PURE
 # -n numbers source lines in a rendered view. A data mode prints rows, and -T prints
@@ -2155,72 +2143,44 @@ css_alias() {
 # -S then searched the selector's leftovers for a heading, which is why `-S Install
 # -Q code` reported "no section matching 'Install'" while plain `-S Install` worked.
 #
-# Both apply their spans to ROWS -- one per block, keeping its position -- rather than
-# handing doc.blocks to duck_blocks_slice once per span. That passed the whole list on
-# every call, ~60 ms each at 18,000 rows, so cost grew as spans x document: `-s`, with a
-# span per heading, ran past 120 s on a file a plain render reads in 0.2 s. Measured
-# identical output against the slice form before switching.
+# Both narrow through panduck, which owns the matching now: panduck is duckeye's SQL
+# core (Teague, 2026-11-10). `doc_section_blocks` and `doc_search_sections_blocks` take
+# a `blocks` list, so they compose exactly as the old SQL did, and `match := 'glob'`
+# gives them duckeye's `*` and `?` meanings. duckeye keeps the plumbing: the messages,
+# the exit codes, the tty test, the pager.
 #
-# Rows find their span by carrying it forward in a window, NOT by an ASOF join, which
-# is the obvious tool and was tried first. Inside these CTEs DuckDB estimates the span
-# list at 2 rows, under asof_loop_join_threshold (64), so it plans the ASOF as a nested
-# loop plus arg_max: 288 million joined rows for `-s` at 72,000 rows, 12 s. The same
-# query over temp tables, with real row counts, took 0.2 s -- a prototype that
-# benchmarks tables will not show this. The window form has no estimate to get wrong.
+# duckeye's own span SQL is gone, but why it was shaped that way still matters, because
+# panduck has to hold the same line. Spans were applied to ROWS rather than by calling
+# duck_blocks_slice once per span, which passed the whole list every time, about 60 ms
+# at 18,000 rows. Rows then found their span through a WINDOW rather than an ASOF join,
+# which DuckDB planned as a nested loop: 288 million joined rows for `-s` at 72,000
+# rows. docs/dev/sql-core.md records both, and git history holds the SQL. test.sh
+# bounds the scale cases at 20 s, so a panduck regression there fails the suite.
+#
+# The input list goes through duck_blocks_reorder FIRST, which is load-bearing and not
+# tidying. A multi-file code glob numbers element_order per file, so 10 blocks can
+# carry only 5 distinct values, and these panduck functions return no column for list
+# position. Ordering by element_order alone would then have no defined tie order.
+# Reorder makes element_order unique, so document order is defined again.
+#
+# panduck returns the seven block columns as rows. duckeye's readers build the same
+# struct with the same fields in the same order, so this repack loses nothing.
+BLOCK_STRUCT="struct_pack(kind := kind, element_type := element_type,
+     content := content, level := level, encoding := encoding,
+     attributes := attributes, element_order := element_order)"
+
 section_span_doc() {
-  printf '%s\n' "WITH doc AS MATERIALIZED ($1),
-     r AS (SELECT generate_subscripts(blocks, 1) AS i, unnest(blocks) AS b FROM doc),
-     h AS (SELECT e.level AS lvl, e.title AS title, e.id AS id, e.element_order AS ord
-           FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
-     sec AS (SELECT h1.ord AS s, coalesce(min(h2.ord) - 1, 2147483647) AS e
-             FROM h h1 LEFT JOIN h h2 ON h2.ord > h1.ord AND h2.lvl <= h1.lvl
-             WHERE h1.title ILIKE '%' || $pat || '%' ESCAPE '\\' OR h1.id = $pat
-             GROUP BY h1.ord),
-     -- A substring can match both a chapter and a section inside it. The chapter
-     -- already carries the child, so keeping both printed it twice; drop any span
-     -- another span contains. Heading spans either nest or are disjoint, so in start
-     -- order a span is contained exactly when an earlier one reaches as far: a running
-     -- max, not a pairwise comparison.
-     top AS (SELECT s, e FROM sec
-             QUALIFY coalesce(max(e) OVER (ORDER BY s, e DESC
-                              ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), -1) < e),
-     -- What survives is disjoint, so a row can only be inside the latest span that
-     -- starts at or before it: carry each span forward from its first row.
-     t AS (SELECT i, b, s FROM (
-             SELECT r.i, r.b, last_value(top.s IGNORE NULLS) OVER w AS s,
-                    last_value(top.e IGNORE NULLS) OVER w AS e
-             FROM r LEFT JOIN top ON top.s = r.b.element_order
-             WINDOW w AS (ORDER BY r.b.element_order, r.i ROWS UNBOUNDED PRECEDING))
-           WHERE b.element_order <= e)
-     SELECT duck_blocks_reorder(list(b ORDER BY s, i)) AS blocks FROM t HAVING count(*) > 0"
+  printf '%s\n' "WITH doc AS MATERIALIZED (SELECT duck_blocks_reorder(blocks) AS blocks FROM ($1))
+     SELECT duck_blocks_reorder(list($BLOCK_STRUCT ORDER BY element_order)) AS blocks
+     FROM doc_section_blocks((SELECT blocks FROM doc), $pat_raw, match := 'glob')
+     HAVING count(*) > 0"
 }
 
-# Spans here stop at the next heading of *any* level, so a hit reports the innermost
-# section that holds it rather than nesting parent inside child.
 search_span_doc() {
-  printf '%s\n' "WITH doc AS MATERIALIZED ($1),
-     r AS (SELECT generate_subscripts(blocks, 1) AS i, unnest(blocks) AS b FROM doc),
-     h AS (SELECT e.element_order AS ord
-           FROM (SELECT unnest(duck_blocks_headings_structs(blocks)) AS e FROM doc)),
-     span AS (SELECT ord AS s, coalesce(lead(ord) OVER (ORDER BY ord) - 1, 2147483647) AS e
-              FROM h
-              UNION ALL   -- anything ahead of the first heading, and whole
-                          -- documents that have no headings at all
-              SELECT 0 AS s, e FROM (SELECT coalesce((SELECT min(ord) - 1 FROM h),
-                                                     2147483647)::INTEGER AS e)
-              WHERE e >= 0),
-     -- The spans tile the document, so each row belongs to the latest one starting at
-     -- or before it, and a span's text is one GROUP BY away.
-     t AS (SELECT i, b, s FROM (
-             SELECT r.i, r.b, last_value(span.s IGNORE NULLS) OVER w AS s,
-                    last_value(span.e IGNORE NULLS) OVER w AS e
-             FROM r LEFT JOIN span ON span.s = r.b.element_order
-             WINDOW w AS (ORDER BY r.b.element_order, r.i ROWS UNBOUNDED PRECEDING))
-           WHERE b.element_order <= e),
-     hit AS (SELECT s FROM t GROUP BY s
-             HAVING duck_blocks_to_match_text(list(b ORDER BY i)) ILIKE '%' || $pat || '%' ESCAPE '\\')
-     SELECT duck_blocks_reorder(list(b ORDER BY s, i)) AS blocks
-     FROM t WHERE s IN (SELECT s FROM hit) HAVING count(*) > 0"
+  printf '%s\n' "WITH doc AS MATERIALIZED (SELECT duck_blocks_reorder(blocks) AS blocks FROM ($1))
+     SELECT duck_blocks_reorder(list($BLOCK_STRUCT ORDER BY element_order)) AS blocks
+     FROM doc_search_sections_blocks((SELECT blocks FROM doc), $pat_raw, match := 'glob')
+     HAVING count(*) > 0"
 }
 
 # Narrow BEFORE selecting. mode is left alone: it still names what the user asked for,
@@ -2232,6 +2192,10 @@ if [[ -n $reader ]]; then
 fi
 
 span_probe=
+# The matching lives in panduck now, so every -S/-s route has to load it. The format
+# routes name only their own readers -- the md route sets exts="markdown" -- and
+# duckeye_load_sql turns $exts into the LOAD list further down.
+[[ $mode == section || $mode == search ]] && exts="$exts panduck"
 case $mode in
   section) doc=$(section_span_doc "$doc") ;;
   search)  doc=$(search_span_doc "$doc") ;;

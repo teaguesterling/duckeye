@@ -239,26 +239,25 @@ where the AST loses content, which is why `-t md` no longer goes through one.
 > `-Q` on source files is **not** experimental and is unaffected.
 >
 > **`-Q` needs the `sitting_duck` extension — including on documents.** It is
-> served and loads on **1.5.6 and 2.0.0** alike, measured 2026-10-27 by calling
+> served and loads on **2.0.0**, measured 2026-10-27 by calling
 > `LOAD` and not by reading `INSTALL`'s exit code;
 > [community-extensions#2855](https://github.com/duckdb/community-extensions/pull/2855)
 > merged 2026-09-30. This paragraph said the opposite for a month.
 >
 > **One** extension is not usable on 2.0.0: `toml` returns HTTP 404, so `.toml`
 > does not read, and `duckeye --init` prints it as `UNAVAILABLE for this DuckDB
-> version` with the capability you lose rather than failing. `toml` is
-> unavailable on 1.5.6 too.
+> version` with the capability you lose rather than failing.
 >
 > Two names that used to be listed here are not any more, measured 2026-10-29.
 > **`pdf`** now installs and loads on 2.0.0, so `.pdf` reads and a PDF inside a
-> `.zim` renders. The scalar it exposes was RENAMED between lines -- `pdf_to_text`
-> on the 1.5.6 build, `pdf_text` on the 2.0.0 one -- so the `.zim` reader resolves
-> the name from the loaded catalog instead of naming one. **`textplot`** is served
+> `.zim` renders. The scalar it exposes was RENAMED between DuckDB lines --
+> `pdf_to_text` before 2.0.0, `pdf_text` on 2.0.0 -- which is why the `.zim` reader
+> still resolves the name from the loaded catalog instead of naming one. **`textplot`** is served
 > from [Query.Farm's own repository](https://query.farm/products/extensions/),
 > which `--init` now registers; the community registry still serves a copy whose
 > init throws. That is a THIRD-PARTY binary source: set `DUCKEYE_QUERYFARM=` to
 > decline it and lose only `-Z` sparklines and profile histograms. Everything else — rendering, `-T`, `-S`, `-s`, `-Q` and every writer — is
-> unaffected: measured byte-identical between 1.5.5, 1.5.6 and 2.0.0.
+> unaffected.
 
 The same `-Q` that addresses a syntax tree also addresses a document, because
 every reader produces the same `duck_block` vocabulary. Reading, querying and

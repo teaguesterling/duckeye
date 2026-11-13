@@ -1408,11 +1408,12 @@ ok 'ipynb never shells out to pandoc' bash -c \
 has     'ipynb cells carry source_type'        'source_type' $DUCKEYE -t blocks "$TMP/nb.ipynb"
 no_leak 'ipynb no longer carries pandoc cell classes' 'cell markdown' \
         $DUCKEYE -t blocks "$TMP/nb.ipynb"
-# FOUR defects have now been fixed and their guards deleted, each measured on a served
+# FIVE defects have now been fixed and their guards deleted, each measured on a served
 # build before removal: .rst block quotes (panduck#64, 0.5.1), the one-line footnote
-# body (#67, 0.5.3), a numbered section title parsing as an ordered list (#84, 0.5.5)
-# and headings carrying no id (#85 part 2a, 0.5.5). ONE defect still holds .rst on
-# pandoc(1), and it is the guard below.
+# body (#67, 0.5.3), a numbered section title parsing as an ordered list (#84, 0.5.5),
+# headings carrying no id (#85 part 2a, 0.5.5) and the literal `[1]_` marker with its
+# missing reference-to-body link (#85 part 1, v0.10.0). What still holds .rst on
+# pandoc(1) is the REMAINDER of #85 part 1, and it is the guard below.
 #
 # Each of those was found the same way and it is the lesson worth keeping: a guard
 # reporting FIXED is not parity. It measures the defect you already knew about. #84 and
@@ -1421,17 +1422,35 @@ no_leak 'ipynb no longer carries pandoc cell classes' 'cell markdown' \
 # while the guard that had just gone green said nothing about it. Re-run parity again
 # before moving the route, not just these guards.
 #
-#   #85 part 1  footnote/citation reference markers stay literal in prose (`[1]_`) and
-#               the bodies land as loose document-level paragraphs with no id. Nothing
-#               is lost; the reference-to-body LINK is. The ruled shape (duck_block_utils,
-#               2026-09-22) is an inline ANCHOR carrying attributes['id'] plus a body
-#               subtree at document level with the matching id, so what the reader emits
-#               today is a third shape -- neither the ruled one nor the rejected nesting.
-#               panduck lands #97 first (the pandoc reader's Note/Cite arms do not
-#               recurse), then the RST reader.
+# #85 part 1 landed in panduck v0.10.0 (registry 2026-11-13), and it landed in PART.
+# What arrived: the `[1]_` marker no longer survives as literal prose, and the
+# reference-to-body LINK now exists -- the inline and the document-level body share
+# attributes['id']. Both of those get POSITIVE assertions below, because a guard that
+# merely stops reporting is not evidence of anything.
+#
+# MEASURED on v0.10.0, read_rst_blocks over $TMP/footnote.rst:
+#
+#   ord kind    element_type content                      attributes
+#   3   inline  note         The one line footnote body.   {id=1}
+#   5   block   div          (null)                        {id=1, source_type=footnote}
+#   6   block   paragraph    The one line footnote body.   {}
+#
+# What has NOT arrived is the ruled SHAPE. The ruled inline (duck_block_utils,
+# 2026-09-22) is an ANCHOR carrying attributes['id']; this inline carries the body TEXT,
+# so the footnote body appears TWICE in a prose aggregate -- once spliced into the
+# sentence it annotates and once as the document-level body. That remainder is the guard,
+# and it is why .rst stays on pandoc(1).
+#
+# The two positives are not vacuous: on panduck v0.7.0 the same probes answer NOLINK and
+# BODY_ONCE, so each one fails against the previous release rather than passing either
+# way. They therefore require panduck >= v0.10.0, which is what `duckeye --init` installs.
 cause=panduck
-emits 'rst footnote reference stays literal in prose' '[1]_' bash -c \
+no_leak 'rst footnote marker no longer leaks' '[1]_' bash -c \
   "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT string_agg(coalesce(content,''), ' ') FROM read_rst_blocks('$TMP/footnote.rst');\" 2>/dev/null"
+has 'rst footnote reference links to its body' 'LINKED' bash -c \
+  "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT CASE WHEN EXISTS (SELECT 1 FROM read_rst_blocks('$TMP/footnote.rst') i JOIN read_rst_blocks('$TMP/footnote.rst') b ON map_extract(i.attributes,'id')[1] = map_extract(b.attributes,'id')[1] WHERE i.kind='inline' AND b.kind='block' AND map_extract(i.attributes,'id')[1] IS NOT NULL) THEN 'LINKED' ELSE 'NOLINK' END;\" 2>/dev/null"
+emits 'rst footnote body is inlined, not anchored' 'BODY_TWICE' bash -c \
+  "duckdb -noheader -list -c \"LOAD duck_block_utils; LOAD panduck; SELECT CASE WHEN (SELECT count(*) FROM read_rst_blocks('$TMP/footnote.rst') WHERE content='The one line footnote body.') > 1 THEN 'BODY_TWICE' ELSE 'BODY_ONCE' END;\" 2>/dev/null"
 cause=unattributed
 
 # duckeye's own output must be clean TODAY, whatever upstream does.

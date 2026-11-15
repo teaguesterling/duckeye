@@ -291,7 +291,8 @@ emit_sql() {
   printf -- '-- Create each group after loading the extensions on its needs line.\n\n'
   printf -- '-- group: pure\n-- needs: (DuckDB core only)\n%s\n' "$DUCKEYE_SQL_PURE"
   printf -- '-- group: blocks\n-- needs: duck_block_utils\n%s\n' "$DUCKEYE_SQL_BLOCKS"
-  printf -- '-- group: toc\n-- needs: duck_block_utils\n%s' "$DUCKEYE_SQL_TOC"
+  printf -- '-- group: toc\n-- needs: duck_block_utils\n%s\n' "$DUCKEYE_SQL_TOC"
+  printf -- '-- group: reader\n-- needs: (DuckDB core only)\n%s' "$DUCKEYE_SQL_READER"
 }
 
 usage() {

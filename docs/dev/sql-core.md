@@ -28,6 +28,7 @@ Android app, must run the same SQL as the CLI. The design is in
 | pure | `DUCKEYE_SQL_PURE` | DuckDB core only | mode is `section` or `search` (`-S`, `-s`), and in the zim `-s` corpus query |
 | blocks | `DUCKEYE_SQL_BLOCKS` | duck_block_utils | every code source (sitting_duck reader), with `pure` before it |
 | toc | `DUCKEYE_SQL_TOC` | duck_block_utils | mode is `toc` (`-T`) |
+| reader | `DUCKEYE_SQL_READER` | DuckDB core only | `--reader`. The Android app's reading mode. `duckeye_reader(blocks)` keeps `<main>` (else each `<article>`) and drops nav, aside, and a header or footer outside an article. Its rules are in the comment above the heredoc in `duckeye` |
 
 ### Get the text: `duckeye --emit-sql`
 

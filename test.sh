@@ -1752,10 +1752,22 @@ has '--emit-sql: duckeye_toc_text runs in a bare duckdb' $'Top\n  Sub' \
     env -u AI_AGENT -u CLAUDECODE duckdb -list -noheader \
       -s "LOAD duck_block_utils; $(cat "$TMP/core.sql")" \
       -s "SELECT toc FROM (SELECT [duck_block_heading('Top', 1), duck_block_heading('Sub', 2)] AS blocks) d, duckeye_toc_text(d.blocks);"
+# The reader group is the Android app's reading mode, so the app must get it from here.
+# Its intent: a nav section and its text go, the main section's text stays. `= 'story'`
+# rather than `has 'story'`, because 'menu|story' would also contain 'story'.
+has '--emit-sql: duckeye_reader drops nav, keeps main' 'true' \
+    env -u AI_AGENT -u CLAUDECODE duckdb -list -noheader \
+      -s "LOAD duck_block_utils; $(cat "$TMP/core.sql")" \
+      -s "SELECT array_to_string(list_transform(duckeye_reader([
+            {'kind':'block','element_type':'section','content':NULL::VARCHAR,'level':1,'encoding':'text','attributes':MAP{'role':'nav'},'element_order':0},
+            {'kind':'block','element_type':'paragraph','content':'menu','level':2,'encoding':'text','attributes':MAP{}::MAP(VARCHAR,VARCHAR),'element_order':1},
+            {'kind':'block','element_type':'section','content':NULL::VARCHAR,'level':1,'encoding':'text','attributes':MAP{'role':'main'},'element_order':2},
+            {'kind':'block','element_type':'paragraph','content':'story','level':2,'encoding':'text','attributes':MAP{}::MAP(VARCHAR,VARCHAR),'element_order':3}]),
+          lambda b: b.content), '|') = 'story';"
 # Like --version, it prints text the script already holds, so it must not need duckdb.
 # `has`, not `ok`: rc 0 with empty or broken output would pass `ok`. And the stderr check,
 # for the reason the --version pair above gives: a missing tool can complain and still exit 0.
-has '--emit-sql needs nothing else' '-- group: toc' env PATH="$TMP/empty" "$BASH" "$DUCKEYE" --emit-sql
+has '--emit-sql needs nothing else' '-- group: reader' env PATH="$TMP/empty" "$BASH" "$DUCKEYE" --emit-sql
 ok  '--emit-sql is silent on stderr' \
     bash -c "[[ -z \$(env PATH='$TMP/empty' '$BASH' '$DUCKEYE' --emit-sql 2>&1 >/dev/null) ]]"
 # The pin must never be OLDER than the latest tag. --version is duckeye's ONLY version

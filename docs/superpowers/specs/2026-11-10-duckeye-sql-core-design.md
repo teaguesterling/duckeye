@@ -147,6 +147,13 @@ a new skip, and a pass count alone is not a gate. (My call.)
 4. **Emit.** `duckeye_emit`. Also add `--emit-sql`, with its own new test, in a
    separate commit from the refactor.
 
+   > **Amended 2026-11-10: no `duckeye_emit`.** Measured on DuckDB v2.0.0: the six `-t`
+   > formats come from four extensions (duck_block_utils, markdown, webbed, panduck). One
+   > macro would load all four on every run; `LOAD panduck` alone added about 65 ms to a
+   > bare session on longbottom. A macro per extension only renames one function. So the
+   > core has no emit macro. `docs/dev/sql-core.md` has the format table a host uses, and
+   > phase 4 is `--emit-sql` alone. Teague chose this option.
+
 ### Risks
 
 - **Plan changes.** A scalar macro is expanded inline. The planner may treat the

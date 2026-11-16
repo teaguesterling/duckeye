@@ -27,6 +27,42 @@ Android app, must run the same SQL as the CLI. The design is in
 |---|---|---|---|
 | pure | `DUCKEYE_SQL_PURE` | DuckDB core only | mode is `section` or `search` (`-S`, `-s`), and in the zim `-s` corpus query |
 | blocks | `DUCKEYE_SQL_BLOCKS` | duck_block_utils | every code source (sitting_duck reader), with `pure` before it |
+| toc | `DUCKEYE_SQL_TOC` | duck_block_utils | mode is `toc` (`-T`) |
+| reader | `DUCKEYE_SQL_READER` | DuckDB core only | `--reader`. The Android app's reading mode. `duckeye_reader(blocks)` keeps `<main>` (else each `<article>`) and drops nav, aside, and a header or footer outside an article. Its rules are in the comment above the heredoc in `duckeye` |
+
+### Get the text: `duckeye --emit-sql`
+
+`duckeye --emit-sql` prints every group as one SQL script and exits. Each group starts
+with a `-- group:` line and a `-- needs:` line. A host loads the extensions on the
+`needs` line, then runs that group. The flag needs no duckdb, so a build can run it
+anywhere the script is.
+
+```sh
+duckeye --emit-sql > duckeye-core.sql
+duckdb -s "LOAD duck_block_utils; $(cat duckeye-core.sql)" -s "SELECT duckeye_like('Al*a');"
+# Al%a
+```
+
+test.sh runs the emitted text in a bare duckdb, so the text a host gets is the text
+that works.
+
+### Output formats (`-t`): a table, not a macro
+
+`-t` has no macro. Its six formats come from four extensions (measured 2026-11-10,
+DuckDB v2.0.0). One macro over all six would have to load all four extensions on
+every run. A macro per extension would only rename one function. So a host maps the
+format name to the function itself:
+
+| `-t` | Call | Extension |
+|---|---|---|
+| `ansi` | `duck_blocks_render_ansi(blocks)` | duck_block_utils |
+| `text` | `duck_blocks_to_text(blocks)` | duck_block_utils |
+| `md` | `duck_blocks_to_md(blocks)` | markdown |
+| `html` | `duck_blocks_to_html(blocks)` | webbed |
+| `pandoc` | `to_json(duck_blocks_to_pandoc_ast(blocks))` | panduck |
+| `blocks` | `to_json(blocks)` | DuckDB core |
+
+The source is `emit()` in `duckeye`. A change there changes this table.
 
 ## Macros
 
@@ -113,6 +149,28 @@ Which code views carry positions (2026-11-10):
 | `-R --json` candidates | duckeye `rerank_candidates` | as `start_line`/`end_line` fields | n/a. Its `content` still has the dedent bug |
 
 The sitting_duck ask is in `docs/briefs/2026-11-10-sitting-duck-block-positions.md`.
+
+### `duckeye_toc_text(blocks)` and `duckeye_toc_json(blocks)`: table macros
+
+Group: toc. `-T` and `-T --json`. Each is a table macro over duck_block_utils'
+`duck_blocks_toc_rows(blocks)`, so it takes a column and works on every route.
+`duckeye_toc_text` gives one row: each title, indented two spaces per level of
+`indent`, joined with `\n`. `duckeye_toc_json` gives one row: a JSON array of
+`{title, level, indent, element_order}`. A document with no headings gives zero rows,
+and the caller (bash) prints `no headings in FILE` and exits 1.
+
+The outline itself is duck_block_utils' work. panduck's `doc_toc` takes only a path,
+so duckeye does not use it.
+
+Use in a host:
+
+```sql
+-- run DUCKEYE_SQL_TOC after LOAD duck_block_utils
+SELECT toc FROM (SELECT [duck_block_heading('Top', 1), duck_block_heading('Sub', 2)] AS blocks) d,
+                duckeye_toc_text(d.blocks);
+-- Top
+--   Sub
+```
 
 ## panduck functions duckeye can call instead of its own SQL
 

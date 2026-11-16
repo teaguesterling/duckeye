@@ -1733,6 +1733,43 @@ ok  'version needs nothing else' env PATH="$TMP/empty" "$BASH" "$DUCKEYE" --vers
 ok  'version is silent on stderr' \
     bash -c "[[ -z \$(env PATH='$TMP/empty' '$BASH' '$DUCKEYE' --version 2>&1 >/dev/null) ]]"
 no_leak 'version is not the help' 'usage:' $DUCKEYE --version
+# --emit-sql prints duckeye's SQL core for a host that cannot run bash, such as the planned
+# duckdb-wasm app. The point is ONE copy: the host runs this text and keeps none of its own.
+# So these assert that the text WORKS in a bare duckdb, with only the extensions each group
+# names loaded, and not merely that it contains the right words.
+has '--emit-sql names the pure group'   '-- group: pure' $DUCKEYE --emit-sql
+has '--emit-sql names what blocks needs' '-- needs: duck_block_utils' $DUCKEYE --emit-sql
+$DUCKEYE --emit-sql >"$TMP/core.sql" 2>/dev/null
+# env -u: DuckDB 2.0's agent mode would change this bare call's output (see duckeye:20).
+has '--emit-sql: duckeye_like runs in a bare duckdb' 'Al%a' \
+    env -u AI_AGENT -u CLAUDECODE duckdb -list -noheader \
+      -s "LOAD duck_block_utils; $(cat "$TMP/core.sql")" -s "SELECT duckeye_like('Al*a');"
+has '--emit-sql: duckeye_number_lines runs in a bare duckdb' $'    10\tdef f():' \
+    env -u AI_AGENT -u CLAUDECODE duckdb -list -noheader \
+      -s "LOAD duck_block_utils; $(cat "$TMP/core.sql")" \
+      -s "SELECT duck_blocks_to_text(duckeye_number_lines(duckeye_code_at('python', 'def f():' || chr(10) || '    pass' || chr(10), 10)));"
+has '--emit-sql: duckeye_toc_text runs in a bare duckdb' $'Top\n  Sub' \
+    env -u AI_AGENT -u CLAUDECODE duckdb -list -noheader \
+      -s "LOAD duck_block_utils; $(cat "$TMP/core.sql")" \
+      -s "SELECT toc FROM (SELECT [duck_block_heading('Top', 1), duck_block_heading('Sub', 2)] AS blocks) d, duckeye_toc_text(d.blocks);"
+# The reader group is the Android app's reading mode, so the app must get it from here.
+# Its intent: a nav section and its text go, the main section's text stays. `= 'story'`
+# rather than `has 'story'`, because 'menu|story' would also contain 'story'.
+has '--emit-sql: duckeye_reader drops nav, keeps main' 'true' \
+    env -u AI_AGENT -u CLAUDECODE duckdb -list -noheader \
+      -s "LOAD duck_block_utils; $(cat "$TMP/core.sql")" \
+      -s "SELECT array_to_string(list_transform(duckeye_reader([
+            {'kind':'block','element_type':'section','content':NULL::VARCHAR,'level':1,'encoding':'text','attributes':MAP{'role':'nav'},'element_order':0},
+            {'kind':'block','element_type':'paragraph','content':'menu','level':2,'encoding':'text','attributes':MAP{}::MAP(VARCHAR,VARCHAR),'element_order':1},
+            {'kind':'block','element_type':'section','content':NULL::VARCHAR,'level':1,'encoding':'text','attributes':MAP{'role':'main'},'element_order':2},
+            {'kind':'block','element_type':'paragraph','content':'story','level':2,'encoding':'text','attributes':MAP{}::MAP(VARCHAR,VARCHAR),'element_order':3}]),
+          lambda b: b.content), '|') = 'story';"
+# Like --version, it prints text the script already holds, so it must not need duckdb.
+# `has`, not `ok`: rc 0 with empty or broken output would pass `ok`. And the stderr check,
+# for the reason the --version pair above gives: a missing tool can complain and still exit 0.
+has '--emit-sql needs nothing else' '-- group: reader' env PATH="$TMP/empty" "$BASH" "$DUCKEYE" --emit-sql
+ok  '--emit-sql is silent on stderr' \
+    bash -c "[[ -z \$(env PATH='$TMP/empty' '$BASH' '$DUCKEYE' --emit-sql 2>&1 >/dev/null) ]]"
 # The pin must never be OLDER than the latest tag. --version is duckeye's ONLY version
 # surface -- no VERSION file, no changelog -- so a stale pin is invisible until someone
 # reports the wrong number.

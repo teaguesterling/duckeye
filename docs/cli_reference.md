@@ -78,5 +78,4 @@ usage: duckeye [OPTION]... [FILE]
 | `0` | Success |
 | `1` | General error (no section match, unreadable file, SQL error) |
 | `2` | Unsupported file format |
-| `3` | Format requires `pandoc`, but `pandoc` is not installed |
 | `64` | Command line usage error (invalid flag or argument) |

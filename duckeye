@@ -2106,7 +2106,7 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
     # real .rst files; each gap has gone to panduck:
     #   - a doctest block drops every `...` continuation line (content loss, panduck#192);
     #   - a footnote keeps only its first paragraph; the rest becomes a block quote
-    #     (being fixed on panduck branch fix/rst-footnote-paragraphs);
+    #     (fix open as panduck#197);
     #   - interpreted-text roles stay literal, as :class:`X` (#193);
     #   - a definition's body joins into one text (#194);
     #   - directive options read as a definition list, losing the argument (#195);

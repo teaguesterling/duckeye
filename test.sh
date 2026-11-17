@@ -1255,14 +1255,20 @@ ok  'docx renders without pandoc(1)' \
     bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -T '$TMP/z.docx'"
 has 'docx content without pandoc(1)' 'Alpha' \
     bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE '$TMP/z.docx'"
-# .rst is now the only format that still shells out to pandoc(1), so it is the one that
-# must still say so when pandoc cannot run. This used to be the man page's job; man
-# support was removed entirely and .rst inherited the assertion, which is the better
-# home for it anyway -- the earlier version pointed at a fixture that is never created,
-# so it passed because the file was missing rather than because pandoc was.
-no  'rst still needs pandoc(1)' \
+# .rst was the last format on pandoc(1), and these two used to assert that it STILL
+# needed it. Teague moved it to panduck on 2026-11-16, so they now assert the opposite:
+# with pandoc stubbed to fail, .rst still renders. No format runs pandoc(1) any more.
+ok  'rst renders without pandoc(1)' \
     bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -T '$TMP/t.rst'"
-has 'rst works when pandoc IS present' 'Beta' $DUCKEYE -T "$TMP/t.rst"
+has 'rst content without pandoc(1)' 'Beta' \
+    bash -c "PATH='$TMP/nopandoc:'\$PATH $DUCKEYE -T '$TMP/t.rst'"
+# panduck gives a footnote body twice (inline in the note and as a document-level div),
+# and duckeye_drop_note_bodies() removes the div until the renderers skip it. The body
+# must print exactly once, inside the note, for every document -t that renders it.
+for fmt in ansi text md html; do
+  has "rst footnote body prints once (-t $fmt)" 'ONCE' bash -c \
+    "n=\$($DUCKEYE -t $fmt '$TMP/footnote.rst' | grep -o 'The one line footnote body' | wc -l); [ \$n -eq 1 ] && echo ONCE || echo \"COUNT=\$n\""
+done
 
 # And a man page is simply not a format any more. Both spellings refuse, and the refusal
 # is the assertion -- without it, removing the dispatch would read the same as never
@@ -1429,8 +1435,8 @@ no_leak 'ipynb no longer carries pandoc cell classes' 'cell markdown' \
 # build before removal: .rst block quotes (panduck#64, 0.5.1), the one-line footnote
 # body (#67, 0.5.3), a numbered section title parsing as an ordered list (#84, 0.5.5),
 # headings carrying no id (#85 part 2a, 0.5.5) and the literal `[1]_` marker with its
-# missing reference-to-body link (#85 part 1, v0.10.0). What still holds .rst on
-# pandoc(1) is the REMAINDER of #85 part 1, and it is the guard below.
+# missing reference-to-body link (#85 part 1, v0.10.0). The REMAINDER of #85 part 1 is
+# the guard below; it no longer holds .rst on pandoc(1), which duckeye stopped using.
 #
 # Each of those was found the same way and it is the lesson worth keeping: a guard
 # reporting FIXED is not parity. It measures the defect you already knew about. #84 and
@@ -1455,8 +1461,9 @@ no_leak 'ipynb no longer carries pandoc cell classes' 'cell markdown' \
 # What has NOT arrived is the ruled SHAPE. The ruled inline (duck_block_utils,
 # 2026-09-22) is an ANCHOR carrying attributes['id']; this inline carries the body TEXT,
 # so the footnote body appears TWICE in a prose aggregate -- once spliced into the
-# sentence it annotates and once as the document-level body. That remainder is the guard,
-# and it is why .rst stays on pandoc(1).
+# sentence it annotates and once as the document-level body. That remainder is the guard.
+# duckeye itself no longer shows it: .rst moved to panduck on 2026-11-16, and
+# duckeye_drop_note_bodies() removes the second copy (see 'rst footnote body prints once').
 #
 # The two positives are not vacuous: on panduck v0.7.0 the same probes answer NOLINK and
 # BODY_ONCE, so each one fails against the previous release rather than passing either

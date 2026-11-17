@@ -277,6 +277,31 @@ CREATE OR REPLACE MACRO duckeye_reader(blocks) AS (
                                       duckeye_reader_named(blocks)) AS spans)));
 EOF
 
+# Group "notes": DuckDB core only. .rst, until the renderers skip footnote bodies.
+#   panduck gives a footnote twice: as an inline `note` whose content is the body, and as
+#   a document-level div{source_type=footnote} with the same attributes['id']. Every
+#   renderer prints both. duckeye_drop_note_bodies(blocks) removes the div and its
+#   subtree when an inline note has its id, so the body prints once, inside the note.
+#   A citation body (source_type=citation) stays: it is the visible reference list.
+#   Remove this group when duck_block_utils#76, markdown#110 and webbed#272 are served.
+#   The shape follows the reader group: spans computed once, then passed as values.
+IFS= read -r -d '' DUCKEYE_SQL_NOTES <<'EOF' || :
+CREATE OR REPLACE MACRO duckeye_note_bodies(blocks) AS
+  list_filter(list_transform(blocks, lambda b, i: {'i': i, 'lv': b.level, 'id': b.attributes['id'],
+                                                   'body': b.kind = 'block' AND b.element_type = 'div'
+                                                           AND b.attributes['source_type'] = 'footnote'}),
+              lambda s: s.body);
+CREATE OR REPLACE MACRO duckeye_drop_note_bodies(blocks) AS (
+  SELECT list_filter(blocks, lambda b, i: len(list_filter(spans, lambda c: i >= c.i AND i < c.stop)) = 0)
+  FROM (SELECT list_transform(list_filter(bodies, lambda s: list_contains(ids, s.id)), lambda s: {'i': s.i,
+                 'stop': coalesce(s.i + list_position(list_transform(levels[s.i + 1:], lambda l: l <= s.lv), true),
+                                  len(levels) + 1)}) AS spans
+        FROM (SELECT duckeye_note_bodies(blocks) AS bodies,
+                     list_transform(blocks, lambda b: b.level) AS levels,
+                     list_transform(list_filter(blocks, lambda b: b.kind = 'inline' AND b.element_type = 'note'),
+                                    lambda b: b.attributes['id']) AS ids)));
+EOF
+
 # --emit-sql prints the groups above as one script, so a host that cannot run bash (the
 # planned duckdb-wasm app) ships THIS text rather than a copy of it. Each group says what
 # it needs, because DuckDB binds a macro when it is created: a host loads those extensions
@@ -292,7 +317,8 @@ emit_sql() {
   printf -- '-- group: pure\n-- needs: (DuckDB core only)\n%s\n' "$DUCKEYE_SQL_PURE"
   printf -- '-- group: blocks\n-- needs: duck_block_utils\n%s\n' "$DUCKEYE_SQL_BLOCKS"
   printf -- '-- group: toc\n-- needs: duck_block_utils\n%s\n' "$DUCKEYE_SQL_TOC"
-  printf -- '-- group: reader\n-- needs: (DuckDB core only)\n%s' "$DUCKEYE_SQL_READER"
+  printf -- '-- group: reader\n-- needs: (DuckDB core only)\n%s\n' "$DUCKEYE_SQL_READER"
+  printf -- '-- group: notes\n-- needs: (DuckDB core only)\n%s' "$DUCKEYE_SQL_NOTES"
 }
 
 usage() {
@@ -386,7 +412,7 @@ Formats:
                        panduck extension, natively (no pandoc(1) needed)
   .ipynb               panduck extension, natively — panduck 0.5.1 fixed the lambda
                        warning that had kept notebooks on pandoc(1)
-  .rst                 via pandoc(1) — panduck reads it, but loses table-cell markup
+  .rst                 panduck extension, natively (some RST constructs are lost)
   .zim  zim://...      zim extension (see ZIM archives below)
   -d bypasses this table entirely and hands FILE to DuckDB, so the format is
   whatever DuckDB's replacement scan makes of the extension. Under -d a .json
@@ -551,10 +577,6 @@ init() {
       fi
     done
   done
-  printf '%-20s %-10s ' pandoc system
-  if command -v pandoc >/dev/null; then echo found
-  else echo 'missing — .rst will not render; the rest use panduck'
-  fi
   dbu_body_floor
   return $rc
 }
@@ -1123,7 +1145,7 @@ if [[ $# -gt 1 ]]; then
 fi
 
 # Standard input: an explicit "-", or no FILE at all with something piped in. It is
-# spooled to a file rather than streamed because pandoc needs to seek (a .docx is a zip),
+# spooled to a file rather than streamed because a reader needs to seek (a .docx is a zip),
 # because the section and search queries read the document more than once, and because
 # sniffing has to look at the first bytes without consuming them.
 if [[ $f == - || ( -z $f && ! -t 0 ) ]]; then
@@ -1260,7 +1282,7 @@ pat="duckeye_like('$(q "$arg")')"
 # functions take the pattern RAW. Translating first would make `Al*a` the literal
 # `Al%a`. $pat stays for zim_suggest and zim_search, which still match in SQL.
 pat_raw="'$(q "$arg")'"
-exts= doc= via_pandoc= zim_open= premacro=
+exts= doc= zim_open= premacro=
 [[ $mode == section || $mode == search ]] && premacro=$DUCKEYE_SQL_PURE
 [[ $mode == toc ]] && premacro=$DUCKEYE_SQL_TOC
 # -n numbers source lines in a rendered view. A data mode prints rows, and -T prints
@@ -2079,51 +2101,22 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
                    doc="SELECT list(b) AS blocks FROM read_panduck_doc('$src', expand_embedded := true) b" ;;
     esac ;;
   *.rst)
-    # ONE format stays on pandoc(1), for a measured reason. .ipynb left this list when
-    # panduck 0.5.1 fixed the lambda warning (#65) -- it now reads through panduck
-    # above -- and test.sh carries two guards for .rst that report FIXED when that
-    # route can move too. `.man` and the numbered sections `.1`-`.9` were here too
-    # until man page support was removed entirely; roff has no reader anywhere in the
-    # stack, so nothing was left behind for them to use.
-    #
-    #   .rst    panduck has now fixed five defects that each held this route: table-cell
-    #           markup and block-quote nesting (0.5.1), the one-line footnote body
-    #           (#67, 0.5.3), and -- in 0.5.5 -- a numbered section title parsing as an
-    #           ordered list instead of a heading (#84) and headings carrying no id
-    #           (#85 part 2a). Verified on the served build rather than the changelog:
-    #           a four-title fixture now reports four headings, matching pandoc, and
-    #           duck_blocks_to_html emits `<h2 id="table-of-contents">`.
-    #
-    #           ONE defect remains, and it is why this stays on pandoc(1): footnote and
-    #           citation reference markers are still literal in the prose (`a note
-    #           [1]_`), with bodies as loose document-level paragraphs carrying no id,
-    #           where pandoc strips the marker and attaches a note (panduck#85 part 1).
-    #           The ruled shape is an inline anchor with attributes['id'] plus a
-    #           document-level body subtree sharing it; today's output is a third shape,
-    #           neither ruled nor rejected. panduck lands #97 first (the pandoc reader's
-    #           Note/Cite arms do not recurse), then the RST reader.
-    #
-    #           Move only when that guard reports FIXED -- and RE-RUN PARITY rather than
-    #           trusting it, because parity is what caught #84 and the missing ids while
-    #           a freshly-green guard said nothing. #68 also changed which lines a list
-    #           item owns, so list parity moves too. One correction worth keeping from
-    #           panduck: an `hr` after a BULLETED line is CORRECT -- docutils emits
-    #           bullet_list + transition there and panduck matches it; pandoc is the
-    #           outlier, so do not file that as a defect.
-    command -v pandoc >/dev/null ||
-      die "${key##*.} needs pandoc, which is not installed" 3
-    # Name the reader rather than letting pandoc infer it. Inference would work for
-    # .rst alone; the explicit name is kept because it costs nothing and because the
-    # branch used to carry formats that DID defeat inference.
-    from=rst
-    via_pandoc=1
-    # read_pandoc_ast() silently returns [] on a pipe (constant-folded double-read,
-    # teaguesterling/duckdb_duck_block_utils#18), so stdin goes via read_text().
-    # panduck's reader, not duck_block_utils' pandoc_ast_to_blocks, which is
-    # deprecated and printed a notice to stderr on every .rst/.ipynb render.
-    # Same blocks out, measured; one less thing duckeye owns.
-    exts+=" panduck"
-    doc="SELECT list(b) AS blocks FROM read_pandoc_blocks('/dev/stdin') b" ;;
+    # The last format that used pandoc(1). Teague moved it to panduck on 2026-11-16,
+    # knowing the gaps below. MEASURED on panduck v0.10.0 against pandoc 3.1.3 over 15
+    # real .rst files; each gap has gone to panduck:
+    #   - a doctest block drops every `...` continuation line (content loss, panduck#192);
+    #   - a footnote keeps only its first paragraph; the rest becomes a block quote
+    #     (fix open as panduck#197);
+    #   - interpreted-text roles stay literal, as :class:`X` (#193);
+    #   - a definition's body joins into one text (#194);
+    #   - directive options read as a definition list, losing the argument (#195);
+    #   - runs of spaces are not collapsed (#196).
+    # A footnote body is ALSO a document-level div, so it would print twice. The
+    # renderers will skip it (duck_block_utils#76, markdown#110, webbed#272); until they
+    # do, duckeye_drop_note_bodies() does it here, with the same rule.
+    exts="panduck"
+    premacro+=$DUCKEYE_SQL_NOTES
+    doc="SELECT duckeye_drop_note_bodies(list(b)) AS blocks FROM read_rst_blocks('$src') b" ;;
   http*://*)
     # Assume http(s):// with no extension is HTML
     exts="webbed"
@@ -2142,7 +2135,7 @@ elif [[ $f == git://* ]]; then
 fi
 
 # MATERIALIZED: the section/search queries reference the document more than once,
-# and the pandoc path's source is stdin, which can only be read one time.
+# and a spooled stdin is cheaper to read once.
 # HTML aliases for duck_block types. A preprocessor over the selector, applied
 # before it reaches the css parse, so `-Q 'h2'` and `-Q 'li'` work for anyone who
 # knows HTML but not the duck_block vocabulary. h1..h6 rewrite to an ATTRIBUTE on
@@ -2535,18 +2528,13 @@ duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")
 [[ -n $premacro ]] && duck+=(-s "$premacro")   # its own -s: macros must exist before $sql binds
 duck+=(-s "$sql")
 
-# Runs $span_probe through the same reader the real query used -- a pandoc-routed
-# file has to be piped in again, since its blocks arrive on stdin, not from a path.
-# Only ever called on the failure path.
+# Runs $span_probe through the same reader the real query used. Only ever called on
+# the failure path.
 span_rows() {
   # The probe only exists for -S/-s, whose $doc calls duckeye_like(), so it needs the
   # "pure" core group -- but not the rest of $premacro, whose -Q tables it never reads.
   local q=(duckdb -list -noheader -s "$load" -s "$DUCKEYE_SQL_PURE" -s "$span_probe")
-  if [[ -n $via_pandoc ]]; then
-    pandoc -f "$from" "$f" -t json 2>/dev/null | "${q[@]}" 2>/dev/null
-  else
-    "${q[@]}" 2>/dev/null
-  fi
+  "${q[@]}" 2>/dev/null
 }
 page=(cat); [[ -n $do_page && -n $DUCKEYE_PAGER ]] && page=($DUCKEYE_PAGER)
 
@@ -2565,11 +2553,7 @@ if [[ -n $rank_criterion ]]; then
   c_duck+=(-s "$c_sql")
 
   cand_file=$tmp/candidates.json
-  if [[ -n $via_pandoc ]]; then
-    pandoc -f "$from" "$f" -t json | "${c_duck[@]}" >"$cand_file" 2>/dev/null
-  else
-    "${c_duck[@]}" >"$cand_file" 2>/dev/null
-  fi
+  "${c_duck[@]}" >"$cand_file" 2>/dev/null
 
   if [[ ! -s $cand_file ]] || grep -qE '^([[:space:]]*\[[[:space:]]*\]|[[:space:]]*null|[[:space:]]*)$' "$cand_file"; then
     if [[ -n $json_out ]]; then
@@ -2615,11 +2599,6 @@ SQL
       fi
     fi
   fi
-elif [[ -n $via_pandoc ]]; then
-  pandoc -f "$from" "$f" -t json | "${duck[@]}" >"$out"
-  st=("${PIPESTATUS[@]}")
-  (( st[0] )) && die "pandoc failed on $f" "${st[0]}"
-  (( st[1] )) && exit "${st[1]}"
 else
   "${duck[@]}" >"$out" || exit $?
 fi

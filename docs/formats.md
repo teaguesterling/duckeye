@@ -14,7 +14,7 @@
 | **OpenDocument** | `.odt` | `panduck` (native) | Headings, document hierarchy, formatting |
 | **EPUB Books** | `.epub` | `panduck` (native) | Chapter outlines, table of contents, book text |
 | **LaTeX** | `.tex`, `.latex` | `panduck` (native) | Mathematical equations, sections, cross-references |
-| **reStructuredText**| `.rst` | `pandoc` | Python docstrings, Sphinx manuals, section hierarchies (via pandoc(1)) |
+| **reStructuredText**| `.rst` | `panduck` (native) | Python docstrings, Sphinx manuals, section hierarchies (some RST constructs are lost; see the README) |
 | **Org-Mode** | `.org` | `panduck` (native) | Emacs outlines, task lists, code snippets |
 | **Jupyter Notebook**| `.ipynb` | `panduck` (native) | Markdown cells and executed code cells |
 | **MediaWiki** | `.mediawiki` | `panduck` (native) | Wikipedia markup, templates, section headers |

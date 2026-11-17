@@ -21,7 +21,7 @@ $ duckeye -s photosynthesis wikipedia.zim   # search 19M offline articles
 ```
 
 One bash script. No build step and no runtime beyond `duckdb` — every format is a DuckDB
-extension, with `pandoc` filling the gaps.
+extension. `pandoc(1)` is not needed.
 
 ## Install & Update
 
@@ -123,7 +123,7 @@ Under `-d` the input is data rather than prose, and the candidates are too easil
 confused for guessing to be safe, so stdin there requires `-f` rather than picking for
 you.
 
-Input is spooled to a temporary file rather than streamed, because pandoc needs to seek
+Input is spooled to a temporary file rather than streamed, because a reader needs to seek
 (a `.docx` is a zip), the section and search queries read the document more than once,
 and sniffing has to look at the first bytes without consuming them.
 
@@ -212,7 +212,6 @@ reader. See [Data files and profiling](#data-files-and-profiling).
 **`-t md` does not shell out.** It calls `duck_blocks_to_md`, one of the
 duck_blocks writers, so *writing* markdown needs no `pandoc` binary and takes no
 round trip through a Pandoc AST. `-t pandoc` is the only format that builds one.
-(Reading `.rst` still runs `pandoc` — see below.)
 
 That matters for more than a dependency. A Pandoc AST has no representation for a
 block that cannot stand at the top level, and `duck_blocks_to_pandoc_ast` drops
@@ -735,18 +734,24 @@ being parsed as a page. That matters more than it sounds: a Gutenberg archive is
 images against 141k HTML files, and even a Wikipedia carries CSS, JavaScript, and
 hundreds of thousands of entries with no mimetype at all.
 
-## The remaining `pandoc` dependency
+## No `pandoc` dependency
 
-The goal is for panduck to do all of it. `pandoc(1)` is no longer used to write
-anything, or to convert an AST into blocks; three extensions still use it to
-**read**, and each for a measured reason:
+duckeye no longer runs `pandoc(1)`. `.rst` was the last format to use it, and it
+moved to panduck's `read_rst_blocks` on 2026-11-16. panduck's RST reader has known gaps,
+measured against pandoc 3.1.3:
 
-| ext | why pandoc still reads it |
+| gap | panduck issue |
 |---|---|
-| `.rst` | panduck has fixed table cells, block-quote nesting, the one-line footnote body, numbered section titles and heading ids (the last two in 0.5.5). One defect still holds the route: footnote and citation reference markers stay literal in the prose (`a note [1]_`) with bodies as loose paragraphs carrying no id, where pandoc attaches a note (panduck#85 part 1) |
+| a doctest block drops its `...` continuation lines | #192 |
+| interpreted-text roles stay literal (`:class:`X``) | #193 |
+| a definition's body is joined into one text | #194 |
+| directive options read as prose, and the argument is lost | #195 |
+| runs of spaces are not collapsed | #196 |
+| a footnote keeps only its first paragraph | #197 (fix, open) |
 
-Everything else — `.docx .odt .epub .org .tex .rtf .textile .mediawiki`, plus
-`.md` and `.html` — is read natively, with no pandoc process.
+A footnote body also arrives twice, inside the note and as a document-level block.
+duckeye drops the second copy with `duckeye_drop_note_bodies()` until the renderers do
+(duck_block_utils#76, markdown#110, webbed#272).
 
 `.rst` is one upstream fix away, and `test.sh` carries guards that report `FIXED` when
 the route can move; at that point nothing needs `pandoc(1)` at all. `.man` and `.1`–`.9`

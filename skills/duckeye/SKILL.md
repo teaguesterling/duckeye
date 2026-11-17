@@ -164,7 +164,7 @@ duckeye 'zim://wiki.zim/_assets_/doc.pdf' # read embedded PDFs in ZIM
 ### Piping and scripting
 
 ```sh
-# Exit codes: 0=ok, 1=no match/error, 2=unsupported format, 3=needs pandoc, 64=usage
+# Exit codes: 0=ok, 1=no match/error, 2=unsupported format, 64=usage
 duckeye -s 'BREAKING' CHANGELOG.md || echo 'safe to upgrade'
 
 # Interactive fuzzy section picker
@@ -273,8 +273,7 @@ duckeye -T --json docs/architecture.md
 | `.json` | Pandoc AST |
 | `.zim`, `zim://…` | `zim` DuckDB extension (handles HTML, markdown, and embedded PDFs) |
 | `.py` `.rs` `.go` `.c` `.cpp` `.js` `.ts` `.java` `.kt` `.cs` `.swift` `.rb` `.php` `.lua` `.r` `.sh` `.zig` `.dart` `.sql` `.gql` `.tf` `.css` (27 languages) | `sitting_duck` DuckDB extension (Tree-sitter AST to duck_blocks & CSS selector engine) |
-| `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` `.ipynb` | `panduck` — native, no `pandoc(1)` |
-| `.rst` | `pandoc(1)` — the only route that still needs it |
+| `.docx` `.odt` `.epub` `.org` `.tex` `.rtf` `.textile` `.mediawiki` `.ipynb` `.rst` | `panduck` — native, no `pandoc(1)` |
 | anything under `-d` | DuckDB reader (parquet, csv, json, yaml, xlsx, pdf, zip, git, lines, ast, …; `toml` is unpublished — see above) |
 
 ---
@@ -343,9 +342,8 @@ duckeye --init      # installs DuckDB extensions
 duckeye --update    # updates DuckDB extensions and duckeye
 ```
 
-Requires `duckdb` on `PATH`. `pandoc` is optional, and now needed only for `.rst` and man
-pages — DOCX, ODT, EPUB, LaTeX, Org, RTF, Textile, MediaWiki and `.ipynb` all read
-natively through `panduck`.
+Requires `duckdb` on `PATH`. `pandoc` is not needed: DOCX, ODT, EPUB, LaTeX, Org, RTF,
+Textile, MediaWiki, `.ipynb` and `.rst` all read natively through `panduck`.
 
 `duckeye -V` prints the running version — check it against this skill's `version:` if
 something here does not match what you observe.

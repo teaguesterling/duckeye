@@ -388,7 +388,7 @@ Options:
                          fenced as csv/tsv/json/jsonl, becomes its rows; other blocks stay
                          one row each. With no -Q/-E the selection is the whole document
   -E, --extract SPEC     select and read as data (implies -x): KIND:N is the Nth block of
-                         that type, from 1 (table:2, code:1); KIND#ID and KIND are -Q
+                         that type, from 1, blocks only (table:2, code:1); KIND#ID and KIND are -Q
                          selectors (table#my-info). Then -w, -c, -l, -t apply to its rows
   -n, --number           number source code lines by their FILE line, like cat -n, so
                          a match can be cited as file:line. Code views only: the plain
@@ -1075,7 +1075,6 @@ while (( $# )); do
                    color=$(lower "$2"); shift ;;
     --color=*)     color=$(lower "${1#--color=}") ;;
     -w|--where)    [[ $# -ge 2 ]] || die '-w needs a WHERE expression' 64
-                   [[ $mode == full ]] && setmode raw
                    where=$2; shift ;;
     -l|--limit)    [[ $# -ge 2 ]] || die '-l needs a row count' 64
                    [[ $2 =~ ^[0-9]+$ ]] || die "-l needs a non-negative integer, got '$2'" 64
@@ -1115,10 +1114,15 @@ if [[ -n $extract ]]; then
   fi
   as_data=1
 fi
-# -x and -c only make sense on rows, so they imply -d the way -w does -- but AFTER the
-# loop, so that `-c a -z` and `-z -c a` are the same command. -w decides inside the loop,
-# which is why `-w X -z` is refused as two modes while `-z -w X` works.
-[[ ( -n $as_data || -n $columns ) && $mode == full ]] && mode=raw
+# -w, -x and -c only make sense on rows, so they imply -d -- AFTER the loop, so that
+# `-w X -z` and `-z -w X` are the same command. -w used to decide inside the loop, which
+# refused `-w X -z` as two modes while `-z -w X` worked.
+[[ ( -n $where || -n $as_data || -n $columns ) && $mode == full ]] && mode=raw
+# -T, -S and -s render a document; the data flags read rows. Combined, the data flag was
+# accepted and then silently dropped (-w as well, since only the data path reads it), so
+# refuse. "Section, then extract" is a real use; it is not built yet.
+[[ ( -n $where || -n $as_data || -n $columns ) && ( $mode == toc || $mode == section || $mode == search ) ]] &&
+  die '-w, -x, -E and -c read rows; they do not combine with -T, -S or -s yet' 64
 
 if [[ -n $rank_criterion ]]; then
   if [[ -z $rank_threshold ]]; then
@@ -1795,11 +1799,23 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     exts="$exts duck_tails"
   fi
 
+  # -E and -x read a document's blocks, so the two document formats data mode otherwise
+  # reads differently go to their block readers here: a pandoc AST .json (else JSON data)
+  # and .rst (which has no data-mode reader at all).
+  if [[ -n $as_data && -z $fmt ]]; then
+    if [[ $key == *.json ]] && is_pandoc_json "$f"; then
+      from="read_pandoc_blocks('$src')"; exts+=" panduck"
+    elif [[ $key == *.rst ]]; then
+      from="read_rst_blocks('$src')"; exts+=" panduck"
+    fi
+  fi
   # A document read as data is one row per block. A selection (-Q, -E) narrows those
   # rows to the matched blocks, and -x reads a lone table -- or a code block fenced as
   # csv/tsv/json/jsonl -- as the rows it holds. Without this, -Q on a document under -d
   # was SILENTLY IGNORED: every block came back.
-  if [[ $from == read_*_blocks\(* || $from == read_panduck_doc\(* ]]; then
+  # Plain -d on a document skips all of this: it stays one row per block, read once.
+  if [[ ( $from == read_*_blocks\(* || $from == read_panduck_doc\(* ) &&
+        ( -n ${selector:-} || -n $extract_kind || -n $as_data ) ]]; then
     if [[ -n ${selector:-} ]]; then
       doc="SELECT list(b) AS blocks FROM $from b"
       doc_select
@@ -1811,7 +1827,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
       kind=$(css_alias "$extract_kind")
       [[ $kind == *\[* ]] && die "-E $extract: $extract_kind is not a block type; use -E heading:N, or -Q '$extract_kind'" 64
       matched="SELECT b, ord FROM (SELECT b, row_number() OVER () AS ord FROM $from b)
-               WHERE b.element_type = '$(q "$kind")'
+               WHERE b.element_type = '$(q "$kind")' AND b.kind = 'block'
                QUALIFY row_number() OVER (ORDER BY ord) = $extract_n"
     else
       matched="SELECT b, row_number() OVER () AS ord FROM $from b"
@@ -1821,11 +1837,13 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     # built: panduck_table_read binds its columns from a constant, not a subquery. That costs
     # a second read of the document; panduck doc_table (teaguesterling/duckdb_panduck#215)
     # would make it one.
+    # stderr is kept apart: a ~/.duckdbrc prints a "Loading resources" banner there, and
+    # merged into stdout it became the match count. Measured under CI's lambda-rule HOME.
     probe=$(duckdb -noheader -list -separator $'\t' -c "$(duckeye_load_sql $exts panduck) $data_pre
       SELECT count(*), count(*) FILTER (WHERE b.element_type = 'table'),
              coalesce(any_value(b.element_type), ''),
              coalesce(lower(any_value(b.attributes['language'])), '')
-      FROM __duckeye_m;" 2>&1) || die "$probe" 1
+      FROM __duckeye_m;" 2>"$tmp/probe.err") || die "$(cat "$tmp/probe.err")" 1
     IFS=$'\t' read -r m_n m_tables m_type m_lang <<<"$probe"
     (( m_n > 0 )) || die "nothing matched ${extract:-${selector:-}} in $f" 1
     if [[ -n $as_data && $m_n == 1 && $m_type == table ]]; then

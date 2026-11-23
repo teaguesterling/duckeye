@@ -1923,9 +1923,29 @@ no_leak '-c drops the other columns'               'alpha'   $DUCKEYE -x -c 'Mod
 has     '-c filters on a column it drops'          't_two'   $DUCKEYE -E table:2 -c test -w "status='FAIL'" -t csv "$TMP/tbl.md"
 has     '-c works on a data file'                  '{"b":2}' $DUCKEYE -c b "$TMP/cols.csv"
 dies_with '-c names an unknown column loudly'      'Nope'    $DUCKEYE -c Nope "$TMP/cols.csv"
+# -w implied -d INSIDE the option loop, so `-w X -z` refused as two modes while
+# `-z -w X` worked. Like -c, its place relative to -z must not matter.
+has     '-w before -z is one mode'                 '"column_name":"b"' $DUCKEYE -w 'a = 1' -z "$TMP/cols.csv"
+has     '-w after -z is one mode'                  '"column_name":"b"' $DUCKEYE -z -w 'a = 1' "$TMP/cols.csv"
+dies_with '-w with -T is refused, not ignored'     'do not combine with -T, -S or -s' $DUCKEYE -T -w x "$TMP/tbl.md"
 # -c implies data mode after parsing, so its place relative to -z does not matter.
 ok      '-c before -z is one mode'                 $DUCKEYE -c b -z "$TMP/cols.csv"
 ok      '-z before -c is one mode'                 $DUCKEYE -z -c b "$TMP/cols.csv"
+
+# The data flags read rows; -T, -S and -s render a document. Combined, the data flag used
+# to be accepted and silently dropped -- refuse it instead, naming both.
+dies_with '-E with -S is refused, not ignored'     'do not combine with -T, -S or -s' $DUCKEYE -S Results -E table:1 "$TMP/tbl.md"
+dies_with '-c with -T is refused, not ignored'     'do not combine with -T, -S or -s' $DUCKEYE -T -c x "$TMP/tbl.md"
+dies_with '-x with -s is refused, not ignored'     'do not combine with -T, -S or -s' $DUCKEYE -s alpha -x "$TMP/tbl.md"
+# KIND:N counts BLOCKS: an inline `code` span before a fence must not be code:1.
+printf '# A\n\nsome `span` inline.\n\n```csv\nx,y\n10,20\n```\n' >"$TMP/inline-code.md"
+has     '-E code:1 skips inline code spans'        '10,20'   $DUCKEYE -E code:1 -t csv "$TMP/inline-code.md"
+# Every document reader, not only md and html: a pandoc AST .json and an .rst are
+# documents, though data mode alone reads .json as JSON data.
+$DUCKEYE -t pandoc "$TMP/tbl.md" >"$TMP/tbl.pandoc.json" 2>/dev/null
+has     '-E reads a table from pandoc AST JSON'    't_one,PASS' $DUCKEYE -E table:2 -t csv "$TMP/tbl.pandoc.json"
+printf 'T\n=\n\n=====  =====\nk      v\n=====  =====\nrk     rv\n=====  =====\n' >"$TMP/tbl.rst"
+has     '-E reads a table from .rst'               'rk,rv'   $DUCKEYE -E table:1 -t csv "$TMP/tbl.rst"
 
 # -f table reads one table block's content JSON on its own.
 printf '{"headers":["a","b"],"rows":[["1","x"],["2","y"]]}' >"$TMP/one.tbl.json"

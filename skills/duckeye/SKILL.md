@@ -136,7 +136,9 @@ duckeye -d -Q table report.md                       # the table BLOCKS, one row 
 ```
 
 `-x` refuses a selection holding more than one table: two tables have no shared columns.
-Pick one with `-E table:N`.
+Pick one with `-E table:N`. `KIND:N` counts block-level elements only, so an inline
+`` `code` `` span is never `code:1`; select an inline element with `-Q`. `-w`, `-x`, `-E` and
+`-c` do not combine with `-T`, `-S` or `-s` yet, and say so rather than being ignored.
 
 `.toml` is in the table above but **does not read on the shipped DuckDB** — the `toml`
 extension is unpublished for it (duckeye tracks this in `DUCKEYE_UNPUBLISHED`), so

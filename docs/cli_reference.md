@@ -41,7 +41,7 @@ usage: duckeye [OPTION]... [FILE]
 | `-f` | `--from FMT` | Override format detection, or name the DuckDB reader under `-d` |
 | `-w` | `--where EXPR` | SQL `WHERE` expression for filtering; implies data mode |
 | `-c` | `--columns A,B` | Keep only these columns, in order, after `-w` and `-l`. Each name is quoted for you (`-c 'Name,Model ID'`); implies data mode |
-| `-x` | `--as-data` | Read a selection (`-Q`, `-E`, or the whole document) as data: a lone table block, or a `csv`/`tsv`/`json`/`jsonl` code block, becomes its rows |
+| `-x` | `--as-data` | Read a selection (`-Q`, `-E`) as data: a lone table block, or a `csv`/`tsv`/`json`/`jsonl` code block, becomes its rows. With no selection, reads the document's only table |
 | `-E` | `--extract SPEC` | Select and read as data: `KIND:N` is the Nth block of that type from 1 (`table:2`, `code:1`); `KIND#ID` and `KIND` are `-Q` selectors (`table#my-info`). Implies `-x` |
 | `-n` | `--number` | Number source code lines by file line, like `cat -n` (code views only) |
 | `-l` | `--limit N` | Cap row count in data modes or ZIM search listings (was `-n` before 0.26) |

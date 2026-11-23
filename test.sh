@@ -1576,6 +1576,10 @@ no_leak 'doc -Q zero match hides pandoc error' 'JSON parse error' \
 # parse. -t text after FILE has to change the serializer, and -S has to narrow.
 has 'flag after FILE is applied' 'alpha body' \
     $DUCKEYE "$TMP/doc.md" -S Alpha -t text
+# 'alpha body' is in the default output too, so it cannot show that -t text was applied.
+# The heading glyph can: the default renderer draws it and -t text does not.
+no_leak 'flag after FILE changes the serializer' '▍' \
+    $DUCKEYE "$TMP/doc.md" -S Alpha -t text
 no_leak 'flag after FILE still narrows' 'beta body' \
     $DUCKEYE "$TMP/doc.md" -S Alpha -t text
 no_leak 'flag after FILE is not a file count' 'only one FILE' \
@@ -1909,7 +1913,7 @@ has     '-E reads a table from stdin with -f md'   'alpha,1' bash -c "$DUCKEYE -
 has     '-z summarizes an extracted table'         '"column_name":"status"' $DUCKEYE -z -E table:2 "$TMP/tbl.md"
 dies_with '-x refuses two tables at once'          'a table reads as rows only on its own' $DUCKEYE -Q table -x "$TMP/tbl.md"
 dies_with '-E past the last table says so'         'nothing matched table:9' $DUCKEYE -E table:9 "$TMP/tbl.md"
-dies_with '-E on a data file is refused'           '-E selects blocks of a document' $DUCKEYE -E table:1 "$TMP/cols.csv"
+dies_with '-E on a data file is refused'           'select blocks of a document' $DUCKEYE -E table:1 "$TMP/cols.csv"
 dies_with '-E and -Q together are refused'         'give either -E or -Q' $DUCKEYE -E table:1 -Q table "$TMP/tbl.md"
 dies_with '-E rejects a malformed spec'            '-E needs KIND:N' $DUCKEYE -E 'table 1' "$TMP/tbl.md"
 # -Q under -d used to be SILENTLY IGNORED on a document: every block came back.
@@ -1929,8 +1933,11 @@ has     '-w before -z is one mode'                 '"column_name":"b"' $DUCKEYE 
 has     '-w after -z is one mode'                  '"column_name":"b"' $DUCKEYE -z -w 'a = 1' "$TMP/cols.csv"
 dies_with '-w with -T is refused, not ignored'     'do not combine with -T, -S or -s' $DUCKEYE -T -w x "$TMP/tbl.md"
 # -c implies data mode after parsing, so its place relative to -z does not matter.
-ok      '-c before -z is one mode'                 $DUCKEYE -c b -z "$TMP/cols.csv"
-ok      '-z before -c is one mode'                 $DUCKEYE -z -c b "$TMP/cols.csv"
+# Exit status alone would pass if -z dropped -c, so assert -c's effect: a is gone.
+has     '-c before -z is one mode'                 '"column_name":"b"' $DUCKEYE -c b -z "$TMP/cols.csv"
+no_leak '-c before -z still projects'              '"column_name":"a"' $DUCKEYE -c b -z "$TMP/cols.csv"
+has     '-z before -c is one mode'                 '"column_name":"b"' $DUCKEYE -z -c b "$TMP/cols.csv"
+no_leak '-z before -c still projects'              '"column_name":"a"' $DUCKEYE -z -c b "$TMP/cols.csv"
 
 # The data flags read rows; -T, -S and -s render a document. Combined, the data flag used
 # to be accepted and silently dropped -- refuse it instead, naming both.
@@ -1946,6 +1953,28 @@ $DUCKEYE -t pandoc "$TMP/tbl.md" >"$TMP/tbl.pandoc.json" 2>/dev/null
 has     '-E reads a table from pandoc AST JSON'    't_one,PASS' $DUCKEYE -E table:2 -t csv "$TMP/tbl.pandoc.json"
 printf 'T\n=\n\n=====  =====\nk      v\n=====  =====\nrk     rv\n=====  =====\n' >"$TMP/tbl.rst"
 has     '-E reads a table from .rst'               'rk,rv'   $DUCKEYE -E table:1 -t csv "$TMP/tbl.rst"
+
+# From the review of #38.
+# -x on a whole document reads the document's ONLY table, as the skill says -- a heading
+# beside it must not make that "2 blocks matched". Zero or several tables fail loud.
+printf '# T\n\n| a | b |\n|---|---|\n| 1 | 2 |\n' >"$TMP/head-table.md"
+has     '-x reads the one table beside a heading'  '1,2'     $DUCKEYE -x -t csv "$TMP/head-table.md"
+dies_with '-x on two tables names the count'       'has 2 tables' $DUCKEYE -x "$TMP/tbl.md"
+dies_with '-x on no tables says so'                'has no table' $DUCKEYE -x "$TMP/doc.md"
+# -x reads blocks; on csv, parquet or code it did nothing and exited 0.
+dies_with '-x on a data file is refused'           'select blocks of a document' $DUCKEYE -x -c a "$TMP/cols.csv"
+# -Q under -d on csv/parquet/json selected nothing and returned every row, rc 0.
+dies_with '-d -Q on a data file is refused'        '-Q selects document blocks or code' $DUCKEYE -d -Q x "$TMP/cols.csv"
+# -D asks for the document view; -w/-x/-c ask for rows. Before #38 a later -D won; after
+# it the data flags silently won. Refuse instead.
+dies_with '-D with -w is refused'                  '-D reads FILE as a document' $DUCKEYE -w true -D "$TMP/doc.md"
+dies_with '-D with -c is refused'                  '-D reads FILE as a document' $DUCKEYE -D -c a "$TMP/doc.md"
+ok      '-d -D still undoes -d'                    $DUCKEYE -d -D "$TMP/doc.md"
+# KIND:N is decimal: bash read 08 as bad octal and blamed "N counts from 1".
+dies_with '-E N with a leading zero is decimal'    'nothing matched code:09' $DUCKEYE -E code:09 "$TMP/tbl.md"
+# stdin under -E/-x needs a DOCUMENT reader, so the hint must name md and html.
+dies_with '-E on stdin names a document -f'        '-f md or -f html' bash -c "$DUCKEYE -E table:1 - <'$TMP/tbl.md'"
+dies_with '-E on stdin names stdin, not a spool'   'in standard input' bash -c "$DUCKEYE -E table:9 -f md - <'$TMP/tbl.md'"
 
 # -f table reads one table block's content JSON on its own.
 printf '{"headers":["a","b"],"rows":[["1","x"],["2","y"]]}' >"$TMP/one.tbl.json"

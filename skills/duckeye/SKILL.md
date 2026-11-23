@@ -122,7 +122,8 @@ duckeye -c 'Name,Model ID' data.csv # keep only these columns (names quoted for 
 
 `-E` selects a block and reads it as data, so a markdown or HTML table becomes rows with
 its header as column names, and the cells are typed. `-x` does the same for a `-Q`
-selection, or for a whole document that holds one table. `-w`, `-c`, `-l`, `-z` and `-t`
+selection. With no selection, `-x` reads the document's only table, and fails loud on
+zero or several (`-d` still gives every block). `-w`, `-c`, `-l`, `-z` and `-t`
 then work on those rows exactly as on a csv. FILE may come before or after the flags.
 
 ```sh
@@ -130,7 +131,7 @@ duckeye -E table:1 -t csv report.md                 # first table as CSV
 duckeye report.md -E table:2 -w "status='PASS'" -c test,status
 duckeye -E 'table#my-info' -t json page.html        # a table by its id
 duckeye -E code:1 notes.md                          # a ```csv fence as rows
-duckeye -x -t json one-table.md                     # a document that is one table
+duckeye -x -t json one-table.md                     # the document's only table
 cat page.html | duckeye -E table:1 -f html -        # stdin needs -f
 duckeye -d -Q table report.md                       # the table BLOCKS, one row each
 ```

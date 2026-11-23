@@ -386,7 +386,7 @@ Options:
                          are quoted for you: -c 'Name,Model ID'. Implies -d
   -x, --as-data          read a selection as data. A lone table block, or a code block
                          fenced as csv/tsv/json/jsonl, becomes its rows; other blocks stay
-                         one row each. With no -Q/-E the selection is the whole document
+                         one row each. With no -Q/-E it reads the document's only table
   -E, --extract SPEC     select and read as data (implies -x): KIND:N is the Nth block of
                          that type, from 1, blocks only (table:2, code:1); KIND#ID and KIND are -Q
                          selectors (table#my-info). Then -w, -c, -l, -t apply to its rows
@@ -661,7 +661,7 @@ q() { printf '%s' "${1//\'/\'\'}"; }
 [[ ${0##*/} == dep && -t 1 ]] && do_page=1 || do_page=
 [[ ${0##*/} == der ]] && mode=raw || mode=full
 arg= where= limit= fmt= color=auto out_fmt=ansi pages=
-in_file= out_file= data_fmt= columns= as_data= extract= positional=()
+in_file= out_file= data_fmt= columns= as_data= extract= explicit_doc= positional=()
 find_query= rank_criterion= rank_threshold= top_k= dialect= json_out= number_lines= reader=
 
 # ---------------------------------------------------------------- intelligence layer
@@ -949,7 +949,9 @@ duckdb_color_mode() {
   echo "-dark-mode"
 }
 
-setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -T, -S, -s, -d, -z, -Z' 64; mode=$1; }
+setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -T, -S, -s, -d, -z, -Z' 64; mode=$1
+  # A data mode after -D supersedes it, as -d -D is undone by a later -d.
+  [[ $1 == raw || $1 == summary || $1 == profile ]] && explicit_doc=; }
 
 # duck_blocks_to_pandoc_ast stamps pandoc-api-version [1,20], which pandoc 3.x refuses
 # outright (teaguesterling/duckdb_duck_block_utils#22). The encoding itself is fine, so
@@ -1019,7 +1021,7 @@ while (( $# )); do
     # -D resets to document interpretation, so `-d -D` is a document. Without this
     # it would parse and do nothing, since document is already the default -- a flag
     # that is accepted and inert is worse than an unknown-option error.
-    -D|--document) mode=full ;;
+    -D|--document) mode=full explicit_doc=1 ;;
     -z|--summary|--summarize) setmode summary ;;
     -Z|--profile|--smart-summary) setmode profile ;;
     -S|--section)  [[ $# -ge 2 ]] || die '-S needs a section name' 64; setmode section; arg=$2; shift ;;
@@ -1105,7 +1107,8 @@ extract_kind= extract_n=
 if [[ -n $extract ]]; then
   [[ -n ${selector:-} || -n $find_query ]] && die '-E is itself a selection; give either -E or -Q/-F, not both' 64
   if [[ $extract =~ ^([A-Za-z_][A-Za-z0-9_]*):([0-9]+)$ ]]; then
-    extract_kind=${BASH_REMATCH[1]} extract_n=${BASH_REMATCH[2]}
+    # 10#: a leading zero is decimal here, not bash octal (08 was "value too great for base").
+    extract_kind=${BASH_REMATCH[1]} extract_n=$((10#${BASH_REMATCH[2]}))
     (( extract_n >= 1 )) || die "-E $extract: N counts from 1" 64
   elif [[ $extract =~ ^[A-Za-z_][A-Za-z0-9_]*(#.+)?$ ]]; then
     selector=$extract
@@ -1117,6 +1120,10 @@ fi
 # -w, -x and -c only make sense on rows, so they imply -d -- AFTER the loop, so that
 # `-w X -z` and `-z -w X` are the same command. -w used to decide inside the loop, which
 # refused `-w X -z` as two modes while `-z -w X` worked.
+# -D asks for the document view and these ask for rows. A later -D used to win over -w;
+# once -w moved here the data flags won silently. Neither is what was asked: refuse.
+[[ -n $explicit_doc && ( -n $where || -n $as_data || -n $columns ) ]] &&
+  die '-D reads FILE as a document; -w, -x, -E and -c read rows. Drop one side' 64
 [[ ( -n $where || -n $as_data || -n $columns ) && $mode == full ]] && mode=raw
 # -T, -S and -s render a document; the data flags read rows. Combined, the data flag was
 # accepted and then silently dropped (-w as well, since only the data path reads it), so
@@ -1195,6 +1202,8 @@ if [[ $f == - || ( -z $f && ! -t 0 ) ]]; then
   if [[ -z $fmt ]]; then
     # Sniffing recognises document formats. Under -d the input is data, where the
     # candidates are indistinguishable often enough that guessing would be a liability.
+    [[ $mode == raw && -n $as_data ]] &&
+      die '-x and -E read a document from standard input only with -f md or -f html' 64
     [[ $mode == raw ]] &&
       die 'reading data from standard input needs -f (csv, parquet, json, ...)' 64
     fmt=$(sniff "$f")
@@ -1322,7 +1331,7 @@ pat="duckeye_like('$(q "$arg")')"
 # functions take the pattern RAW. Translating first would make `Al*a` the literal
 # `Al%a`. $pat stays for zim_suggest and zim_search, which still match in SQL.
 pat_raw="'$(q "$arg")'"
-exts= doc= zim_open= premacro= data_pre=
+exts= doc= zim_open= premacro= data_pre= whole_doc=
 [[ $mode == section || $mode == search ]] && premacro=$DUCKEYE_SQL_PURE
 [[ $mode == toc ]] && premacro=$DUCKEYE_SQL_TOC
 # -n numbers source lines in a rendered view. A data mode prints rows, and -T prints
@@ -1802,7 +1811,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   # -E and -x read a document's blocks, so the two document formats data mode otherwise
   # reads differently go to their block readers here: a pandoc AST .json (else JSON data)
   # and .rst (which has no data-mode reader at all).
-  if [[ -n $as_data && -z $fmt ]]; then
+  if [[ ( -n $as_data || -n ${selector:-} ) && -z $fmt ]]; then
     if [[ $key == *.json ]] && is_pandoc_json "$f"; then
       from="read_pandoc_blocks('$src')"; exts+=" panduck"
     elif [[ $key == *.rst ]]; then
@@ -1830,7 +1839,11 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
                WHERE b.element_type = '$(q "$kind")' AND b.kind = 'block'
                QUALIFY row_number() OVER (ORDER BY ord) = $extract_n"
     else
-      matched="SELECT b, row_number() OVER () AS ord FROM $from b"
+      # No selection: -x reads the document's ONLY table. A heading beside it is not a
+      # second candidate; plain -d is the way to get every block.
+      whole_doc=1
+      matched="SELECT b, ord FROM (SELECT b, row_number() OVER () AS ord FROM $from b)
+               WHERE b.element_type = 'table' AND b.kind = 'block'"
     fi
     data_pre+="CREATE OR REPLACE TEMP TABLE __duckeye_m AS $matched; "
     # What matched decides the SHAPE of the result, so it is read before the query is
@@ -1839,13 +1852,23 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     # would make it one.
     # stderr is kept apart: a ~/.duckdbrc prints a "Loading resources" banner there, and
     # merged into stdout it became the match count. Measured under CI's lambda-rule HOME.
-    probe=$(duckdb -noheader -list -separator $'\t' -c "$(duckeye_load_sql $exts panduck) $data_pre
+    # Loaded the same way as the final query below: its extensions, autoload off for a
+    # local source. Forcing panduck here made `-d -Q` need panduck for no reason.
+    probe_load=
+    case $f in http://*|https://*|s3://*) ;; *) probe_load="SET autoload_known_extensions=false; " ;; esac
+    probe_load+=$(duckeye_load_sql $exts $DUCKEYE_EXTS)
+    probe=$(duckdb -noheader -list -separator $'\t' -c "$probe_load $data_pre
       SELECT count(*), count(*) FILTER (WHERE b.element_type = 'table'),
              coalesce(any_value(b.element_type), ''),
              coalesce(lower(any_value(b.attributes['language'])), '')
       FROM __duckeye_m;" 2>"$tmp/probe.err") || die "$(cat "$tmp/probe.err")" 1
     IFS=$'\t' read -r m_n m_tables m_type m_lang <<<"$probe"
-    (( m_n > 0 )) || die "nothing matched ${extract:-${selector:-}} in $f" 1
+    where_lbl=$f; [[ -n ${from_stdin:-} ]] && where_lbl='standard input'
+    if [[ -n ${whole_doc:-} ]]; then
+      (( m_n > 0 )) || die "-x: $where_lbl has no table. -d gives its blocks as rows" 1
+      (( m_n == 1 )) || die "-x: $where_lbl has $m_n tables; pick one with -E table:N" 1
+    fi
+    (( m_n > 0 )) || die "nothing matched ${extract:-${selector:-}} in $where_lbl" 1
     if [[ -n $as_data && $m_n == 1 && $m_type == table ]]; then
       data_pre+="SET VARIABLE __duckeye_x = (SELECT b.content FROM __duckeye_m); "
       from="panduck_table_read(getvariable('__duckeye_x'))"; exts+=" panduck"
@@ -1860,8 +1883,10 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     else
       from="(SELECT unnest(b) FROM __duckeye_m ORDER BY ord)"
     fi
-  elif [[ -n $extract ]]; then
-    die "-E selects blocks of a document, and $f is read as data, not as a document" 64
+  elif [[ -n $as_data ]]; then
+    die "-x and -E select blocks of a document, and $f is read as data, not as a document" 64
+  elif [[ -n ${selector:-} && $from != ast_select\(* ]]; then
+    die "-Q selects document blocks or code, and $f is read as data; drop -Q or use -w" 64
   fi
 
   # DuckDB's .mode jsonlines prints an EXTENSION-DEFINED type's label UNQUOTED at the

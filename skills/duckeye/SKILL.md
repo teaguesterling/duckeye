@@ -115,7 +115,28 @@ duckeye .git                        # inspect git commit log
 duckeye -d -f lines script.sh       # inspect file with line numbers & offsets
 duckeye -w "score > 90" data.parquet  # -w implies data mode, full SQL WHERE syntax
 duckeye -l 20 huge.csv              # limit rows
+duckeye -c 'Name,Model ID' data.csv # keep only these columns (names quoted for you)
 ```
+
+#### A document's tables as data
+
+`-E` selects a block and reads it as data, so a markdown or HTML table becomes rows with
+its header as column names, and the cells are typed. `-x` does the same for a `-Q`
+selection, or for a whole document that holds one table. `-w`, `-c`, `-l`, `-z` and `-t`
+then work on those rows exactly as on a csv. FILE may come before or after the flags.
+
+```sh
+duckeye -E table:1 -t csv report.md                 # first table as CSV
+duckeye report.md -E table:2 -w "status='PASS'" -c test,status
+duckeye -E 'table#my-info' -t json page.html        # a table by its id
+duckeye -E code:1 notes.md                          # a ```csv fence as rows
+duckeye -x -t json one-table.md                     # a document that is one table
+cat page.html | duckeye -E table:1 -f html -        # stdin needs -f
+duckeye -d -Q table report.md                       # the table BLOCKS, one row each
+```
+
+`-x` refuses a selection holding more than one table: two tables have no shared columns.
+Pick one with `-E table:N`.
 
 `.toml` is in the table above but **does not read on the shipped DuckDB** — the `toml`
 extension is unpublished for it (duckeye tracks this in `DUCKEYE_UNPUBLISHED`), so

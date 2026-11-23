@@ -1571,10 +1571,13 @@ no_leak 'doc -Q zero match hides pandoc error' 'JSON parse error' \
 # Two diagnostics that used to name the wrong culprit. Both are documented in the
 # README's limits table, so both are pinned.
 #
-# Parsing stops at the first non-flag, so `-t text` after FILE became a second FILE
-# and was reported as "only one FILE at a time" -- which reads as a glob problem.
-has 'flag after FILE names the flag' 'flags must come before FILE' \
-    bash -c "$DUCKEYE -S Alpha '$TMP/doc.md' -t text 2>&1 >/dev/null"
+# A flag after FILE used to be refused ("flags must come before FILE"). Teague asked
+# for FILE anywhere (2026-11-22), so a trailing flag must now TAKE EFFECT -- not merely
+# parse. -t text after FILE has to change the serializer, and -S has to narrow.
+has 'flag after FILE is applied' 'alpha body' \
+    $DUCKEYE "$TMP/doc.md" -S Alpha -t text
+no_leak 'flag after FILE still narrows' 'beta body' \
+    $DUCKEYE "$TMP/doc.md" -S Alpha -t text
 no_leak 'flag after FILE is not a file count' 'only one FILE' \
     bash -c "$DUCKEYE -S Alpha '$TMP/doc.md' -t text 2>&1 >/dev/null"
 # ...but two real files must still say that.
@@ -1858,6 +1861,75 @@ has 'update inits from the NEW script' 'NEW-INIT-MARKER' \
 ok  'git uri toc'                $DUCKEYE -T 'git://README.md@HEAD'
 has 'git uri section'            'Install' $DUCKEYE -S Install 'git://README.md@HEAD'
 ok  'git uri code ast toc'       $DUCKEYE -T 'git://test.sh@HEAD'
+
+# ---- -x, -E and -c: a document's tables as data (Teague, 2026-11-22)
+# A markdown or HTML table has to come out as ROWS with its header as column names, so
+# -w, -c, -l and -t csv work on it as on a csv. The parsing is panduck's
+# (panduck_table_read); these pin duckeye's wiring of it.
+cat >"$TMP/tbl.md" <<'EOF'
+# Results
+
+| Name  | n |
+|-------|---|
+| alpha | 1 |
+| beta  | 2 |
+
+## Runs
+
+| test   | status |
+|--------|--------|
+| t_one  | PASS   |
+| t_two  | FAIL   |
+
+```csv
+x,y
+10,20
+```
+EOF
+cat >"$TMP/one-table.md" <<'EOF'
+| Name  | Model ID |
+|-------|----------|
+| alpha | org/a    |
+EOF
+printf '<h1>H</h1><table><tr><th>a</th></tr><tr><td>first</td></tr></table><table id="my-info"><tr><th>k</th><th>v</th></tr><tr><td>key</td><td>val</td></tr></table>\n' >"$TMP/tbl.html"
+printf 'a,b\n1,2\n' >"$TMP/cols.csv"
+
+has     '-x reads a lone table as rows'            '"Model ID":"org/a"' $DUCKEYE -x -t jsonl "$TMP/one-table.md"
+has     '-E table:2 picks the second table'        't_one'   $DUCKEYE -E table:2 -t csv "$TMP/tbl.md"
+no_leak '-E table:2 leaves the first table out'    'alpha'   $DUCKEYE -E table:2 -t csv "$TMP/tbl.md"
+# The headline command: a filter on a table's own column, written after FILE.
+has     '-E with -w filters on a table column'     't_one,PASS' $DUCKEYE -E table:2 "$TMP/tbl.md" -w "status='PASS'" -t csv
+no_leak '-E with -w drops the other rows'          't_two'      $DUCKEYE -E table:2 "$TMP/tbl.md" -w "status='PASS'" -t csv
+# Types are sniffed: a number column must come out as a number, not a string.
+has     '-E table cells are typed'                 '"n":2'   $DUCKEYE -E table:1 -t jsonl "$TMP/tbl.md"
+has     '-E KIND#ID picks a table by its id'       'key,val' $DUCKEYE -E 'table#my-info' -t csv "$TMP/tbl.html"
+no_leak '-E KIND#ID leaves other tables out'       'first'   $DUCKEYE -E 'table#my-info' -t csv "$TMP/tbl.html"
+has     '-E code:1 reads a csv fence as rows'      '10,20'   $DUCKEYE -E code:1 -t csv "$TMP/tbl.md"
+has     '-E reads a table from stdin with -f md'   'alpha,1' bash -c "$DUCKEYE -E table:1 -f md -t csv - <'$TMP/tbl.md'"
+has     '-z summarizes an extracted table'         '"column_name":"status"' $DUCKEYE -z -E table:2 "$TMP/tbl.md"
+dies_with '-x refuses two tables at once'          'a table reads as rows only on its own' $DUCKEYE -Q table -x "$TMP/tbl.md"
+dies_with '-E past the last table says so'         'nothing matched table:9' $DUCKEYE -E table:9 "$TMP/tbl.md"
+dies_with '-E on a data file is refused'           '-E selects blocks of a document' $DUCKEYE -E table:1 "$TMP/cols.csv"
+dies_with '-E and -Q together are refused'         'give either -E or -Q' $DUCKEYE -E table:1 -Q table "$TMP/tbl.md"
+dies_with '-E rejects a malformed spec'            '-E needs KIND:N' $DUCKEYE -E 'table 1' "$TMP/tbl.md"
+# -Q under -d used to be SILENTLY IGNORED on a document: every block came back.
+has     '-d -Q narrows document blocks'            '"element_type":"table"'   $DUCKEYE -d -Q table "$TMP/tbl.md"
+no_leak '-d -Q drops unmatched blocks'             '"element_type":"heading"' $DUCKEYE -d -Q table "$TMP/tbl.md"
+
+# -c projects named columns, quoted for the user, AFTER -w -- so a filter can test a
+# column the output leaves out.
+has     '-c keeps the named column'                'org/a'   $DUCKEYE -x -c 'Model ID' -t csv "$TMP/one-table.md"
+no_leak '-c drops the other columns'               'alpha'   $DUCKEYE -x -c 'Model ID' -t csv "$TMP/one-table.md"
+has     '-c filters on a column it drops'          't_two'   $DUCKEYE -E table:2 -c test -w "status='FAIL'" -t csv "$TMP/tbl.md"
+has     '-c works on a data file'                  '{"b":2}' $DUCKEYE -c b "$TMP/cols.csv"
+dies_with '-c names an unknown column loudly'      'Nope'    $DUCKEYE -c Nope "$TMP/cols.csv"
+# -c implies data mode after parsing, so its place relative to -z does not matter.
+ok      '-c before -z is one mode'                 $DUCKEYE -c b -z "$TMP/cols.csv"
+ok      '-z before -c is one mode'                 $DUCKEYE -z -c b "$TMP/cols.csv"
+
+# -f table reads one table block's content JSON on its own.
+printf '{"headers":["a","b"],"rows":[["1","x"],["2","y"]]}' >"$TMP/one.tbl.json"
+has     '-f table reads table-block JSON'          '2,y'     $DUCKEYE -d -f table -t csv "$TMP/one.tbl.json"
 
 printf '\n%d passed, %d failed, %d skipped' "$pass" "$fail" "$skip"
 if (( known )); then

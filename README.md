@@ -812,6 +812,9 @@ it to `DUCKEYE_EXTS`.
 -o, --output FILE      write to FILE instead of stdout (names a FILE, not a format)
     --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies data mode
+-c, --columns A,B      keep only these columns (names quoted for you); implies data mode
+-x, --as-data          read a selection as data: a lone table becomes its rows
+-E, --extract SPEC     select and read as data: table:2, code:1, table#my-info
 -n, --number           number source code lines by file line, like cat -n
 -l, --limit N          cap rows in any listing (-d, -z, -Z, and .zim -T/-s)
     --init             install the DuckDB extensions

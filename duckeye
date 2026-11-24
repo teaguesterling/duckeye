@@ -379,7 +379,17 @@ Options:
   -f, --from FMT         treat the input as FMT rather than guessing from the
                          filename: md, html, pdf, rst, docx, tex, zim, ...
                          Under -d, FMT names a DuckDB reader: csv, parquet, json, pdf, yaml, ...
+                         md and html read a document's blocks (for stdin), and table reads
+                         one table block's content JSON {"headers": [...], "rows": [...]}
   -w, --where EXPR       SQL WHERE clause for data modes (-d, -z, -Z); implies -d
+  -c, --columns A,B      keep only these columns, in this order, after -w and -l. Names
+                         are quoted for you: -c 'Name,Model ID'. Implies -d
+  -x, --as-data          read a selection as data. A lone table block, or a code block
+                         fenced as csv/tsv/json/jsonl, becomes its rows; other blocks stay
+                         one row each. With no -Q/-E it reads the document's only table
+  -E, --extract SPEC     select and read as data (implies -x): KIND:N is the Nth block of
+                         that type, from 1, blocks only (table:2, code:1); KIND#ID and KIND are -Q
+                         selectors (table#my-info). Then -w, -c, -l, -t apply to its rows
   -n, --number           number source code lines by their FILE line, like cat -n, so
                          a match can be cited as file:line. Code views only: the plain
                          view and statement -Q matches. Definitions (-Q .func/.class,
@@ -651,7 +661,7 @@ q() { printf '%s' "${1//\'/\'\'}"; }
 [[ ${0##*/} == dep && -t 1 ]] && do_page=1 || do_page=
 [[ ${0##*/} == der ]] && mode=raw || mode=full
 arg= where= limit= fmt= color=auto out_fmt=ansi pages=
-in_file= out_file= data_fmt=
+in_file= out_file= data_fmt= columns= as_data= extract= explicit_doc= positional=()
 find_query= rank_criterion= rank_threshold= top_k= dialect= json_out= number_lines= reader=
 
 # ---------------------------------------------------------------- intelligence layer
@@ -939,7 +949,9 @@ duckdb_color_mode() {
   echo "-dark-mode"
 }
 
-setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -T, -S, -s, -d, -z, -Z' 64; mode=$1; }
+setmode() { [[ $mode == full || $mode == "$1" ]] || die 'use only one of -T, -S, -s, -d, -z, -Z' 64; mode=$1
+  # A data mode after -D supersedes it, as -d -D is undone by a later -d.
+  [[ $1 == raw || $1 == summary || $1 == profile ]] && explicit_doc=; }
 
 # duck_blocks_to_pandoc_ast stamps pandoc-api-version [1,20], which pandoc 3.x refuses
 # outright (teaguesterling/duckdb_duck_block_utils#22). The encoding itself is fine, so
@@ -1009,7 +1021,7 @@ while (( $# )); do
     # -D resets to document interpretation, so `-d -D` is a document. Without this
     # it would parse and do nothing, since document is already the default -- a flag
     # that is accepted and inert is worse than an unknown-option error.
-    -D|--document) mode=full ;;
+    -D|--document) mode=full explicit_doc=1 ;;
     -z|--summary|--summarize) setmode summary ;;
     -Z|--profile|--smart-summary) setmode profile ;;
     -S|--section)  [[ $# -ge 2 ]] || die '-S needs a section name' 64; setmode section; arg=$2; shift ;;
@@ -1040,6 +1052,16 @@ while (( $# )); do
     -f|--from|--format) [[ $# -ge 2 ]] || die '-f needs an input format' 64; fmt=$(lower "$2"); shift ;;
     -t|--to)       [[ $# -ge 2 ]] || die '-t needs an output format' 64; out_fmt=$(lower "$2"); shift ;;
     -i|--input)    [[ $# -ge 2 ]] || die '-i needs a FILE' 64; in_file=$2; shift ;;
+    -c|--columns)  [[ $# -ge 2 ]] || die '-c needs a comma-separated column list' 64
+                   columns=$2; shift ;;
+    --columns=*)   columns=${1#--columns=} ;;
+    # -x and -X name the OUTPUT shape of a selection, where -d and -D name how the INPUT
+    # is read. Only -x exists so far: -X (a selection as a document) is deferred until a
+    # case needs it, and an accepted flag that did nothing would be worse than none.
+    -x|--as-data)  as_data=1 ;;
+    -E|--extract)  [[ $# -ge 2 ]] || die '-E needs KIND:N, KIND#ID or KIND (e.g. table:1)' 64
+                   extract=$2; shift ;;
+    --extract=*)   extract=${1#--extract=} ;;
     # -o is the output FILE, per pandoc, gcc, curl and ld. Under duckeye's previous
     # meaning it named a FORMAT, and that spelling stays syntactically valid here --
     # `-o html doc.md` would quietly create a file called "html". Refusing a
@@ -1055,7 +1077,6 @@ while (( $# )); do
                    color=$(lower "$2"); shift ;;
     --color=*)     color=$(lower "${1#--color=}") ;;
     -w|--where)    [[ $# -ge 2 ]] || die '-w needs a WHERE expression' 64
-                   [[ $mode == full ]] && setmode raw
                    where=$2; shift ;;
     -l|--limit)    [[ $# -ge 2 ]] || die '-l needs a row count' 64
                    [[ $2 =~ ^[0-9]+$ ]] || die "-l needs a non-negative integer, got '$2'" 64
@@ -1067,13 +1088,48 @@ while (( $# )); do
     -n|--number)   [[ $# -ge 2 && $2 =~ ^[0-9]+$ && ! -e $2 ]] &&
                      die "-n is now line numbers (like cat -n); use -l $2 for the row limit" 64
                    number_lines=1 ;;
-    --)            shift; break ;;
-    -)             break ;;                      # the conventional name for stdin
+    --)            shift; positional+=("$@"); break ;;
+    -)             positional+=("$1") ;;         # the conventional name for stdin
     -*)            die "unknown option: $1" 64 ;;
-    *)             break ;;
+    # A FILE may come before, between or after flags. It is kept in order and handled
+    # once every flag is read, so `duckeye doc.md -S Setup` means what it says.
+    *)             positional+=("$1") ;;
   esac
   shift
 done
+set -- "${positional[@]}"
+
+# -E is shorthand for a selection plus -x. KIND#ID and a bare KIND are already CSS
+# selectors, so they become -Q. KIND:N is sitting_duck's :nth-of-type(N), which it does
+# not have yet (teaguesterling/sitting_duck#359); until it does, duckeye resolves the Nth
+# block of that type itself, and -E KIND:N should then become `-Q 'KIND:Nth(N)' -x`.
+extract_kind= extract_n=
+if [[ -n $extract ]]; then
+  [[ -n ${selector:-} || -n $find_query ]] && die '-E is itself a selection; give either -E or -Q/-F, not both' 64
+  if [[ $extract =~ ^([A-Za-z_][A-Za-z0-9_]*):([0-9]+)$ ]]; then
+    # 10#: a leading zero is decimal here, not bash octal (08 was "value too great for base").
+    extract_kind=${BASH_REMATCH[1]} extract_n=$((10#${BASH_REMATCH[2]}))
+    (( extract_n >= 1 )) || die "-E $extract: N counts from 1" 64
+  elif [[ $extract =~ ^[A-Za-z_][A-Za-z0-9_]*(#.+)?$ ]]; then
+    selector=$extract
+  else
+    die "-E needs KIND:N, KIND#ID or KIND (e.g. table:1), got '$extract'" 64
+  fi
+  as_data=1
+fi
+# -w, -x and -c only make sense on rows, so they imply -d -- AFTER the loop, so that
+# `-w X -z` and `-z -w X` are the same command. -w used to decide inside the loop, which
+# refused `-w X -z` as two modes while `-z -w X` worked.
+# -D asks for the document view and these ask for rows. A later -D used to win over -w;
+# once -w moved here the data flags won silently. Neither is what was asked: refuse.
+[[ -n $explicit_doc && ( -n $where || -n $as_data || -n $columns ) ]] &&
+  die '-D reads FILE as a document; -w, -x, -E and -c read rows. Drop one side' 64
+[[ ( -n $where || -n $as_data || -n $columns ) && $mode == full ]] && mode=raw
+# -T, -S and -s render a document; the data flags read rows. Combined, the data flag was
+# accepted and then silently dropped (-w as well, since only the data path reads it), so
+# refuse. "Section, then extract" is a real use; it is not built yet.
+[[ ( -n $where || -n $as_data || -n $columns ) && ( $mode == toc || $mode == section || $mode == search ) ]] &&
+  die '-w, -x, -E and -c read rows; they do not combine with -T, -S or -s yet' 64
 
 if [[ -n $rank_criterion ]]; then
   if [[ -z $rank_threshold ]]; then
@@ -1132,17 +1188,8 @@ if [[ -n $in_file ]]; then
   set -- "$in_file"
 fi
 f=${1:-}
-# Parsing stops at the first non-flag, so anything after FILE lands here as a second
-# FILE. Saying "only one FILE" about `-t text` is false and reads as a glob problem.
-# Measured: `-S Setup doc.md -t text` reported two files while the identical command
-# with -t before doc.md worked, which looked like -S not supporting what -Q supports.
-if [[ $# -gt 1 ]]; then
-  for extra in "${@:2}"; do
-    [[ $extra == -* ]] &&
-      die "flags must come before FILE (saw $extra after $1)" 64
-  done
-  die 'only one FILE at a time' 64
-fi
+# Flags may follow FILE, so anything left here really is a second FILE.
+(( $# > 1 )) && die 'only one FILE at a time' 64
 
 # Standard input: an explicit "-", or no FILE at all with something piped in. It is
 # spooled to a file rather than streamed because a reader needs to seek (a .docx is a zip),
@@ -1155,6 +1202,8 @@ if [[ $f == - || ( -z $f && ! -t 0 ) ]]; then
   if [[ -z $fmt ]]; then
     # Sniffing recognises document formats. Under -d the input is data, where the
     # candidates are indistinguishable often enough that guessing would be a liability.
+    [[ $mode == raw && -n $as_data ]] &&
+      die '-x and -E read a document from standard input only with -f md or -f html' 64
     [[ $mode == raw ]] &&
       die 'reading data from standard input needs -f (csv, parquet, json, ...)' 64
     fmt=$(sniff "$f")
@@ -1282,7 +1331,7 @@ pat="duckeye_like('$(q "$arg")')"
 # functions take the pattern RAW. Translating first would make `Al*a` the literal
 # `Al%a`. $pat stays for zim_suggest and zim_search, which still match in SQL.
 pat_raw="'$(q "$arg")'"
-exts= doc= zim_open= premacro=
+exts= doc= zim_open= premacro= data_pre= whole_doc=
 [[ $mode == section || $mode == search ]] && premacro=$DUCKEYE_SQL_PURE
 [[ $mode == toc ]] && premacro=$DUCKEYE_SQL_TOC
 # -n numbers source lines in a rendered view. A data mode prints rows, and -T prints
@@ -1416,6 +1465,222 @@ build_zim_macro() {
 #   FROM unnest(bin_counts) t(cnt)
 # );
 
+# HTML aliases for duck_block types. A preprocessor over the selector, applied
+# before it reaches the css parse, so `-Q 'h2'` and `-Q 'li'` work for anyone who
+# knows HTML but not the duck_block vocabulary. h1..h6 rewrite to an ATTRIBUTE on
+# the selected node, which is exactly the case the post-filter handles correctly.
+#
+# Word-boundary substitution rather than a parse rewrite: rebuilding a selector from
+# its parse tree is more machinery than this earns, and the boundaries hold for
+# every shape duck_block selectors take. It would mis-fire on a tag name appearing
+# inside a quoted attribute VALUE (-Q 'a[href="li"]'), which is why the aliases run
+# only over the portion outside brackets.
+css_alias() {
+  local sel=$1 head tail
+  # split at the first '[' so attribute values are never rewritten
+  if [[ $sel == *\[* ]]; then head=${sel%%\[*}; tail=${sel:${#head}}; else head=$sel; tail=; fi
+  head=$(printf '%s' "$head" | sed -E '
+    s/\bh([1-6])\b/heading[heading_level=\1]/g
+    s/\bp\b/paragraph/g
+    s/\b(ul|ol)\b/list/g
+    s/\bli\b/list_item/g
+    s/\ba\b/link/g
+    s/\b(strong|b)\b/bold/g
+    s/\b(em|i)\b/italic/g
+    s/\bpre\b/code/g
+    s/\bimg\b/image/g
+    s/\bbr\b/line_break/g
+    s/\bdel\b/strikethrough/g')
+  printf '%s%s' "$head" "$tail"
+}
+
+# The -Q selection over a DOCUMENT, as a function so the data path can apply it too
+# (-x, -E, and -d -Q). It reads $selector, $doc and $src, adds the node tables and
+# __qs (the matched node ids) to $premacro, and replaces $doc with the selection.
+doc_select() {
+  # An attribute on a CONTEXT node cannot work here. Attributes are matched after
+  # the structural selector, so a condition on any node but the selected one is
+  # lost -- `heading[heading_level=2] ~ code` would quietly return nothing. Refuse
+  # rather than answer wrongly; sitting_duck#117 ask 1 is the real fix.
+  aliased=$(css_alias "$selector")
+  if [[ $aliased =~ \[[^]]*\][^[]*[\>\+\~[:space:]] ]]; then
+    die "-Q: an attribute on a context node is not supported for documents yet ($selector).
+       Put the attribute on the selected node, or see teaguesterling/sitting_duck#117" 64
+  fi
+  exts+=" sitting_duck"
+  # SEMANTIC_TYPE is not in duckdb_types(), so typed NULLs must be borrowed from a
+  # zero-row read_ast() of a real source file. duckeye itself is one, and is always
+  # present. sitting_duck#117 ask 2 would remove this.
+  qself=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+  qsel=$(q "$(css_alias "$selector")")
+  # `#x` matches the block's TEXT. It must match the block's id as well, which is
+  # what -S already does -- `h1.title ILIKE '%pat%' OR h1.id = pat` in
+  # section_span_doc(). sitting_duck's `#` is one exact, case-sensitive match on
+  # `name`, and a node has one name, so either-match needs TWO passes over the same
+  # node table and the UNION of what each selects. Pass 2 replaces only `name`, with
+  # coalesce(attributes['id'], name): a block with no id then behaves identically in
+  # both passes, so the union only ever ADDS matches.
+  #
+  # One pass with that coalesce was the obvious shape and is WRONG. A markdown
+  # heading carries both: content `Alpha` and slug id `alpha`. Letting the id win
+  # would have made `-Q 'heading#Alpha'` stop matching, and the README documents the
+  # text spelling. MEASURED on h.md (`## Alpha`): with the union, `heading#Alpha`,
+  # `heading#alpha` and `heading#week-one` all match, and neither key is matched
+  # loosely -- `heading#install` and `heading#INSTALLATION` still exit 1.
+  #
+  # __qb, __qn and __qe are built once either way, so what pass 2 adds is one more
+  # run of the selector engine over the same rows. MEASURED on a 72,000-block
+  # markdown file, three runs each: `-Q 'heading'` is unchanged at 3.2 s, and
+  # `-Q 'heading#section-7'` goes from 2.7-3.0 s to 5.1-5.2 s -- about +2.4 s.
+  # So pass 2 runs ONLY when the selector carries a `#`. With `[...]` stripped
+  # before the selector runs, `#` is the only syntax left that reads `name`, so for
+  # every other selector that second run would return the same set for nothing.
+  qidtab='' qidpass=''
+  if [[ $aliased == *'#'* ]]; then
+    qidtab="CREATE OR REPLACE TEMP TABLE __qi AS
+      SELECT a.* REPLACE (coalesce(b.atr['id'], a.name) AS name)
+      FROM __qa a LEFT JOIN __qb b ON b.ord + 1 = a.node_id;
+    "
+    qidpass="
+               UNION SELECT node_id FROM ast_select_from('__qi',
+                 regexp_replace('$qsel', '\\[[^\\]]*\\]', '', 'g'))"
+  fi
+  premacro+="CREATE OR REPLACE TEMP TABLE __qb AS
+      SELECT row_number() OVER () AS ord, b.level AS lvl, b.element_type AS ty,
+             b.kind AS knd,
+             coalesce(b.content,'') AS nm, b.attributes AS atr, b AS blk
+      FROM (SELECT unnest(blocks) AS b FROM ($doc));
+    CREATE OR REPLACE TEMP TABLE __qn AS
+      SELECT 1 AS node_id, 0 AS ord, (SELECT min(lvl) FROM __qb) - 1 AS lvl, 'document' AS ty, '' AS nm
+      UNION ALL SELECT ord + 1, ord, lvl, ty, nm FROM __qb;
+    -- Each node's parent (the last node before it at a lower level) and the end of its
+    -- span (the first node after it at the same level or above), from one windowed pass
+    -- per distinct level. These were correlated subqueries per node -- quadratic, 13 s
+    -- of the node table's build at 18,000 rows. Levels are few, so this stays linear.
+    CREATE OR REPLACE TEMP TABLE __qe AS
+      WITH lv AS (SELECT DISTINCT lvl AS l FROM __qn),
+           x AS (SELECT n.node_id, n.ord, n.lvl, lv.l,
+                   max(CASE WHEN n.lvl < lv.l THEN n.node_id END) OVER (PARTITION BY lv.l ORDER BY n.ord
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS parent_id,
+                   min(CASE WHEN n.lvl <= lv.l THEN n.ord END) OVER (PARTITION BY lv.l ORDER BY n.ord
+                       ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) AS nxt
+                 FROM __qn n, lv)
+      SELECT node_id, ord, lvl, parent_id, coalesce(nxt, (SELECT max(ord) + 1 FROM __qn)) AS e
+      FROM x WHERE l = lvl;
+    -- INHERIT sitting_duck's node schema, then fill it BY NAME. A hand-written column
+    -- list is what broke here: sitting_duck gained a \`receiver\` column by the time it
+    -- was published for v1.5.6, the list did not have it, and ast_select_from('__qa', ..)
+    -- stopped binding --
+    --   Binder Error: Values list \"a\" does not have a column named \"receiver\"
+    -- -- so EVERY document -Q returned nothing. Note how that failed: the presence
+    -- assertions went red while every absence and exit-status one still passed, because
+    -- \"no output\" satisfies them. 25 assertions at once, and only because sitting_duck
+    -- had become installable again -- while it was unavailable they all skipped, so the
+    -- -Q rewrite they cover had never actually run against it.
+    --
+    -- Creating the table from a zero-row read_ast() means a column duckeye does not set
+    -- (receiver, semantic_type, qualified_name, parameters, scope -- and whatever is added
+    -- next) is simply NULL, rather than a Binder Error on the next upstream addition. It
+    -- also replaces four borrowed-type subqueries with one, which is what they were for.
+    CREATE OR REPLACE TEMP TABLE __qa AS SELECT * FROM read_ast('$qself') WHERE false;
+    INSERT INTO __qa (node_id, type, flags, name, signature_type, modifiers, annotations,
+                      file_path, language, start_line, end_line, parent_id, depth,
+                      sibling_index, children_count, descendant_count, peek)
+      SELECT a.node_id::BIGINT, a.ty::VARCHAR,
+             0::UTINYINT, a.nm::VARCHAR,
+             NULL::VARCHAR, NULL::VARCHAR[], NULL::VARCHAR,
+             '$src'::VARCHAR, 'duck_block',
+             NULL::UINTEGER, NULL::UINTEGER,
+             e.parent_id::BIGINT,
+             a.lvl::UINTEGER,
+             (row_number() OVER (PARTITION BY e.parent_id ORDER BY a.ord) - 1)::INTEGER,
+             -- Children are the nodes one level down whose parent this is. The old
+             -- in-span count agreed with this on every node measured, including
+             -- level skips: a node two levels down names this parent but is no child.
+             coalesce(c.n, 0)::UINTEGER,
+             (e.e - a.ord - 1)::UINTEGER,
+             a.nm::VARCHAR
+      FROM __qn a JOIN __qe e ON e.node_id = a.node_id
+      LEFT JOIN (SELECT k.parent_id, count(*) AS n FROM __qe k JOIN __qe p ON p.node_id = k.parent_id
+                 WHERE k.lvl = p.lvl + 1 GROUP BY k.parent_id) c ON c.parent_id = a.node_id
+      ORDER BY a.node_id;
+    CREATE OR REPLACE TEMP TABLE __qat AS
+      SELECT ord + 1 AS node_id, unnest(map_keys(atr)) AS key, unnest(map_values(atr)) AS value
+      FROM __qb WHERE atr IS NOT NULL AND len(map_keys(atr)) > 0;
+    CREATE OR REPLACE TEMP TABLE __qc AS
+      SELECT an.name AS key,
+             (SELECT trim(v.name, '\"') FROM parse_ast_list_table('$qsel','css') v
+               WHERE v.parent_id = an.parent_id
+                 AND v.type IN ('integer_value','plain_value','string_value') LIMIT 1) AS value
+      FROM parse_ast_list_table('$qsel','css') an WHERE an.type = 'attribute_name';
+    ${qidtab}CREATE OR REPLACE TEMP TABLE __qs AS
+      SELECT b.node_id FROM (
+               SELECT node_id FROM ast_select_from('__qa',
+                 regexp_replace('$qsel', '\[[^\]]*\]', '', 'g'))$qidpass) b
+      WHERE NOT EXISTS (SELECT 1 FROM __qc c WHERE NOT EXISTS (
+              SELECT 1 FROM __qat a WHERE a.node_id = b.node_id AND a.key = c.key
+                AND (c.value IS NULL OR a.value = c.value)));
+    "
+  # A match carries its SUBTREE, not just the matched node. Container blocks hold no
+  # text of their own -- a list_item's words live in child paragraphs, a paragraph's
+  # in inline children -- so returning bare matches renders empty. Measured: `-Q
+  # list_item` matched both items and printed nothing until the span was included.
+  #
+  # A block-kind match ALSO carries its ANCESTOR chain, because a child block is not
+  # well-formed outside its container and the writers differ on how badly they take
+  # it. Measured on a .docx, where the reader puts the item text on the list_item
+  # itself rather than in a child paragraph: `-Q li` selected both items, yet
+  # duck_blocks_to_pandoc_ast returned "blocks":[] -- a list_item with no enclosing
+  # list is not representable in the Pandoc AST, so the text was DROPPED, and -t md
+  # printed nothing. Pulling the real ancestors (rather than synthesising a wrapper)
+  # keeps the container's own attributes -- bullet vs ordered, start number.
+  #
+  # kind='inline' matches are deliberately excluded: an inline's ancestor is the
+  # paragraph holding it, and returning that would answer `-Q strong` with the whole
+  # surrounding sentence. Those keep failing with the message that explains why.
+  #
+  # DO NOT DELETE THIS WHEN duck_blocks_repair ARRIVES. Spec 1.2 -- the same spec
+  # this was drafted as 6.6, relabelled when the internal 6.x numbering was retired;
+  # the header keeps SPEC_VERSION_SUPERSEDES = '6.6' -- makes a fragment legal input
+  # and wraps it with an IMPLICIT parent, so
+  # -t pandoc stops dropping content even without this block. That fixes the data
+  # loss, not the output: an implicit parent is synthetic and carries no attributes,
+  # while this carries the REAL ancestors -- bullet vs ordered, start number.
+  #
+  # They COMPOSE, which is the part that decides what to do rather than what to
+  # keep: the spec states that repair leaves a real ancestor alone. So the shape is
+  # not "mine INSTEAD of repair" but this block first, repair on top -- this supplies
+  # the attributes when the ancestors are known, repair covers what is left. Nothing
+  # is double-wrapped and nothing is lost either way.
+  #
+  # WIRED: duck_blocks_repair now wraps the selection below, ON TOP of the ancestor
+  # chain -- it arrived with duck_block_utils 6c1c2e5 (spec 1.2). Measured against a
+  # copy without it, before switching: every output the ancestor chain supplies is
+  # unchanged (an ordered list keeps start="3" in md and html, docx lists, -S with -Q,
+  # code, headings, the no-match error). What repair adds is the case the ancestor
+  # chain deliberately leaves alone: a bare INLINE match. It gets an implicit `plain`
+  # parent, so `-Q a -t ansi` renders "link (https://example.com)" instead of failing.
+  #
+  # Both halves come from __qe, not from EXISTS over the matches -- that was quadratic
+  # in the same way the node table was. Subtrees are a running-max cover (the technique
+  # panduck measured in their #76): walking in document order, a row is inside some
+  # match while the furthest span end seen so far lies beyond it. Ancestors walk the
+  # parent chain, which is the same set the old level-and-span test described.
+  doc="WITH RECURSIVE
+         m AS (SELECT e.ord, e.e FROM __qs s JOIN __qe e ON e.node_id = s.node_id),
+         cover AS (SELECT n.ord, max(m.e) OVER (ORDER BY n.ord ROWS UNBOUNDED PRECEDING) AS c
+                   FROM __qn n LEFT JOIN m ON m.ord = n.ord),
+         anc(node_id) AS (SELECT e.parent_id FROM m JOIN __qb b ON b.ord = m.ord
+                            JOIN __qe e ON e.ord = m.ord
+                          WHERE b.knd = 'block' AND e.parent_id IS NOT NULL
+                          UNION
+                          SELECT e.parent_id FROM anc JOIN __qe e ON e.node_id = anc.node_id
+                          WHERE e.parent_id IS NOT NULL)
+       SELECT duck_blocks_repair(list(k.blk ORDER BY k.ord)) AS blocks FROM __qb k
+       WHERE k.ord IN (SELECT ord FROM cover WHERE c > ord)
+          OR k.ord + 1 IN (SELECT node_id FROM anc)"
+}
+
 # Data modes (raw, summary, profile) operate directly on tables/scans without duck_block_utils:
 # DuckDB's own box renderer streams and emits clean tabular output.
 if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
@@ -1520,6 +1785,13 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     toml)              from="(SELECT parse_toml(content) AS toml FROM read_text('$src'))"; exts="toml" ;;
     excel|xlsx|xls)    from="read_xlsx('$src')"; exts="excel" ;;
     zip)               from="zip_contents('$src')"; exts="zipfs" ;;
+    # Documents by name, so stdin can be read as blocks too (stdin under -d needs -f).
+    md|markdown)       from="read_markdown_blocks('$src')"; exts="markdown" ;;
+    html|htm)          from="read_html_blocks('$src')"; exts="webbed" ;;
+    # One table block's content on its own, {"headers": [...], "rows": [[...]]} -- what
+    # `-t blocks` writes in a table's content field. panduck reads it back, typed.
+    table)             data_pre+="SET VARIABLE __duckeye_x = (SELECT content FROM read_text('$src')); "
+                       from="panduck_table_read(getvariable('__duckeye_x'))"; exts="panduck" ;;
     git)               local_repo=${src%/.git}; local_repo=${local_repo%.git}
                        from="git_log('${local_repo:-.}')"; exts="duck_tails" ;;
     lines)             from="read_lines('$src')"; exts="read_lines" ;;
@@ -1534,6 +1806,87 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
 
   if [[ $f == git://* ]]; then
     exts="$exts duck_tails"
+  fi
+
+  # -E and -x read a document's blocks, so the two document formats data mode otherwise
+  # reads differently go to their block readers here: a pandoc AST .json (else JSON data)
+  # and .rst (which has no data-mode reader at all).
+  if [[ ( -n $as_data || -n ${selector:-} ) && -z $fmt ]]; then
+    if [[ $key == *.json ]] && is_pandoc_json "$f"; then
+      from="read_pandoc_blocks('$src')"; exts+=" panduck"
+    elif [[ $key == *.rst ]]; then
+      from="read_rst_blocks('$src')"; exts+=" panduck"
+    fi
+  fi
+  # A document read as data is one row per block. A selection (-Q, -E) narrows those
+  # rows to the matched blocks, and -x reads a lone table -- or a code block fenced as
+  # csv/tsv/json/jsonl -- as the rows it holds. Without this, -Q on a document under -d
+  # was SILENTLY IGNORED: every block came back.
+  # Plain -d on a document skips all of this: it stays one row per block, read once.
+  if [[ ( $from == read_*_blocks\(* || $from == read_panduck_doc\(* ) &&
+        ( -n ${selector:-} || -n $extract_kind || -n $as_data ) ]]; then
+    if [[ -n ${selector:-} ]]; then
+      doc="SELECT list(b) AS blocks FROM $from b"
+      doc_select
+      data_pre+="$premacro"
+      matched="SELECT k.blk AS b, k.ord FROM __qb k WHERE k.ord + 1 IN (SELECT node_id FROM __qs)"
+    elif [[ -n $extract_kind ]]; then
+      # KIND is an element_type; the HTML names (li, pre, img, ...) alias to one. h1..h6
+      # alias to an attribute test, which is a selector, not a type: those go to -Q.
+      kind=$(css_alias "$extract_kind")
+      [[ $kind == *\[* ]] && die "-E $extract: $extract_kind is not a block type; use -E heading:N, or -Q '$extract_kind'" 64
+      matched="SELECT b, ord FROM (SELECT b, row_number() OVER () AS ord FROM $from b)
+               WHERE b.element_type = '$(q "$kind")' AND b.kind = 'block'
+               QUALIFY row_number() OVER (ORDER BY ord) = $extract_n"
+    else
+      # No selection: -x reads the document's ONLY table. A heading beside it is not a
+      # second candidate; plain -d is the way to get every block.
+      whole_doc=1
+      matched="SELECT b, ord FROM (SELECT b, row_number() OVER () AS ord FROM $from b)
+               WHERE b.element_type = 'table' AND b.kind = 'block'"
+    fi
+    data_pre+="CREATE OR REPLACE TEMP TABLE __duckeye_m AS $matched; "
+    # What matched decides the SHAPE of the result, so it is read before the query is
+    # built: panduck_table_read binds its columns from a constant, not a subquery. That costs
+    # a second read of the document; panduck doc_table (teaguesterling/duckdb_panduck#215)
+    # would make it one.
+    # stderr is kept apart: a ~/.duckdbrc prints a "Loading resources" banner there, and
+    # merged into stdout it became the match count. Measured under CI's lambda-rule HOME.
+    # Loaded the same way as the final query below: its extensions, autoload off for a
+    # local source. Forcing panduck here made `-d -Q` need panduck for no reason.
+    probe_load=
+    case $f in http://*|https://*|s3://*) ;; *) probe_load="SET autoload_known_extensions=false; " ;; esac
+    probe_load+=$(duckeye_load_sql $exts $DUCKEYE_EXTS)
+    probe=$(duckdb -noheader -list -separator $'\t' -c "$probe_load $data_pre
+      SELECT count(*), count(*) FILTER (WHERE b.element_type = 'table'),
+             coalesce(any_value(b.element_type), ''),
+             coalesce(lower(any_value(b.attributes['language'])), '')
+      FROM __duckeye_m;" 2>"$tmp/probe.err") || die "$(cat "$tmp/probe.err")" 1
+    IFS=$'\t' read -r m_n m_tables m_type m_lang <<<"$probe"
+    where_lbl=$f; [[ -n ${from_stdin:-} ]] && where_lbl='standard input'
+    if [[ -n ${whole_doc:-} ]]; then
+      (( m_n > 0 )) || die "-x: $where_lbl has no table. -d gives its blocks as rows" 1
+      (( m_n == 1 )) || die "-x: $where_lbl has $m_n tables; pick one with -E table:N" 1
+    fi
+    (( m_n > 0 )) || die "nothing matched ${extract:-${selector:-}} in $where_lbl" 1
+    if [[ -n $as_data && $m_n == 1 && $m_type == table ]]; then
+      data_pre+="SET VARIABLE __duckeye_x = (SELECT b.content FROM __duckeye_m); "
+      from="panduck_table_read(getvariable('__duckeye_x'))"; exts+=" panduck"
+    elif [[ -n $as_data && $m_n == 1 && $m_type == code && $m_lang =~ ^(csv|tsv|json|jsonl)$ ]]; then
+      data_pre+="SET VARIABLE __duckeye_x = (SELECT CASE WHEN e.error IS NULL THEN e.content
+                   ELSE error('the $m_lang code block does not parse: ' || e.error) END
+                 FROM (SELECT panduck_embedded_to_table(b.content, '$m_lang') AS e FROM __duckeye_m)); "
+      from="panduck_table_read(getvariable('__duckeye_x'))"; exts+=" panduck"
+    elif [[ -n $as_data && $m_tables -gt 0 ]]; then
+      die "-x: $m_n blocks matched and $m_tables of them are tables; a table reads as rows only on its own.
+       Pick one, e.g. -E table:1" 1
+    else
+      from="(SELECT unnest(b) FROM __duckeye_m ORDER BY ord)"
+    fi
+  elif [[ -n $as_data ]]; then
+    die "-x and -E select blocks of a document, and $f is read as data, not as a document" 64
+  elif [[ -n ${selector:-} && $from != ast_select\(* ]]; then
+    die "-Q selects document blocks or code, and $f is read as data; drop -Q or use -w" 64
   fi
 
   # DuckDB's .mode jsonlines prints an EXTENSION-DEFINED type's label UNQUOTED at the
@@ -1552,6 +1905,18 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   target_query="SELECT *${ast_safe} FROM $from"
   [[ -n $where ]] && target_query+=" WHERE $where"
   [[ -n $limit ]] && target_query+=" LIMIT $limit"
+  # -c projects AFTER -w and -l, so a filter can test a column the output leaves out.
+  # Each name is quoted as an identifier: `-c 'Name,Model ID'` needs no SQL quoting.
+  if [[ -n $columns ]]; then
+    cols_sql=
+    IFS=, read -ra col_list <<<"$columns"
+    for c in "${col_list[@]}"; do
+      c=${c#"${c%%[![:space:]]*}"} c=${c%"${c##*[![:space:]]}"}
+      [[ -n $c ]] || die "-c: empty column name in '$columns'" 64
+      cols_sql+="${cols_sql:+, }\"${c//\"/\"\"}\""
+    done
+    target_query="SELECT $cols_sql FROM ($target_query)"
+  fi
 
   term_cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
   [[ $term_cols =~ ^[0-9]+$ && $term_cols -gt 0 ]] || term_cols=120
@@ -1561,6 +1926,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   elif [[ $mode == profile ]]; then
     load=
     load=$(duckeye_load_sql $exts $DUCKEYE_EXTS)
+    load+=" ${data_pre:-}"
     cols_raw=$(duckdb -dark-mode -noheader -list -s "$load" -s "CREATE VIEW __duckeye_src AS $target_query; SELECT column_name || chr(9) || column_type FROM (DESCRIBE __duckeye_src);" 2>/dev/null) || die "failed to inspect columns for profiling" 1
 
     if [[ $term_cols -le 85 ]]; then
@@ -1793,6 +2159,7 @@ FROM __duckeye_src"
   esac
   load="${no_autoload:-}"
   load+=$(duckeye_load_sql $exts $DUCKEYE_EXTS)
+  load+=" ${data_pre:-}"
   # Piped output is read by programs, not people, so it leaves the box behind. JSONL
   # rather than CSV/TSV because duckeye's cells routinely hold document text: .mode tabs
   # emits an embedded tab or newline RAW, silently turning one row into extra columns or
@@ -2136,34 +2503,6 @@ fi
 
 # MATERIALIZED: the section/search queries reference the document more than once,
 # and a spooled stdin is cheaper to read once.
-# HTML aliases for duck_block types. A preprocessor over the selector, applied
-# before it reaches the css parse, so `-Q 'h2'` and `-Q 'li'` work for anyone who
-# knows HTML but not the duck_block vocabulary. h1..h6 rewrite to an ATTRIBUTE on
-# the selected node, which is exactly the case the post-filter handles correctly.
-#
-# Word-boundary substitution rather than a parse rewrite: rebuilding a selector from
-# its parse tree is more machinery than this earns, and the boundaries hold for
-# every shape duck_block selectors take. It would mis-fire on a tag name appearing
-# inside a quoted attribute VALUE (-Q 'a[href="li"]'), which is why the aliases run
-# only over the portion outside brackets.
-css_alias() {
-  local sel=$1 head tail
-  # split at the first '[' so attribute values are never rewritten
-  if [[ $sel == *\[* ]]; then head=${sel%%\[*}; tail=${sel:${#head}}; else head=$sel; tail=; fi
-  head=$(printf '%s' "$head" | sed -E '
-    s/\bh([1-6])\b/heading[heading_level=\1]/g
-    s/\bp\b/paragraph/g
-    s/\b(ul|ol)\b/list/g
-    s/\bli\b/list_item/g
-    s/\ba\b/link/g
-    s/\b(strong|b)\b/bold/g
-    s/\b(em|i)\b/italic/g
-    s/\bpre\b/code/g
-    s/\bimg\b/image/g
-    s/\bbr\b/line_break/g
-    s/\bdel\b/strikethrough/g')
-  printf '%s%s' "$head" "$tail"
-}
 
 # ---------------------------------------------------------------- -Q on documents
 # -Q queries source code by CSS selector through sitting_duck. Documents can be
@@ -2281,187 +2620,7 @@ fi
 
 if [[ -n ${selector:-} && -n $doc && -z ${code_src:-}
       && $mode != raw && $mode != summary && $mode != profile ]]; then
-  # An attribute on a CONTEXT node cannot work here. Attributes are matched after
-  # the structural selector, so a condition on any node but the selected one is
-  # lost -- `heading[heading_level=2] ~ code` would quietly return nothing. Refuse
-  # rather than answer wrongly; sitting_duck#117 ask 1 is the real fix.
-  aliased=$(css_alias "$selector")
-  if [[ $aliased =~ \[[^]]*\][^[]*[\>\+\~[:space:]] ]]; then
-    die "-Q: an attribute on a context node is not supported for documents yet ($selector).
-       Put the attribute on the selected node, or see teaguesterling/sitting_duck#117" 64
-  fi
-  exts+=" sitting_duck"
-  # SEMANTIC_TYPE is not in duckdb_types(), so typed NULLs must be borrowed from a
-  # zero-row read_ast() of a real source file. duckeye itself is one, and is always
-  # present. sitting_duck#117 ask 2 would remove this.
-  qself=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || printf '%s' "$0")
-  qsel=$(q "$(css_alias "$selector")")
-  # `#x` matches the block's TEXT. It must match the block's id as well, which is
-  # what -S already does -- `h1.title ILIKE '%pat%' OR h1.id = pat` in
-  # section_span_doc(). sitting_duck's `#` is one exact, case-sensitive match on
-  # `name`, and a node has one name, so either-match needs TWO passes over the same
-  # node table and the UNION of what each selects. Pass 2 replaces only `name`, with
-  # coalesce(attributes['id'], name): a block with no id then behaves identically in
-  # both passes, so the union only ever ADDS matches.
-  #
-  # One pass with that coalesce was the obvious shape and is WRONG. A markdown
-  # heading carries both: content `Alpha` and slug id `alpha`. Letting the id win
-  # would have made `-Q 'heading#Alpha'` stop matching, and the README documents the
-  # text spelling. MEASURED on h.md (`## Alpha`): with the union, `heading#Alpha`,
-  # `heading#alpha` and `heading#week-one` all match, and neither key is matched
-  # loosely -- `heading#install` and `heading#INSTALLATION` still exit 1.
-  #
-  # __qb, __qn and __qe are built once either way, so what pass 2 adds is one more
-  # run of the selector engine over the same rows. MEASURED on a 72,000-block
-  # markdown file, three runs each: `-Q 'heading'` is unchanged at 3.2 s, and
-  # `-Q 'heading#section-7'` goes from 2.7-3.0 s to 5.1-5.2 s -- about +2.4 s.
-  # So pass 2 runs ONLY when the selector carries a `#`. With `[...]` stripped
-  # before the selector runs, `#` is the only syntax left that reads `name`, so for
-  # every other selector that second run would return the same set for nothing.
-  qidtab='' qidpass=''
-  if [[ $aliased == *'#'* ]]; then
-    qidtab="CREATE OR REPLACE TEMP TABLE __qi AS
-      SELECT a.* REPLACE (coalesce(b.atr['id'], a.name) AS name)
-      FROM __qa a LEFT JOIN __qb b ON b.ord + 1 = a.node_id;
-    "
-    qidpass="
-               UNION SELECT node_id FROM ast_select_from('__qi',
-                 regexp_replace('$qsel', '\\[[^\\]]*\\]', '', 'g'))"
-  fi
-  premacro+="CREATE OR REPLACE TEMP TABLE __qb AS
-      SELECT row_number() OVER () AS ord, b.level AS lvl, b.element_type AS ty,
-             b.kind AS knd,
-             coalesce(b.content,'') AS nm, b.attributes AS atr, b AS blk
-      FROM (SELECT unnest(blocks) AS b FROM ($doc));
-    CREATE OR REPLACE TEMP TABLE __qn AS
-      SELECT 1 AS node_id, 0 AS ord, (SELECT min(lvl) FROM __qb) - 1 AS lvl, 'document' AS ty, '' AS nm
-      UNION ALL SELECT ord + 1, ord, lvl, ty, nm FROM __qb;
-    -- Each node's parent (the last node before it at a lower level) and the end of its
-    -- span (the first node after it at the same level or above), from one windowed pass
-    -- per distinct level. These were correlated subqueries per node -- quadratic, 13 s
-    -- of the node table's build at 18,000 rows. Levels are few, so this stays linear.
-    CREATE OR REPLACE TEMP TABLE __qe AS
-      WITH lv AS (SELECT DISTINCT lvl AS l FROM __qn),
-           x AS (SELECT n.node_id, n.ord, n.lvl, lv.l,
-                   max(CASE WHEN n.lvl < lv.l THEN n.node_id END) OVER (PARTITION BY lv.l ORDER BY n.ord
-                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS parent_id,
-                   min(CASE WHEN n.lvl <= lv.l THEN n.ord END) OVER (PARTITION BY lv.l ORDER BY n.ord
-                       ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) AS nxt
-                 FROM __qn n, lv)
-      SELECT node_id, ord, lvl, parent_id, coalesce(nxt, (SELECT max(ord) + 1 FROM __qn)) AS e
-      FROM x WHERE l = lvl;
-    -- INHERIT sitting_duck's node schema, then fill it BY NAME. A hand-written column
-    -- list is what broke here: sitting_duck gained a \`receiver\` column by the time it
-    -- was published for v1.5.6, the list did not have it, and ast_select_from('__qa', ..)
-    -- stopped binding --
-    --   Binder Error: Values list \"a\" does not have a column named \"receiver\"
-    -- -- so EVERY document -Q returned nothing. Note how that failed: the presence
-    -- assertions went red while every absence and exit-status one still passed, because
-    -- \"no output\" satisfies them. 25 assertions at once, and only because sitting_duck
-    -- had become installable again -- while it was unavailable they all skipped, so the
-    -- -Q rewrite they cover had never actually run against it.
-    --
-    -- Creating the table from a zero-row read_ast() means a column duckeye does not set
-    -- (receiver, semantic_type, qualified_name, parameters, scope -- and whatever is added
-    -- next) is simply NULL, rather than a Binder Error on the next upstream addition. It
-    -- also replaces four borrowed-type subqueries with one, which is what they were for.
-    CREATE OR REPLACE TEMP TABLE __qa AS SELECT * FROM read_ast('$qself') WHERE false;
-    INSERT INTO __qa (node_id, type, flags, name, signature_type, modifiers, annotations,
-                      file_path, language, start_line, end_line, parent_id, depth,
-                      sibling_index, children_count, descendant_count, peek)
-      SELECT a.node_id::BIGINT, a.ty::VARCHAR,
-             0::UTINYINT, a.nm::VARCHAR,
-             NULL::VARCHAR, NULL::VARCHAR[], NULL::VARCHAR,
-             '$src'::VARCHAR, 'duck_block',
-             NULL::UINTEGER, NULL::UINTEGER,
-             e.parent_id::BIGINT,
-             a.lvl::UINTEGER,
-             (row_number() OVER (PARTITION BY e.parent_id ORDER BY a.ord) - 1)::INTEGER,
-             -- Children are the nodes one level down whose parent this is. The old
-             -- in-span count agreed with this on every node measured, including
-             -- level skips: a node two levels down names this parent but is no child.
-             coalesce(c.n, 0)::UINTEGER,
-             (e.e - a.ord - 1)::UINTEGER,
-             a.nm::VARCHAR
-      FROM __qn a JOIN __qe e ON e.node_id = a.node_id
-      LEFT JOIN (SELECT k.parent_id, count(*) AS n FROM __qe k JOIN __qe p ON p.node_id = k.parent_id
-                 WHERE k.lvl = p.lvl + 1 GROUP BY k.parent_id) c ON c.parent_id = a.node_id
-      ORDER BY a.node_id;
-    CREATE OR REPLACE TEMP TABLE __qat AS
-      SELECT ord + 1 AS node_id, unnest(map_keys(atr)) AS key, unnest(map_values(atr)) AS value
-      FROM __qb WHERE atr IS NOT NULL AND len(map_keys(atr)) > 0;
-    CREATE OR REPLACE TEMP TABLE __qc AS
-      SELECT an.name AS key,
-             (SELECT trim(v.name, '\"') FROM parse_ast_list_table('$qsel','css') v
-               WHERE v.parent_id = an.parent_id
-                 AND v.type IN ('integer_value','plain_value','string_value') LIMIT 1) AS value
-      FROM parse_ast_list_table('$qsel','css') an WHERE an.type = 'attribute_name';
-    ${qidtab}CREATE OR REPLACE TEMP TABLE __qs AS
-      SELECT b.node_id FROM (
-               SELECT node_id FROM ast_select_from('__qa',
-                 regexp_replace('$qsel', '\[[^\]]*\]', '', 'g'))$qidpass) b
-      WHERE NOT EXISTS (SELECT 1 FROM __qc c WHERE NOT EXISTS (
-              SELECT 1 FROM __qat a WHERE a.node_id = b.node_id AND a.key = c.key
-                AND (c.value IS NULL OR a.value = c.value)));
-    "
-  # A match carries its SUBTREE, not just the matched node. Container blocks hold no
-  # text of their own -- a list_item's words live in child paragraphs, a paragraph's
-  # in inline children -- so returning bare matches renders empty. Measured: `-Q
-  # list_item` matched both items and printed nothing until the span was included.
-  #
-  # A block-kind match ALSO carries its ANCESTOR chain, because a child block is not
-  # well-formed outside its container and the writers differ on how badly they take
-  # it. Measured on a .docx, where the reader puts the item text on the list_item
-  # itself rather than in a child paragraph: `-Q li` selected both items, yet
-  # duck_blocks_to_pandoc_ast returned "blocks":[] -- a list_item with no enclosing
-  # list is not representable in the Pandoc AST, so the text was DROPPED, and -t md
-  # printed nothing. Pulling the real ancestors (rather than synthesising a wrapper)
-  # keeps the container's own attributes -- bullet vs ordered, start number.
-  #
-  # kind='inline' matches are deliberately excluded: an inline's ancestor is the
-  # paragraph holding it, and returning that would answer `-Q strong` with the whole
-  # surrounding sentence. Those keep failing with the message that explains why.
-  #
-  # DO NOT DELETE THIS WHEN duck_blocks_repair ARRIVES. Spec 1.2 -- the same spec
-  # this was drafted as 6.6, relabelled when the internal 6.x numbering was retired;
-  # the header keeps SPEC_VERSION_SUPERSEDES = '6.6' -- makes a fragment legal input
-  # and wraps it with an IMPLICIT parent, so
-  # -t pandoc stops dropping content even without this block. That fixes the data
-  # loss, not the output: an implicit parent is synthetic and carries no attributes,
-  # while this carries the REAL ancestors -- bullet vs ordered, start number.
-  #
-  # They COMPOSE, which is the part that decides what to do rather than what to
-  # keep: the spec states that repair leaves a real ancestor alone. So the shape is
-  # not "mine INSTEAD of repair" but this block first, repair on top -- this supplies
-  # the attributes when the ancestors are known, repair covers what is left. Nothing
-  # is double-wrapped and nothing is lost either way.
-  #
-  # WIRED: duck_blocks_repair now wraps the selection below, ON TOP of the ancestor
-  # chain -- it arrived with duck_block_utils 6c1c2e5 (spec 1.2). Measured against a
-  # copy without it, before switching: every output the ancestor chain supplies is
-  # unchanged (an ordered list keeps start="3" in md and html, docx lists, -S with -Q,
-  # code, headings, the no-match error). What repair adds is the case the ancestor
-  # chain deliberately leaves alone: a bare INLINE match. It gets an implicit `plain`
-  # parent, so `-Q a -t ansi` renders "link (https://example.com)" instead of failing.
-  #
-  # Both halves come from __qe, not from EXISTS over the matches -- that was quadratic
-  # in the same way the node table was. Subtrees are a running-max cover (the technique
-  # panduck measured in their #76): walking in document order, a row is inside some
-  # match while the furthest span end seen so far lies beyond it. Ancestors walk the
-  # parent chain, which is the same set the old level-and-span test described.
-  doc="WITH RECURSIVE
-         m AS (SELECT e.ord, e.e FROM __qs s JOIN __qe e ON e.node_id = s.node_id),
-         cover AS (SELECT n.ord, max(m.e) OVER (ORDER BY n.ord ROWS UNBOUNDED PRECEDING) AS c
-                   FROM __qn n LEFT JOIN m ON m.ord = n.ord),
-         anc(node_id) AS (SELECT e.parent_id FROM m JOIN __qb b ON b.ord = m.ord
-                            JOIN __qe e ON e.ord = m.ord
-                          WHERE b.knd = 'block' AND e.parent_id IS NOT NULL
-                          UNION
-                          SELECT e.parent_id FROM anc JOIN __qe e ON e.node_id = anc.node_id
-                          WHERE e.parent_id IS NOT NULL)
-       SELECT duck_blocks_repair(list(k.blk ORDER BY k.ord)) AS blocks FROM __qb k
-       WHERE k.ord IN (SELECT ord FROM cover WHERE c > ord)
-          OR k.ord + 1 IN (SELECT node_id FROM anc)"
+  doc_select
 fi
 
 cte="WITH doc AS MATERIALIZED ($doc)"

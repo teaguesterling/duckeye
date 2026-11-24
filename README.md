@@ -491,7 +491,6 @@ These are measured limits, not guesses:
 | `-Q 'h2 code'` | refused — an attribute on a *context* node is unsupported, and `h2` is shorthand for one. Use `heading code`. |
 | `-Q 'code, blockquote'` | selector groups are not supported; run the two queries separately |
 | `-Q 'heading:contains(Install)'` | pseudo-class predicates are not supported; `-S Install` is the substring query |
-| a flag after FILE | not parsed — `duckeye -S X doc.md -t md` fails. Flags come before the file. |
 
 A `-Q` that matches nothing prints **nothing** on stdout, writes a message to
 stderr and exits non-zero — the same in every `-t`, so it is safe to test in a
@@ -812,6 +811,9 @@ it to `DUCKEYE_EXTS`.
 -o, --output FILE      write to FILE instead of stdout (names a FILE, not a format)
     --color WHEN       auto (default), always, never
 -w, --where EXPR       SQL WHERE clause; implies data mode
+-c, --columns A,B      keep only these columns (names quoted for you); implies data mode
+-x, --as-data          read a selection as data: a lone table becomes its rows
+-E, --extract SPEC     select and read as data: table:2, code:1, table#my-info
 -n, --number           number source code lines by file line, like cat -n
 -l, --limit N          cap rows in any listing (-d, -z, -Z, and .zim -T/-s)
     --init             install the DuckDB extensions

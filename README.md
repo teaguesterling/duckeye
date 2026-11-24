@@ -489,7 +489,6 @@ These are measured limits, not guesses:
 | Form | Result |
 |---|---|
 | `-Q 'h2 code'` | refused — an attribute on a *context* node is unsupported, and `h2` is shorthand for one. Use `heading code`. |
-| `-Q 'code, blockquote'` | selector groups are not supported; run the two queries separately |
 | `-Q 'heading:contains(Install)'` | pseudo-class predicates are not supported; `-S Install` is the substring query |
 
 A `-Q` that matches nothing prints **nothing** on stdout, writes a message to

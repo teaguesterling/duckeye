@@ -1076,20 +1076,23 @@ has 'code -Q statement carries start_line' '"start_line":"3"' \
 has 'code view carries start_line'     '"start_line":"1"' \
     $DUCKEYE -t blocks "$TMP/test_code.py"
 # DEFINITIONS (-Q .func, -S/-s/-T on code) come from sitting_duck's ast_to_blocks_from
-# and ast_to_blocks_list. Those macros read start_line/end_line but put neither on the
-# blocks they emit, and use the column-offset peek as the body. Until they do, -n on
-# them refuses (asserted below) and these report "known".
+# and ast_to_blocks_list. Since sitting_duck v1.19.0 their blocks carry start_line and
+# end_line, so -n numbers a definition by its file lines. -S cuts whole source lines.
+# -Q passes only the selected rows to ast_to_blocks_from, and without the file's root
+# row the first line of the body still loses its indent: those two report "known".
 cause=sitting_duck
 broken 'definition -Q keeps the first line indent' '    def execute(self' \
     $DUCKEYE -Q '.func#execute' -t text "$TMP/test_code.py"
 broken 'line numbers: definition -Q'  $'     5\t    def cancel' \
     $DUCKEYE -n -Q '.func#cancel' -t text "$TMP/test_code.py"
-broken 'line numbers: -S on code'     $'     6\t        pass' \
-    $DUCKEYE -n -S cancel -t text "$TMP/test_code.py"
-broken 'definition block carries start_line' '"start_line":"5"' \
-    $DUCKEYE -Q '.func#cancel' -t blocks "$TMP/test_code.py"
 cause=unattributed
-dies_with '-n on definitions refuses until sitting_duck' 'line numbers' \
+has 'line numbers: -S on code'     $'     6\t        pass' \
+    $DUCKEYE -n -S cancel -t text "$TMP/test_code.py"
+has 'definition block carries start_line' '"start_line":"5"' \
+    $DUCKEYE -Q '.func#cancel' -t blocks "$TMP/test_code.py"
+# -n on a definition numbers it by FILE line, not from 1. Line 6 is the body's second
+# line, so this holds while the first-line indent guard above is still "known".
+has '-n on definitions numbers by file line' $'     6\t        pass' \
     $DUCKEYE -n -Q '.func#cancel' -t text "$TMP/test_code.py"
 # -n USED to be the row limit. Reading `-n 5` as "number lines, file 5" would fail far
 # from the cause, so a bare number after -n refuses and names the new flag.
@@ -1549,7 +1552,11 @@ has 'README limit: context-node attribute refused' 'context node' \
 ok  'README limit: heading code is accepted' bash -c \
     "$DUCKEYE -Q 'heading code' '$TMP/sel.md' >/dev/null 2>&1 || true
      ! $DUCKEYE -Q 'heading code' '$TMP/sel.md' 2>&1 >/dev/null | grep -q 'context node'"
-no  'README limit: selector groups unsupported' $DUCKEYE -Q 'code, blockquote' "$TMP/sel.md"
+# A selector group returns the union (sitting_duck v1.19.0, its #330): both groups print.
+has 'selector group returns the first group'  'fenced_code_here' \
+    $DUCKEYE -Q 'code, blockquote' -t text "$TMP/sel.md"
+has 'selector group returns the second group' 'A quoted warning' \
+    $DUCKEYE -Q 'code, blockquote' -t text "$TMP/sel.md"
 
 # A -Q that matches NOTHING must fail the same way in every writer. It used to print
 # the four characters NULL on stdout and exit 0 under -t ansi/text/blocks/pandoc,

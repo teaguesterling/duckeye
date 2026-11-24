@@ -273,8 +273,12 @@ GMD
       $DUCKEYE -Q 'heading[heading_level=3]' -t md "$TMP/guide.docx"
   has 'README 3: every code block'        'print("nested code")' \
       $DUCKEYE -Q 'code' -t text "$TMP/guide.md"
+  # The claim is that a matched li keeps its <ul>, not the li's attributes. Teague
+  # ruled 2026-11-23 that the check accepts an li with any class: panduck's .docx
+  # reader keeps pandoc's "Compact" paragraph style as class="compact" (MEASURED on
+  # panduck v0.12.0), while .md gives a bare <li>. So the attributes are stripped first.
   has 'README 4: li carries its list'     '<ul><li>macOS supported</li>' \
-      $DUCKEYE -Q 'li' -t html "$TMP/guide.docx"
+      bash -c "$DUCKEYE -Q 'li' -t html '$TMP/guide.docx' | sed -E 's/<li [^>]*>/<li>/g'"
   has 'README 5: descendant combinator'   'macOS supported' \
       $DUCKEYE -Q 'list li' -t md "$TMP/guide.md"
   ok  'README 6: -t md -o FILE'           bash -c \

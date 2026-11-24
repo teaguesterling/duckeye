@@ -1497,6 +1497,39 @@ css_alias() {
 # The -Q selection over a DOCUMENT, as a function so the data path can apply it too
 # (-x, -E, and -d -Q). It reads $selector, $doc and $src, adds the node tables and
 # __qs (the matched node ids) to $premacro, and replaces $doc with the selection.
+# The dialect -F names to the model for a source file: --dialect, else the file's
+# extension. Shared by the code view and by -d, which reads code as AST rows.
+code_lang_hint() {
+  local lang_hint=${dialect:-auto}
+  if [[ $lang_hint == auto ]]; then
+    case "$key" in
+      *.py|*.pyi|*.pyw) lang_hint=python ;;
+      *.rs) lang_hint=rust ;;
+      *.go) lang_hint=go ;;
+      *.js|*.jsx|*.mjs|*.cjs) lang_hint=javascript ;;
+      *.ts|*.tsx) lang_hint=typescript ;;
+      *.c|*.h) lang_hint=c ;;
+      *.cpp|*.hpp|*.cc|*.cxx|*.c++|*.hh|*.hxx) lang_hint=cpp ;;
+      *.java) lang_hint=java ;;
+      *.kt|*.kts) lang_hint=kotlin ;;
+      *.cs) lang_hint=csharp ;;
+      *.swift) lang_hint=swift ;;
+      *.rb|*.ruby) lang_hint=ruby ;;
+      *.php|*.php3|*.php4|*.php5|*.phtml) lang_hint=php ;;
+      *.lua) lang_hint=lua ;;
+      *.sh|*.bash|*.zsh) lang_hint=bash ;;
+      *.zig) lang_hint=zig ;;
+      *.dart) lang_hint=dart ;;
+      *.sql|*.gql|*.graphql) lang_hint=sql ;;
+      *.tf|*.tfvars|*.hcl) lang_hint=terraform ;;
+      *.css) lang_hint=css ;;
+      *.html|*.htm) lang_hint=html ;;
+      *) lang_hint=auto ;;
+    esac
+  fi
+  printf '%s' "$lang_hint"
+}
+
 doc_select() {
   # An attribute on a CONTEXT node cannot work here. Attributes are matched after
   # the structural selector, so a condition on any node but the selected one is
@@ -1811,12 +1844,26 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
   # -E and -x read a document's blocks, so the two document formats data mode otherwise
   # reads differently go to their block readers here: a pandoc AST .json (else JSON data)
   # and .rst (which has no data-mode reader at all).
-  if [[ ( -n $as_data || -n ${selector:-} ) && -z $fmt ]]; then
+  if [[ ( -n $as_data || -n ${selector:-} || -n $find_query ) && -z $fmt ]]; then
     if [[ $key == *.json ]] && is_pandoc_json "$f"; then
       from="read_pandoc_blocks('$src')"; exts+=" panduck"
     elif [[ $key == *.rst ]]; then
       from="read_rst_blocks('$src')"; exts+=" panduck"
     fi
+  fi
+  # -F is -Q in words, so it selects wherever -Q does. It compiled its selector only on
+  # the document path, and under -d it was SILENTLY IGNORED: every block, AST node or
+  # csv row came back, rc 0. It compiles here, once the reader is known, and refuses
+  # before calling the model when the reader has nothing to select.
+  if [[ -n $find_query && -z ${selector:-} ]]; then
+    case $from in
+      read_ast\(*)
+        selector=$(compile_astcss "$find_query" "$(code_lang_hint)") || exit $?
+        from="ast_select('$src', '$(q "$selector")')" ;;
+      read_*_blocks\(*|read_panduck_doc\(*)
+        selector=$(compile_astcss "$find_query" document) || exit $? ;;
+      *) die "-F finds document blocks or code, and $f is read as data; drop -F or use -w" 64 ;;
+    esac
   fi
   # A document read as data is one row per block. A selection (-Q, -E) narrows those
   # rows to the matched blocks, and -x reads a lone table -- or a code block fenced as
@@ -2363,33 +2410,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     code_src=1     # this reader applies -Q itself; see the -Q block's guard
     premacro+=$DUCKEYE_SQL_PURE$DUCKEYE_SQL_BLOCKS   # duckeye_code_at & co. (#14)
     if [[ -n $find_query && -z ${selector:-} ]]; then
-      lang_hint=${dialect:-auto}
-      if [[ $lang_hint == auto ]]; then
-        case "$key" in
-          *.py|*.pyi|*.pyw) lang_hint=python ;;
-          *.rs) lang_hint=rust ;;
-          *.go) lang_hint=go ;;
-          *.js|*.jsx|*.mjs|*.cjs) lang_hint=javascript ;;
-          *.ts|*.tsx) lang_hint=typescript ;;
-          *.c|*.h) lang_hint=c ;;
-          *.cpp|*.hpp|*.cc|*.cxx|*.c++|*.hh|*.hxx) lang_hint=cpp ;;
-          *.java) lang_hint=java ;;
-          *.kt|*.kts) lang_hint=kotlin ;;
-          *.cs) lang_hint=csharp ;;
-          *.swift) lang_hint=swift ;;
-          *.rb|*.ruby) lang_hint=ruby ;;
-          *.php|*.php3|*.php4|*.php5|*.phtml) lang_hint=php ;;
-          *.lua) lang_hint=lua ;;
-          *.sh|*.bash|*.zsh) lang_hint=bash ;;
-          *.zig) lang_hint=zig ;;
-          *.dart) lang_hint=dart ;;
-          *.sql|*.gql|*.graphql) lang_hint=sql ;;
-          *.tf|*.tfvars|*.hcl) lang_hint=terraform ;;
-          *.css) lang_hint=css ;;
-          *.html|*.htm) lang_hint=html ;;
-          *) lang_hint=auto ;;
-        esac
-      fi
+      lang_hint=$(code_lang_hint)
       selector=$(compile_astcss "$find_query" "$lang_hint") || exit $?
     fi
     # ast_to_blocks is a DEFINITIONS outline: its defs CTE keeps only named constructs

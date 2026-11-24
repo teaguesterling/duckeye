@@ -1980,6 +1980,19 @@ dies_with '-E on stdin names stdin, not a spool'   'in standard input' bash -c "
 printf '{"headers":["a","b"],"rows":[["1","x"],["2","y"]]}' >"$TMP/one.tbl.json"
 has     '-f table reads table-block JSON'          '2,y'     $DUCKEYE -d -f table -t csv "$TMP/one.tbl.json"
 
+# -F under -d was SILENTLY IGNORED: it compiled its selector only on the document path,
+# so `-d -F` gave every block of a document, every node of a source file, and every row
+# of a csv, all rc 0. It selects as -Q does under -d. A `has` alone would pass on the
+# unfiltered output, so each case also checks that an unmatched row is gone.
+has     '-d -F selects document blocks'            'kumquat' env DUCKEYE_MOCK_ASTCSS='p' $DUCKEYE -d "$TMP/doc.md" -F 'paragraphs'
+no_leak '-d -F drops unmatched blocks'             'code_block_token' env DUCKEYE_MOCK_ASTCSS='p' $DUCKEYE -d -F 'paragraphs' "$TMP/doc.md"
+gated sitting_duck has     '-d -F selects code nodes'      'execute' env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE -d -F 'the execute method' "$TMP/test_code.py"
+gated sitting_duck no_leak '-d -F drops unmatched nodes'   'cancel'  env DUCKEYE_MOCK_ASTCSS='.func#execute' $DUCKEYE -d -F 'the execute method' "$TMP/test_code.py"
+dies_with '-d -F on a data file is refused'        '-F finds document blocks or code' env DUCKEYE_MOCK_ASTCSS='p' $DUCKEYE -d -F x "$TMP/cols.csv"
+# -F narrows what -x reads: two tables matched is refused by count, where -x alone
+# would say "has 2 tables" without ever applying -F.
+dies_with '-F -x applies the selection first'      '2 blocks matched' env DUCKEYE_MOCK_ASTCSS='table' $DUCKEYE -F 'the tables' -x "$TMP/tbl.md"
+
 printf '\n%d passed, %d failed, %d skipped' "$pass" "$fail" "$skip"
 if (( known )); then
   printf ', %d known-broken upstream' "$known"

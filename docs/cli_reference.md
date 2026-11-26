@@ -66,7 +66,7 @@ usage: duckeye [OPTION]... [FILE]
 | `DUCKEYE_LLM_ENDPOINT` | `http://localhost:11434` | HTTP endpoint URL for Ollama, a Tiiny Pocket (`http://<device>/v1`: a URL without `/v1` is sent Ollama-shaped), or OpenAI server |
 | `DUCKEYE_LLM_MODEL` | `qwen3.5-0.8b-astcss` / `default` | Model identifier for natural language discovery compilation (`-F`) |
 | `DUCKEYE_LLM_KEY` | `""` (auto-detected for Tiiny) | Bearer token for authenticated LLM and embedding endpoints |
-| `DUCKEYE_TIINY_HOST` | `""` (no probe) | Host (and port) of a Tiiny Pocket on your network, as `<host>` or `<host>:<port>`. `-F` and `-R` probe `http://<host>/v1` only when this is set, no socket file exists, the endpoint variable is empty, the local default port does not answer, and a key is found. An endpoint whose host equals it is sent OpenAI-shaped |
+| `DUCKEYE_TIINY_HOST` | `""` (no probe) | Host (and port) of a Tiiny Pocket on your network, as `<host>` or `<host>:<port>` (`http://` is accepted; any other scheme refuses). `-F` and `-R` probe `http://<host>/v1` only when this is set, no socket file exists, the endpoint variable is empty, the local default port does not answer, and a key is found. An endpoint whose host equals it is sent OpenAI-shaped |
 | `DUCKEYE_RERANK_SOCKET` | `/tmp/reranker.sock` | Unix domain socket path for cross-encoder reranker daemon |
 | `DUCKEYE_RERANK_ENDPOINT` | `http://localhost:8001` | HTTP endpoint for cross-encoder (`/v1/rerank`) or embedding similarity (`/v1/embeddings`) |
 | `DUCKEYE_RERANK_MODEL` | `Qwen3-Reranker-0.6B` / `Qwen/Qwen3-Embedding-0.6B` | Model identifier for cross-encoder scoring or dense vector embeddings |

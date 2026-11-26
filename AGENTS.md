@@ -155,10 +155,10 @@ duckeye -Q 'return_statement' --json src/worker.py
   "element_order":0}]
 ```
 
-Definition matches (`-Q '.func'`, `-Q '.class'`) and `-S`/`-s` on code do not carry
-`start_line` yet. Those blocks come from sitting_duck's `ast_to_blocks`, which does not
-put positions on them (duckeye#14). Until it does, use `-R --json` above, or `-d -Q`
-for the raw AST rows with `start_line` and `end_line`.
+Definition matches (`-Q '.func'`, `-Q '.class'`) and `-S`/`-s` on code carry
+`start_line` from sitting_duck v1.19.0. Before it, sitting_duck's `ast_to_blocks` put no
+positions on them (duckeye#14): on an older sitting_duck, use `-R --json` above, or
+`-d -Q` for the raw AST rows with `start_line` and `end_line`.
 
 ### Line numbers for citing `file:line` (`-n`)
 
@@ -171,8 +171,8 @@ duckeye -n -Q 'return_statement' src/worker.py
 #      3	        return True
 ```
 
-`-n` refuses on documents, on `-T`, on data modes, and on definition matches, until
-sitting_duck carries their lines. It does not print wrong numbers. Before #14, `-n` was
+`-n` refuses on documents, on `-T`, and on data modes. On definition matches it works
+from sitting_duck v1.19.0 and refuses before it. It does not print wrong numbers. Before #14, `-n` was
 the row limit. That flag is now `-l`, and `-n 5` refuses and names `-l`.
 
 ### Document Section JSON (`-S` / `-s` `--json`)

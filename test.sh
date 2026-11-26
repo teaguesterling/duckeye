@@ -1123,6 +1123,31 @@ gated sitting_duck has 'rank threshold override'     'cancel'         env DUCKEY
 gated sitting_duck has 'rank top-k limits'           'execute'        env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.85}]' $DUCKEYE -Q '.func' -R "executes task" --top-k 1 "$TMP/test_code.py"
 gated sitting_duck has 'rank --json output'          '"score":0.95'   env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" --json "$TMP/test_code.py"
 has 'rank document prose'         'Alpha'          env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.20}, {"index": 2, "relevance_score": 0.92}]' $DUCKEYE -R "alpha details" "$TMP/doc.md"
+# An endpoint that ANSWERS with an HTTP error must fail -R, not rank its error body.
+# curl -s wrote a JSON error body ({"detail":"Not Found"}, as FastAPI-style servers send
+# for a route they lack) to the response file. The file was not empty, so the "could not
+# connect" check passed, and -R exited 0 printing only NULL.
+cat >"$TMP/http404.py" <<'PYEOF'
+import http.server, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def _404(self):
+        body = b'{"detail":"Not Found"}'
+        self.send_response(404); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    do_GET = do_POST = _404
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+print(s.server_address[1], flush=True)
+s.serve_forever()
+PYEOF
+python3 -I "$TMP/http404.py" >"$TMP/http404.port" 2>/dev/null &
+_httpd=$!
+for _i in 1 2 3 4 5 6 7 8 9 10; do [[ -s $TMP/http404.port ]] && break; sleep 0.2; done
+_port=$(<"$TMP/http404.port")
+dies_with 'rank refuses an endpoint that answers an HTTP error' 'reranker' \
+    env DUCKEYE_RERANK_ENDPOINT="http://127.0.0.1:$_port" DUCKEYE_RERANK_SOCKET="$TMP/no.sock" \
+    $DUCKEYE -R "alpha details" "$TMP/doc.md"
+kill "$_httpd" 2>/dev/null; wait "$_httpd" 2>/dev/null
 has 'outline --json'              '"title":"Alpha"' $DUCKEYE -T --json "$TMP/doc.md"
 has 'section --json'              '"element_type":"heading"' $DUCKEYE -S Alpha --json "$TMP/doc.md"
 

@@ -37,7 +37,7 @@ Other:
   -h, --help       show this help
 
 Auto-detection checks whether the agent's config directory exists
-(~/.gemini/config, ~/.claude, ~/.config/opencode). Explicit flags
+($HOME/.gemini/config, $HOME/.claude, $HOME/.config/opencode). Explicit flags
 override detection.
 EOF
 }

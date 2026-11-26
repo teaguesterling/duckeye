@@ -1201,6 +1201,10 @@ stubbed 'tiiny host: -F refuses https:// too' refuses64 'DUCKEYE_TIINY_HOST' \
 # was cut to the host "https", and the key went to that name, port 80, in clear text.
 # Every other form refuses with 64: one slash, userinfo (@), a path, a bad port, and a
 # second scheme. For each, the stub must also see no request.
+# The no-request check guards only the forms that would reach the stub. For the
+# one-slash forms (https:/, HTTPS:/, http:/, http://https://) the key went to the
+# name "https" on port 80, never to the stub, so that check passes without the fix
+# too; there refuses64 is the guard. Same for ':' and ':x<port>' and a leading space.
 for _v in "https:/127.0.0.1:$_port" "HTTPS:/127.0.0.1:$_port" "http:/127.0.0.1:$_port" \
           "https:@127.0.0.1:$_port" "user@127.0.0.1:$_port" "127.0.0.1:$_port/v1" \
           "127.0.0.1:x$_port" "127.0.0.1:" "http://https://127.0.0.1:$_port" " 127.0.0.1:$_port"; do

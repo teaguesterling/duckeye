@@ -342,8 +342,9 @@ the built-in defaults; they point at local daemons and are not worth memorising.
 | `DUCKEYE_LLM_ENDPOINT` | HTTP base URL instead of a socket. A URL containing `/v1` is treated as OpenAI-shaped (`/chat/completions`); anything else as Ollama-shaped (`/api/generate`) |
 | `DUCKEYE_LLM_MODEL` | Model name to request for `-F` |
 | `DUCKEYE_RERANK_SOCKET` | Unix socket of a cross-encoder reranker, for `-R` / `--rank` |
-| `DUCKEYE_RERANK_ENDPOINT` | HTTP base URL instead of a socket; `-R` posts to `<endpoint>/v1/rerank` |
+| `DUCKEYE_RERANK_ENDPOINT` | HTTP base URL instead of a socket. A URL containing `/v1` is treated as OpenAI-shaped (`/embeddings`); anything else gets `<endpoint>/v1/rerank` |
 | `DUCKEYE_RERANK_MODEL` | Model name to request for `-R` |
+| `DUCKEYE_TIINY_HOST` | Host of a Tiiny Pocket. Unset (the default), nothing is probed. Set, `-F` and `-R` probe `http://<host>/v1` when no socket or endpoint is set and a key is found. A device URL in an endpoint variable needs `/v1` |
 | `DUCKEYE_LLM_KEY` / `DUCKEYE_API_KEY` | Bearer token for either endpoint |
 
 `-F` and `-R` are independent: configuring one does not configure the other, and a selector

@@ -839,6 +839,7 @@ it to `DUCKEYE_EXTS`.
 | `DUCKEYE_LLM_ENDPOINT` | HTTP endpoint URL for ASTCSS compiler (e.g. `http://localhost:11434`) |
 | `DUCKEYE_RERANK_SOCKET` | Unix socket path for cross-encoder reranker daemon (default `/tmp/reranker.sock`) |
 | `DUCKEYE_RERANK_ENDPOINT` | HTTP endpoint URL for cross-encoder reranker (e.g. `http://localhost:8001`) |
+| `DUCKEYE_TIINY_HOST` | host of a Tiiny Pocket to probe when no socket or endpoint is set (default: none, no probe). An endpoint for the device itself needs `/v1`, such as `http://<device>/v1` |
 | `COLUMNS` | overrides terminal column width for table rendering and profiling |
 
 ## Tests

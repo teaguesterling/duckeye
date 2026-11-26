@@ -665,6 +665,10 @@ in_file= out_file= data_fmt= columns= as_data= extract= explicit_doc= positional
 find_query= rank_criterion= rank_threshold= top_k= dialect= json_out= number_lines= reader=
 
 # ---------------------------------------------------------------- intelligence layer
+# url_host URL -> its host[:port], no scheme and no path. DUCKEYE_TIINY_HOST is compared
+# with this EXACTLY: a substring test made host a.b.c.1 match endpoint a.b.c.12.
+url_host() { local h=${1#*://}; printf '%s' "${h%%/*}"; }
+
 compile_astcss() {
   local query=$1 dialect=${2:-auto}
   local socket=${DUCKEYE_LLM_SOCKET:-/tmp/woollama.sock}
@@ -673,7 +677,7 @@ compile_astcss() {
   local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
   # A Tiiny device is probed only at the address you give: a LAN address in a public
   # script would publish one network, and be wrong on every other.
-  local tiiny=${DUCKEYE_TIINY_HOST:-}
+  local tiiny; tiiny=$(url_host "${DUCKEYE_TIINY_HOST:-}")
   # Initialised, not just declared: `set -u` is on, and on the paths where no transport is
   # reached (no socket, no endpoint, no ollama) or one answers with an empty body, the
   # assignments below never run. A bare `local payload resp compiled` leaves them UNSET,
@@ -709,7 +713,7 @@ compile_astcss() {
   local auth_hdr=()
   [[ -n $key ]] && auth_hdr=(-H "Authorization: Bearer $key")
 
-  if [[ $endpoint == *"/v1"* || ( -n $tiiny && $endpoint == *"$tiiny"* ) ]]; then
+  if [[ $endpoint == *"/v1"* || ( -n $tiiny && $(url_host "$endpoint") == "$tiiny" ) ]]; then
     local ep_clean="${endpoint%/}"
     [[ $ep_clean != */v1 ]] && ep_clean+="/v1"
     payload=$(printf '{"model":"%s","messages":[{"role":"system","content":"You are an ASTCSS compiler for sitting_duck. Convert the user natural language request into a single CSS selector for source code ASTs or document blocks (e.g. .func#name, .class#name, h2, p, li, blockquote). Emit ONLY the bare CSS selector, with no quotes, markdown, or explanation.\\nLanguage: %s"},{"role":"user","content":"%s"}],"max_tokens":50,"chat_template_kwargs":{"enable_thinking":false}}' "${model:-default}" "$dialect" "$query")
@@ -745,7 +749,7 @@ rerank_candidates() {
   local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
   # A Tiiny device is probed only at the address you give: a LAN address in a public
   # script would publish one network, and be wrong on every other.
-  local tiiny=${DUCKEYE_TIINY_HOST:-}
+  local tiiny; tiiny=$(url_host "${DUCKEYE_TIINY_HOST:-}")
   local payload_file=$tmp/rerank_payload.json resp_file=$tmp/scored.json
   # Each request below uses curl -f: an endpoint that answers an HTTP error (a 404 for a
   # route it lacks) then writes nothing, and the empty-response check at the end dies.
@@ -777,7 +781,7 @@ rerank_candidates() {
   local auth_hdr=()
   [[ -n $key ]] && auth_hdr=(-H "Authorization: Bearer $key")
 
-  if [[ $endpoint == *"/v1"* || ( -n $tiiny && $endpoint == *"$tiiny"* ) ]]; then
+  if [[ $endpoint == *"/v1"* || ( -n $tiiny && $(url_host "$endpoint") == "$tiiny" ) ]]; then
     local ep_clean="${endpoint%/}"
     [[ $ep_clean != */v1 ]] && ep_clean+="/v1"
 

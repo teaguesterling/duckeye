@@ -669,13 +669,17 @@ find_query= rank_criterion= rank_threshold= top_k= dialect= json_out= number_lin
 # with this EXACTLY: a substring test made host a.b.c.1 match endpoint a.b.c.12.
 url_host() { local h=${1#*://}; printf '%s' "${h%%/*}"; }
 # tiiny_host -> DUCKEYE_TIINY_HOST as host[:port]. The device is probed over plain
-# http:// with the Bearer key, so a value with any other scheme REFUSES: cutting
-# https://host to host would send the key unencrypted to a host meant for TLS.
-tiiny_host() { local v=${DUCKEYE_TIINY_HOST:-}
-  if [[ $v == *://* && $v != http://* ]]; then
-    die "DUCKEYE_TIINY_HOST='$v': the device is probed over plain http://, so only <host>[:<port>] or http://<host>[:<port>] is accepted" 64
+# http:// with the Bearer key, so the value is an ALLOWLIST: <host>[:<port>], after one
+# optional lowercase http:// and one optional trailing /. Anything else refuses (64):
+# a denylist of "://" let https:/<host> through, cut to the host "https", and sent the
+# key there in clear text. Userinfo (@), a path, a second scheme and spaces refuse too.
+tiiny_host() { local v=${DUCKEYE_TIINY_HOST:-} h
+  [[ -z $v ]] && return 0
+  h=${v#http://}; h=${h%/}
+  if [[ ! $h =~ ^[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
+    die "DUCKEYE_TIINY_HOST='$v': give <host>[:<port>] or http://<host>[:<port>]; the device is probed over plain http://" 64
   fi
-  url_host "$v"; }
+  printf '%s' "$h"; }
 
 compile_astcss() {
   local query=$1 dialect=${2:-auto}

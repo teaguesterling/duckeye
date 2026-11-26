@@ -138,14 +138,15 @@ SELECT duck_blocks_to_text(duckeye_number_lines(
 --     11	    pass
 ```
 
-Which code views carry positions (2026-11-10):
+Which code views carry positions (2026-11-10; the two sitting_duck rows updated for v1.19.0 on 2026-11-26):
 
 | View | Built by | `start_line` on blocks | `-n` |
 |---|---|---|---|
 | plain code view | duckeye (`duckeye_code_at`) | yes | numbers |
 | `-Q` statement match | duckeye (`duckeye_code_at` + `duckeye_source_lines`) | yes | numbers |
-| `-Q '.func'` / `'.class'` | sitting_duck `ast_to_blocks_from` | no | refuses |
-| `-S`/`-s`/`-T` on code | sitting_duck `ast_to_blocks_list` | no | refuses |
+| `-Q '.func'` / `'.class'` | sitting_duck `ast_to_blocks_from` | from v1.19.0; no before | numbers from v1.19.0; refuses before |
+| `-S`/`-s` on code | sitting_duck `ast_to_blocks_list` | from v1.19.0; no before | numbers from v1.19.0; refuses before |
+| `-T` on code | sitting_duck `ast_to_blocks_list` | not measured for v1.19.0; no before | refuses on every version: `-T` is an outline, not source lines |
 | `-R --json` candidates | duckeye `rerank_candidates` | as `start_line`/`end_line` fields | n/a. Its `content` still has the dedent bug |
 
 The sitting_duck ask is in `docs/briefs/2026-11-10-sitting-duck-block-positions.md`.

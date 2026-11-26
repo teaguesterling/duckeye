@@ -392,8 +392,8 @@ Options:
                          selectors (table#my-info). Then -w, -c, -l, -t apply to its rows
   -n, --number           number source code lines by their FILE line, like cat -n, so
                          a match can be cited as file:line. Code views only: the plain
-                         view and statement -Q matches. Definitions (-Q .func/.class,
-                         -S/-s on code) refuse until sitting_duck's blocks carry lines
+                         view and statement -Q matches; definitions (-Q .func/.class,
+                         -S/-s on code) from sitting_duck v1.19.0. Before it they refuse
   -l, --limit N          cap the rows any listing prints (-d, -z, -Z, and .zim -T/-s).
                          Was -n before 0.26; `-n 5` now refuses and names -l
       --color WHEN       auto (default), always, never. auto means colour when
@@ -2610,9 +2610,9 @@ esac
 
 # -n (#14): number the code lines the view prints, by their FILE line numbers, so an
 # agent can cite file:line. Only blocks that carry start_line can be numbered. A code
-# block without one comes from sitting_duck's ast_to_blocks (definitions: -Q .func,
-# -S/-s on code), and numbering it from 1 would print WRONG numbers -- so refuse it,
-# loudly, until sitting_duck puts the position on its blocks.
+# block without one comes from sitting_duck's ast_to_blocks before v1.19.0 (definitions:
+# -Q .func, -S/-s on code), and numbering it from 1 would print WRONG numbers -- so refuse
+# it, loudly. From v1.19.0 those blocks carry start_line and this never fires.
 if [[ -n $number_lines ]]; then
   [[ -n ${code_src:-} ]] || die "-n numbers source code lines; '$f' is not source code" 64
   doc="SELECT CASE

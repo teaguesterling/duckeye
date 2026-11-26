@@ -79,6 +79,15 @@ unavailable=
 for _e in sitting_duck toml; do
   duckdb -c "LOAD $_e;" >/dev/null 2>&1 || unavailable="$unavailable $_e"
 done
+# The sitting_duck that LOADs here. The registry builds a different one for each DuckDB
+# (2026-11-26: v1.18.4 for DuckDB v2.0.0, v1.19.0 for v2.0.1), so an assertion about a
+# sitting_duck change asserts the behaviour of the version that runs: the new output
+# from that version on, and the old refusal before it. Both halves stay hard checks.
+sd_ver=$(duckdb -noheader -list -c "LOAD sitting_duck; SELECT extension_version FROM duckdb_extensions() WHERE extension_name = 'sitting_duck'" 2>/dev/null)
+sd_ver=${sd_ver#v}
+# sd_at_least X.Y.Z -- the loaded sitting_duck is X.Y.Z or newer. False when it is not loadable.
+sd_at_least() { [[ -n $sd_ver && $(printf '%s\n%s\n' "$1" "$sd_ver" | sort -V | head -n 1) == "$1" ]]; }
+printf 'note: sitting_duck %s\n' "${sd_ver:-unavailable}"
 if [[ -n $unavailable ]]; then
   printf 'note: unavailable on %s:%s\n' "$(duckdb -version | awk '{print $1}')" "$unavailable"
   printf '      assertions that fail ONLY for that reason are skipped, not passed\n'
@@ -1085,6 +1094,7 @@ broken 'definition -Q keeps the first line indent' '    def execute(self' \
     $DUCKEYE -Q '.func#execute' -t text "$TMP/test_code.py"
 broken 'line numbers: definition -Q'  $'     5\t    def cancel' \
     $DUCKEYE -n -Q '.func#cancel' -t text "$TMP/test_code.py"
+if sd_at_least 1.19.0; then
 cause=unattributed
 has 'line numbers: -S on code'     $'     6\t        pass' \
     $DUCKEYE -n -S cancel -t text "$TMP/test_code.py"
@@ -1094,6 +1104,17 @@ has 'definition block carries start_line' '"start_line":"5"' \
 # line, so this holds while the first-line indent guard above is still "known".
 has '-n on definitions numbers by file line' $'     6\t        pass' \
     $DUCKEYE -n -Q '.func#cancel' -t text "$TMP/test_code.py"
+else
+# Before v1.19.0 a definition block has no start_line. -n must then REFUSE: numbering
+# from 1 would print wrong file lines. This refusal is the only guard on that path.
+broken 'line numbers: -S on code'     $'     6\t        pass' \
+    $DUCKEYE -n -S cancel -t text "$TMP/test_code.py"
+broken 'definition block carries start_line' '"start_line":"5"' \
+    $DUCKEYE -Q '.func#cancel' -t blocks "$TMP/test_code.py"
+cause=unattributed
+dies_with '-n on definitions refuses until sitting_duck' 'line numbers' \
+    $DUCKEYE -n -Q '.func#cancel' -t text "$TMP/test_code.py"
+fi
 # -n USED to be the row limit. Reading `-n 5` as "number lines, file 5" would fail far
 # from the cause, so a bare number after -n refuses and names the new flag.
 dies_with 'old -n N names -l'  'use -l' $DUCKEYE -r -n 2 "$TMP/test_code.py"
@@ -1553,10 +1574,15 @@ ok  'README limit: heading code is accepted' bash -c \
     "$DUCKEYE -Q 'heading code' '$TMP/sel.md' >/dev/null 2>&1 || true
      ! $DUCKEYE -Q 'heading code' '$TMP/sel.md' 2>&1 >/dev/null | grep -q 'context node'"
 # A selector group returns the union (sitting_duck v1.19.0, its #330): both groups print.
+# Before v1.19.0 a group is unsupported and must not exit 0.
+if sd_at_least 1.19.0; then
 has 'selector group returns the first group'  'fenced_code_here' \
     $DUCKEYE -Q 'code, blockquote' -t text "$TMP/sel.md"
 has 'selector group returns the second group' 'A quoted warning' \
     $DUCKEYE -Q 'code, blockquote' -t text "$TMP/sel.md"
+else
+no  'README limit: selector groups unsupported' $DUCKEYE -Q 'code, blockquote' "$TMP/sel.md"
+fi
 
 # A -Q that matches NOTHING must fail the same way in every writer. It used to print
 # the four characters NULL on stdout and exit 0 under -t ansi/text/blocks/pandoc,

@@ -747,6 +747,9 @@ rerank_candidates() {
   # script would publish one network, and be wrong on every other.
   local tiiny=${DUCKEYE_TIINY_HOST:-}
   local payload_file=$tmp/rerank_payload.json resp_file=$tmp/scored.json
+  # Each request below uses curl -f: an endpoint that answers an HTTP error (a 404 for a
+  # route it lacks) then writes nothing, and the empty-response check at the end dies.
+  # Without -f the error body was ranked, and -R exited 0 printing only NULL.
 
   if [[ -n ${DUCKEYE_MOCK_RERANK:-} ]]; then
     printf '%s' "$DUCKEYE_MOCK_RERANK" >"$resp_file"
@@ -782,7 +785,7 @@ rerank_candidates() {
       SELECT to_json(struct_pack(model := '${model:-Qwen/Qwen3-Embedding-0.6B}', input := list_prepend('$(q "$query")', (SELECT list(text) FROM read_json('$cand_file', columns={'text': 'VARCHAR'})))))
     " >"$payload_file" 2>/dev/null || true
 
-    curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "$ep_clean/embeddings" >"$tmp/embed_resp.json" 2>/dev/null || true
+    curl -sf -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "$ep_clean/embeddings" >"$tmp/embed_resp.json" 2>/dev/null || true
 
     if [[ -s "$tmp/embed_resp.json" ]] && grep -q '"embedding"' "$tmp/embed_resp.json"; then
       duckdb -dark-mode -noheader -list -c "
@@ -801,11 +804,11 @@ rerank_candidates() {
     printf '}' >>"$payload_file"
 
     if [[ -S "$socket" ]]; then
-      curl -s --unix-socket "$socket" -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "http://localhost/v1/rerank" >"$resp_file" 2>/dev/null || true
+      curl -sf --unix-socket "$socket" -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "http://localhost/v1/rerank" >"$resp_file" 2>/dev/null || true
     elif [[ -n "$endpoint" ]]; then
-      curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "$endpoint/v1/rerank" >"$resp_file" 2>/dev/null || true
+      curl -sf -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "$endpoint/v1/rerank" >"$resp_file" 2>/dev/null || true
     elif curl -s --connect-timeout 0.3 "http://localhost:8001/v1/rerank" >/dev/null 2>&1; then
-      curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "http://localhost:8001/v1/rerank" >"$resp_file" 2>/dev/null || true
+      curl -sf -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "http://localhost:8001/v1/rerank" >"$resp_file" 2>/dev/null || true
     fi
   fi
 

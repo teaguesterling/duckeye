@@ -126,6 +126,12 @@ dies_with() { local n=$1 pat=$2 m; shift 2
   elif [[ $_err == *"$pat"* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
   elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable"
   else fail=$((fail+1)); printf '  FAIL %s (stderr has no match for %q)\n' "$n" "$pat"; fi; }
+# refuses64 NAME PATTERN ARGS... -- exit status EXACTLY 64 (usage) and PATTERN in stderr.
+# dies_with accepts any nonzero status, so a refusal that regressed to exit 1 would pass.
+refuses64() { local n=$1 pat=$2; shift 2
+  _run "$@"
+  if (( _rc == 64 )) && [[ $_err == *"$pat"* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  else fail=$((fail+1)); printf '  FAIL %s (rc %s, stderr %q)\n' "$n" "$_rc" "${_err:0:160}"; fi; }
 has() { local n=$1 pat=$2 m; shift 2
   _run "$@"
   local out; out=$(printf '%s' "$_out" | strip)
@@ -1181,15 +1187,30 @@ stubbed 'tiiny host: an http:// URL matches its host' has 'POST /v1/embeddings' 
     DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
 # Any other scheme REFUSES, and names the variable. The probe is plain http, so an
 # https:// value would send the key unencrypted to a host the user meant for TLS.
-stubbed 'tiiny host: https:// refuses before any request' dies_with 'DUCKEYE_TIINY_HOST' \
+stubbed 'tiiny host: https:// refuses before any request' refuses64 'DUCKEYE_TIINY_HOST' \
     env DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="https://127.0.0.1:$_port" \
     DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
 stubbed 'tiiny host: https:// sends nothing' no_leak '/v1' \
     reqs DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="https://127.0.0.1:$_port" \
     DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
-stubbed 'tiiny host: -F refuses https:// too' dies_with 'DUCKEYE_TIINY_HOST' \
+stubbed 'tiiny host: -F refuses https:// too' refuses64 'DUCKEYE_TIINY_HOST' \
     env DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="https://127.0.0.1:$_port" \
     DUCKEYE_LLM_SOCKET="$TMP/no.sock" $DUCKEYE -F "find all functions" "$TMP/test_code.py"
+# The value is an ALLOWLIST: <host>[:<port>], after one optional http:// and one
+# optional trailing /. A denylist of "://" let a one-slash https:/<host> through: it
+# was cut to the host "https", and the key went to that name, port 80, in clear text.
+# Every other form refuses with 64: one slash, userinfo (@), a path, a bad port, and a
+# second scheme. For each, the stub must also see no request.
+for _v in "https:/127.0.0.1:$_port" "HTTPS:/127.0.0.1:$_port" "http:/127.0.0.1:$_port" \
+          "https:@127.0.0.1:$_port" "user@127.0.0.1:$_port" "127.0.0.1:$_port/v1" \
+          "127.0.0.1:x$_port" "127.0.0.1:" "http://https://127.0.0.1:$_port" " 127.0.0.1:$_port"; do
+  stubbed "tiiny host: refuses '$_v'" refuses64 'DUCKEYE_TIINY_HOST' \
+      env DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="$_v" \
+      DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
+  stubbed "tiiny host: '$_v' sends nothing" no_leak '/v1' \
+      reqs DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="$_v" \
+      DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
+done
 kill "$_httpd" 2>/dev/null; wait "$_httpd" 2>/dev/null
 has 'outline --json'              '"title":"Alpha"' $DUCKEYE -T --json "$TMP/doc.md"
 has 'section --json'              '"element_type":"heading"' $DUCKEYE -S Alpha --json "$TMP/doc.md"

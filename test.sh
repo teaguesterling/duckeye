@@ -1123,14 +1123,16 @@ gated sitting_duck has 'rank threshold override'     'cancel'         env DUCKEY
 gated sitting_duck has 'rank top-k limits'           'execute'        env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.85}]' $DUCKEYE -Q '.func' -R "executes task" --top-k 1 "$TMP/test_code.py"
 gated sitting_duck has 'rank --json output'          '"score":0.95'   env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.30}]' $DUCKEYE -Q '.func' -R "executes task" --json "$TMP/test_code.py"
 has 'rank document prose'         'Alpha'          env DUCKEYE_MOCK_RERANK='[{"index": 0, "relevance_score": 0.20}, {"index": 2, "relevance_score": 0.92}]' $DUCKEYE -R "alpha details" "$TMP/doc.md"
-# An endpoint that ANSWERS with an HTTP error must fail -R, not rank its error body.
-# curl -s wrote a JSON error body ({"detail":"Not Found"}, as FastAPI-style servers send
-# for a route they lack) to the response file. The file was not empty, so the "could not
-# connect" check passed, and -R exited 0 printing only NULL.
+# A local stub for the HTTP paths of -R. It answers EVERY request 404 with a JSON body
+# ({"detail":"Not Found"}, as FastAPI-style servers send for a route they lack), and
+# records "METHOD PATH" per request in http404.log, so a test can see which shape was
+# sent. DUCKEYE_LLM_KEY=dummy in each call: the real Tiiny key file is never read.
 cat >"$TMP/http404.py" <<'PYEOF'
 import http.server, sys
+log = sys.argv[1]
 class H(http.server.BaseHTTPRequestHandler):
     def _404(self):
+        with open(log, "a") as f: f.write(f"{self.command} {self.path}\n")
         body = b'{"detail":"Not Found"}'
         self.send_response(404); self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
@@ -1140,13 +1142,54 @@ s = http.server.HTTPServer(("127.0.0.1", 0), H)
 print(s.server_address[1], flush=True)
 s.serve_forever()
 PYEOF
-python3 -I "$TMP/http404.py" >"$TMP/http404.port" 2>/dev/null &
+: >"$TMP/http404.log"
+python3 -I "$TMP/http404.py" "$TMP/http404.log" >"$TMP/http404.port" 2>"$TMP/http404.err" &
 _httpd=$!
-for _i in 1 2 3 4 5 6 7 8 9 10; do [[ -s $TMP/http404.port ]] && break; sleep 0.2; done
+for _i in $(seq 1 25); do [[ -s $TMP/http404.port ]] && break; sleep 0.2; done
 _port=$(<"$TMP/http404.port")
-dies_with 'rank refuses an endpoint that answers an HTTP error' 'reranker' \
-    env DUCKEYE_RERANK_ENDPOINT="http://127.0.0.1:$_port" DUCKEYE_RERANK_SOCKET="$TMP/no.sock" \
+# The tests below prove nothing unless the stub runs: with no server, curl gets no
+# answer and -R dies with the same "reranker" message for the wrong reason.
+_stub_up=
+[[ -n $_port && $(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$_port/v1/rerank") == 404 ]] && _stub_up=1
+: >"$TMP/http404.log"
+stubbed() { local n=$1 h=$2; shift 2
+  if [[ -n $_stub_up ]]; then "$h" "$n" "$@"
+  else fail=$((fail+1)); printf '  FAIL %s (the 404 stub did not start: %s)\n' "$n" "$(head -c 200 "$TMP/http404.err")"; fi; }
+# reqs ENV... CMD... -- run CMD, then print the requests the stub saw.
+reqs() { : >"$TMP/http404.log"; env "$@" >/dev/null 2>&1; cat "$TMP/http404.log"; }
+_ep="http://127.0.0.1:$_port"
+
+# An endpoint that ANSWERS with an HTTP error must fail -R, not rank its error body.
+# curl -s wrote the error body to the response file, so the "could not connect" check
+# passed, and -R exited 0 printing only NULL.
+stubbed 'rank refuses an endpoint that answers an HTTP error' dies_with 'reranker' \
+    env DUCKEYE_LLM_KEY=dummy DUCKEYE_RERANK_ENDPOINT="$_ep" DUCKEYE_RERANK_SOCKET="$TMP/no.sock" \
     $DUCKEYE -R "alpha details" "$TMP/doc.md"
+# DUCKEYE_TIINY_HOST matches the endpoint's host EXACTLY. A substring test made a host
+# that is a prefix of the endpoint's host:port match it, and sent the device's
+# OpenAI shape (/v1/embeddings) to another server. Here the host is the endpoint's
+# host:port minus its last digit.
+stubbed 'tiiny host: a prefix of the endpoint host does not match' has 'POST /v1/rerank' \
+    reqs DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="127.0.0.1:${_port%?}" DUCKEYE_RERANK_ENDPOINT="$_ep" \
+    DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
+stubbed 'tiiny host: a prefix of the endpoint host sends no device shape' no_leak '/v1/embeddings' \
+    reqs DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="127.0.0.1:${_port%?}" DUCKEYE_RERANK_ENDPOINT="$_ep" \
+    DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
+# A host given as an http:// URL is cut to its host, so it still matches.
+stubbed 'tiiny host: an http:// URL matches its host' has 'POST /v1/embeddings' \
+    reqs DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="http://127.0.0.1:$_port/" DUCKEYE_RERANK_ENDPOINT="$_ep" \
+    DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
+# Any other scheme REFUSES, and names the variable. The probe is plain http, so an
+# https:// value would send the key unencrypted to a host the user meant for TLS.
+stubbed 'tiiny host: https:// refuses before any request' dies_with 'DUCKEYE_TIINY_HOST' \
+    env DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="https://127.0.0.1:$_port" \
+    DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
+stubbed 'tiiny host: https:// sends nothing' no_leak '/v1' \
+    reqs DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="https://127.0.0.1:$_port" \
+    DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
+stubbed 'tiiny host: -F refuses https:// too' dies_with 'DUCKEYE_TIINY_HOST' \
+    env DUCKEYE_LLM_KEY=dummy DUCKEYE_TIINY_HOST="https://127.0.0.1:$_port" \
+    DUCKEYE_LLM_SOCKET="$TMP/no.sock" $DUCKEYE -F "find all functions" "$TMP/test_code.py"
 kill "$_httpd" 2>/dev/null; wait "$_httpd" 2>/dev/null
 has 'outline --json'              '"title":"Alpha"' $DUCKEYE -T --json "$TMP/doc.md"
 has 'section --json'              '"element_type":"heading"' $DUCKEYE -S Alpha --json "$TMP/doc.md"

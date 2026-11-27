@@ -339,7 +339,7 @@ the built-in defaults; they point at local daemons and are not worth memorising.
 | Variable | Purpose |
 |---|---|
 | `DUCKEYE_LLM_SOCKET` | Unix socket of a local LLM daemon, for `-F` / `--find` |
-| `DUCKEYE_LLM_API` | Request shape `-F` sends to the socket: `ollama` (default, `/api/generate`) or `openai` (`/v1/chat/completions`). A socket gets a key only from `DUCKEYE_LLM_KEY` / `DUCKEYE_API_KEY` |
+| `DUCKEYE_LLM_API` | Request shape `-F` sends to the socket: `ollama` (default, `/api/generate`) or `openai` (`/v1/chat/completions`). `-F` sends the socket a key only from `DUCKEYE_LLM_KEY` / `DUCKEYE_API_KEY` |
 | `DUCKEYE_LLM_ENDPOINT` | HTTP base URL instead of a socket. A URL containing `/v1`, or whose host equals `DUCKEYE_TIINY_HOST`, is treated as OpenAI-shaped (`/chat/completions`); anything else as Ollama-shaped (`/api/generate`) |
 | `DUCKEYE_LLM_MODEL` | Model name to request for `-F` |
 | `DUCKEYE_RERANK_SOCKET` | Unix socket of a cross-encoder reranker, for `-R` / `--rank` |

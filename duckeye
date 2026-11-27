@@ -687,6 +687,10 @@ compile_astcss() {
   local endpoint=${DUCKEYE_LLM_ENDPOINT:-}
   local model=${DUCKEYE_LLM_MODEL:-}
   local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
+  # A socket gets only a key you set, never the auto-discovered Tiiny key, so this is
+  # built before the discovery below.
+  local sock_auth=()
+  [[ -n $key ]] && sock_auth=(-H "Authorization: Bearer $key")
   # A Tiiny device is probed only at the address you give: a LAN address in a public
   # script would publish one network, and be wrong on every other.
   local tiiny; tiiny=$(tiiny_host) || exit $?
@@ -736,7 +740,7 @@ compile_astcss() {
   else
     payload=$(printf '{"model":"%s","prompt":"<|im_start|>system\\nYou are an ASTCSS compiler for sitting_duck. Convert the user natural language request into a single CSS selector for source code ASTs. Emit only the selector.\\nLanguage: %s\\n<|im_end|>\\n<|im_start|>user\\n%s\\n<|im_end|>\\n<|im_start|>assistant\\n","stream":false}' "${model:-qwen3.5-0.8b-astcss}" "$dialect" "$query")
     if [[ -S "$socket" ]]; then
-      resp=$(curl -s --unix-socket "$socket" -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "http://localhost/api/generate" 2>/dev/null || true)
+      resp=$(curl -s --unix-socket "$socket" -H "Content-Type: application/json" "${sock_auth[@]}" -d "$payload" "http://localhost/api/generate" 2>/dev/null || true)
     elif [[ -n "$endpoint" ]]; then
       resp=$(curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "$endpoint/api/generate" 2>/dev/null || true)
     elif curl -s --connect-timeout 0.3 "http://localhost:11434/api/tags" >/dev/null 2>&1; then

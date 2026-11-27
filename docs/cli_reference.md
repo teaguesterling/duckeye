@@ -63,6 +63,7 @@ usage: duckeye [OPTION]... [FILE]
 | `DUCKEYE_COMMUNITY` | `duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck panduck` | Community extensions installed by `--init` |
 | `DUCKEYE_THEME` | `auto` (`dark` / `light`) | Overrides terminal color scheme (default: probes OSC 11 with 50ms timeout) |
 | `DUCKEYE_LLM_SOCKET` | `/tmp/woollama.sock` | Unix domain socket path for ASTCSS compiler daemon |
+| `DUCKEYE_LLM_API` | `ollama` | Request shape `-F` sends to a socket: `ollama` (`/api/generate`) or `openai` (`/v1/chat/completions`). `-F` sends a socket a Bearer token only from `DUCKEYE_LLM_KEY` or `DUCKEYE_API_KEY` |
 | `DUCKEYE_LLM_ENDPOINT` | `http://localhost:11434` | HTTP endpoint URL for Ollama, a Tiiny Pocket (`http://<device>/v1`: a URL without `/v1` is sent Ollama-shaped), or OpenAI server |
 | `DUCKEYE_LLM_MODEL` | `qwen3.5-0.8b-astcss` / `default` | Model identifier for natural language discovery compilation (`-F`) |
 | `DUCKEYE_LLM_KEY` | `""` (auto-detected for Tiiny) | Bearer token for authenticated LLM and embedding endpoints |

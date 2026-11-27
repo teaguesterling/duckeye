@@ -249,6 +249,7 @@ Agents running in autonomous workflows can configure local daemon transport via 
 | Variable | Default | Purpose |
 |---|---|---|
 | `DUCKEYE_LLM_SOCKET` | `/tmp/woollama.sock` | Unix domain socket for ASTCSS compiler daemon |
+| `DUCKEYE_LLM_API` | `ollama` | Request shape `-F` sends to a socket: `ollama` (`/api/generate`) or `openai` (`/v1/chat/completions`). A socket gets a Bearer token only from `DUCKEYE_LLM_KEY` or `DUCKEYE_API_KEY` |
 | `DUCKEYE_LLM_ENDPOINT` | `http://localhost:11434` | HTTP endpoint URL for Ollama, a Tiiny Pocket (`http://<device>/v1`: a URL without `/v1` is sent Ollama-shaped), or OpenAI servers |
 | `DUCKEYE_LLM_MODEL` | `qwen3.5-0.8b-astcss` / `default` | Model identifier for natural language discovery compilation (`-F`) |
 | `DUCKEYE_LLM_KEY` | `""` (auto-detected for Tiiny) | Bearer token for authenticated LLM and embedding endpoints |

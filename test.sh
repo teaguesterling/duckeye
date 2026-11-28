@@ -528,7 +528,7 @@ while True:
     c = s.accept()[0]; open(sys.argv[2], "a").write("hit\n"); c.close()' "$SD/port" "$SD/hits" &
 _listener=$!
 for _i in {1..100}; do [[ -s $SD/port ]] && break; sleep 0.1; done
-_url="http:/127.0.0.1:$(cat "$SD/port")/x.dcs"
+_url="http://127.0.0.1:$(cat "$SD/port")/x.dcs"
 mkdir -p "$SD/cwd/${_url%/*}"; cp "$TMP/prune.dcs" "$SD/cwd/$_url"
 sheeted applied 'a local http: sheet name is not a URL' from_cwd $duck_abs --sheet "$_url" -t text "$TMP/sheet.md"
 sheeted ok 'a local http: sheet name makes no connection' test -s "$SD/port" -a ! -e "$SD/hits"

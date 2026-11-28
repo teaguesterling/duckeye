@@ -352,9 +352,10 @@ Options:
       --sheet FILE       apply a DCS style sheet (dmb) to the document's blocks, after
                          --reader and before -T, -S, -s, -Q and -t (on source code,
                          -Q selects first). A rule dmb cannot use: a warning on
-                         stderr, and the document renders. A sheet that is missing
-                         or has no read permission: exit 64. One that DuckDB cannot
-                         read, or not UTF-8: exit 1, no document. Refused (exit 64)
+                         stderr, and the document renders. A sheet that is missing,
+                         not a regular file or without read permission: exit 64. One
+                         that DuckDB cannot read, or not UTF-8: exit 1, no document.
+                         Refused (exit 64)
                          with a second --sheet, -d, -r, -z, -Z, -x, -E, -w, -c, a
                          data file, an archive listing, and -R on source code
   -d, --data             read FILE as data, not prose: SELECT * FROM FILE

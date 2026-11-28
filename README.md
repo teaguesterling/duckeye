@@ -193,7 +193,8 @@ $ duckeye --sheet anchors.dcs -t md README.md
   that is not UTF-8, or that DuckDB cannot read, exits 1 with no document.
 - `--sheet` is refused (exit 64) with a second `--sheet`, `-d`, `-r`, `-z`, `-Z`, `-x`,
   `-E`, `-w`, `-c`, a data file, an archive listing, and `-R` on source code.
-- With `--sheet`, HTML blocks keep `class`, so `.name` selectors match.
+- With `--sheet`, an HTML file or web page keeps `class`, so `.name` selectors match. An
+  HTML article from a ZIM archive does not keep `class`.
 - On source code, `-Q` selects from the syntax tree first, and the sheet applies to the
   result.
 - `-t md`, `-t html` and `-t text` write the changed document. The input file is not edited.

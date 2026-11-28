@@ -192,7 +192,7 @@ duckeye 'zim://wiki.zim/_assets_/doc.pdf' # read embedded PDFs in ZIM
 printf '#changelog { -dcs-prune: section; }\n' > trim.dcs
 duckeye --sheet trim.dcs -t md README.md
 # A rule dmb cannot use warns on stderr with line:column; the document still renders.
-# Missing or no read permission: exit 64. Not UTF-8 or DuckDB cannot read it: exit 1.
+# Missing, not a regular file or no read permission: exit 64. Not UTF-8 or DuckDB cannot read it: exit 1.
 # Exit 64 with a second --sheet, -d, -r, -z, -Z, -x, -E, -w, -c, a data file,
 # an archive listing, or -R on source code.
 ```

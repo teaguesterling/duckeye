@@ -681,21 +681,31 @@ tiiny_host() { local v=${DUCKEYE_TIINY_HOST:-} h
   if [[ ! $h =~ ^[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
     die "DUCKEYE_TIINY_HOST='$v': give <host>[:<port>] or http://<host>[:<port>]; the device is probed over plain http://" 64
   fi
+  if [[ $h =~ ^[Hh][Tt][Tt][Pp][Ss]?$ ]]; then
+    die "DUCKEYE_TIINY_HOST='$v': '$h' is a URL scheme, not a host; give <host>[:<port>]" 64
+  fi
   printf '%s' "$h"; }
+# tiiny_url URL HOST -> true only for a plain http:// URL whose whole authority is HOST
+# (from tiiny_host). The discovered Tiiny key goes nowhere else: userinfo, another
+# scheme, no scheme or another host is false.
+tiiny_url() { local re='^http://([^@/?#]+)(/|$)'
+  [[ -n $2 && $1 =~ $re && ${BASH_REMATCH[1]} == "$2" ]]; }
 
 compile_astcss() {
   local query=$1 dialect=${2:-auto}
-  local socket=${DUCKEYE_LLM_SOCKET:-/tmp/woollama.sock}
+  local socket=${DUCKEYE_LLM_SOCKET:-}
   local endpoint=${DUCKEYE_LLM_ENDPOINT:-}
+  # The default socket path counts only when you name neither a socket nor an endpoint.
+  [[ -z $socket && -z $endpoint ]] && socket=/tmp/woollama.sock
   local model=${DUCKEYE_LLM_MODEL:-}
   local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
   # The request shape for a socket. It is named, never probed.
   local api=${DUCKEYE_LLM_API:-ollama}
   [[ $api == ollama || $api == openai ]] || die "DUCKEYE_LLM_API='$api': give ollama or openai" 64
-  # A socket gets only a key you set, never the auto-discovered Tiiny key, so this is
-  # built before the discovery below.
+  # A socket gets only a key you set, and only when you name the socket: never the
+  # auto-discovered Tiiny key, so this is built before the discovery below.
   local sock_auth=()
-  [[ -n $key ]] && sock_auth=(-H "Authorization: Bearer $key")
+  [[ -n ${DUCKEYE_LLM_SOCKET:-} && -n $key ]] && sock_auth=(-H "Authorization: Bearer $key")
   # A Tiiny device is probed only at the address you give: a LAN address in a public
   # script would publish one network, and be wrong on every other.
   local tiiny; tiiny=$(tiiny_host) || exit $?
@@ -714,23 +724,27 @@ compile_astcss() {
   fi
 
   # Auto-discover Tiiny API key if present and no key is explicitly set
+  local found=''
   if [[ -z $key && -d "$HOME/.local/share/tiiny-pcsvr/auth_data" ]]; then
     local key_file
     key_file=$(ls -t "$HOME/.local/share/tiiny-pcsvr/auth_data/"*.json 2>/dev/null | head -n 1)
     if [[ -n $key_file && -f $key_file ]]; then
-      key=$(sed -n 's/.*"auth_key":[[:space:]]*"\([^"]*\)".*/\1/p' "$key_file" 2>/dev/null || true)
+      found=$(sed -n 's/.*"auth_key":[[:space:]]*"\([^"]*\)".*/\1/p' "$key_file" 2>/dev/null || true)
     fi
   fi
 
   # Auto-detect Tiiny device if no endpoint or socket is active
   if [[ ! -S "$socket" && -z "$endpoint" ]]; then
     if ! curl -s --connect-timeout 0.2 "http://localhost:11434/api/tags" >/dev/null 2>&1; then
-      if [[ -n $tiiny && -n $key ]] && curl -s --connect-timeout 0.3 "http://$tiiny/v1/models" -H "Authorization: Bearer $key" >/dev/null 2>&1; then
+      if [[ -n $tiiny && -n ${key:-$found} ]] && curl -s --connect-timeout 0.3 "http://$tiiny/v1/models" -H "Authorization: Bearer ${key:-$found}" >/dev/null 2>&1; then
         endpoint="http://$tiiny"
       fi
     fi
   fi
 
+  # For the endpoint: the key you set, else the discovered key if the endpoint is the
+  # Tiiny host. The default local ports below get no key.
+  if [[ -z $key ]] && tiiny_url "$endpoint" "$tiiny"; then key=$found; fi
   local auth_hdr=()
   [[ -n $key ]] && auth_hdr=(-H "Authorization: Bearer $key")
 
@@ -756,7 +770,7 @@ compile_astcss() {
     elif [[ -n "$endpoint" ]]; then
       resp=$(curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "$endpoint/api/generate" 2>/dev/null || true)
     elif curl -s --connect-timeout 0.3 "http://localhost:11434/api/tags" >/dev/null 2>&1; then
-      resp=$(curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "http://localhost:11434/api/generate" 2>/dev/null || true)
+      resp=$(curl -s -H "Content-Type: application/json" -d "$payload" "http://localhost:11434/api/generate" 2>/dev/null || true)
     fi
     if [[ -n "$resp" ]]; then
       compiled=$(printf '%s' "$resp" | sed -n 's/.*"response":"\([^"]*\)".*/\1/p' | tr -d '\n\r' | sed -E 's/^[[:space:]`]+|[[:space:]`]+$//g; s/\\n//g')
@@ -771,14 +785,20 @@ compile_astcss() {
 
 rerank_candidates() {
   local query=$1 threshold=$2 topk=$3 cand_file=$4
-  local socket=${DUCKEYE_RERANK_SOCKET:-/tmp/reranker.sock}
+  local socket=${DUCKEYE_RERANK_SOCKET:-}
   local endpoint=${DUCKEYE_RERANK_ENDPOINT:-}
+  # The default socket path counts only when you name neither a socket nor an endpoint.
+  [[ -z $socket && -z $endpoint ]] && socket=/tmp/reranker.sock
   local model=${DUCKEYE_RERANK_MODEL:-}
   local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
   # A Tiiny device is probed only at the address you give: a LAN address in a public
   # script would publish one network, and be wrong on every other.
   local tiiny; tiiny=$(tiiny_host) || exit $?
   local payload_file=$tmp/rerank_payload.json resp_file=$tmp/scored.json
+  # A socket gets only a key you set, and only when you name the socket, so this is
+  # built before the discovery below.
+  local sock_auth=()
+  [[ -n ${DUCKEYE_RERANK_SOCKET:-} && -n $key ]] && sock_auth=(-H "Authorization: Bearer $key")
   # Each request below uses curl -f: an endpoint that answers an HTTP error (a 404 for a
   # route it lacks) then writes nothing, and the empty-response check at the end dies.
   # Without -f the error body was ranked, and -R exited 0 printing only NULL.
@@ -789,23 +809,27 @@ rerank_candidates() {
   fi
 
   # Auto-discover Tiiny API key if present and no key is explicitly set
+  local found=''
   if [[ -z $key && -d "$HOME/.local/share/tiiny-pcsvr/auth_data" ]]; then
     local key_file
     key_file=$(ls -t "$HOME/.local/share/tiiny-pcsvr/auth_data/"*.json 2>/dev/null | head -n 1)
     if [[ -n $key_file && -f $key_file ]]; then
-      key=$(sed -n 's/.*"auth_key":[[:space:]]*"\([^"]*\)".*/\1/p' "$key_file" 2>/dev/null || true)
+      found=$(sed -n 's/.*"auth_key":[[:space:]]*"\([^"]*\)".*/\1/p' "$key_file" 2>/dev/null || true)
     fi
   fi
 
   # Auto-detect Tiiny device if no endpoint or socket is active
   if [[ ! -S "$socket" && -z "$endpoint" ]]; then
     if ! curl -s --connect-timeout 0.2 "http://localhost:8001/health" >/dev/null 2>&1; then
-      if [[ -n $tiiny && -n $key ]] && curl -s --connect-timeout 0.3 "http://$tiiny/v1/models" -H "Authorization: Bearer $key" >/dev/null 2>&1; then
+      if [[ -n $tiiny && -n ${key:-$found} ]] && curl -s --connect-timeout 0.3 "http://$tiiny/v1/models" -H "Authorization: Bearer ${key:-$found}" >/dev/null 2>&1; then
         endpoint="http://$tiiny"
       fi
     fi
   fi
 
+  # For the endpoint: the key you set, else the discovered key if the endpoint is the
+  # Tiiny host. The default local ports below get no key.
+  if [[ -z $key ]] && tiiny_url "$endpoint" "$tiiny"; then key=$found; fi
   local auth_hdr=()
   [[ -n $key ]] && auth_hdr=(-H "Authorization: Bearer $key")
 
@@ -836,11 +860,11 @@ rerank_candidates() {
     printf '}' >>"$payload_file"
 
     if [[ -S "$socket" ]]; then
-      curl -sf --unix-socket "$socket" -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "http://localhost/v1/rerank" >"$resp_file" 2>/dev/null || true
+      curl -sf --unix-socket "$socket" -H "Content-Type: application/json" "${sock_auth[@]}" --data-binary @"$payload_file" "http://localhost/v1/rerank" >"$resp_file" 2>/dev/null || true
     elif [[ -n "$endpoint" ]]; then
       curl -sf -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "$endpoint/v1/rerank" >"$resp_file" 2>/dev/null || true
     elif curl -s --connect-timeout 0.3 "http://localhost:8001/v1/rerank" >/dev/null 2>&1; then
-      curl -sf -H "Content-Type: application/json" "${auth_hdr[@]}" --data-binary @"$payload_file" "http://localhost:8001/v1/rerank" >"$resp_file" 2>/dev/null || true
+      curl -sf -H "Content-Type: application/json" --data-binary @"$payload_file" "http://localhost:8001/v1/rerank" >"$resp_file" 2>/dev/null || true
     fi
   fi
 

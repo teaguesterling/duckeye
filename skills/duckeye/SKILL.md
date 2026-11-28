@@ -346,7 +346,7 @@ the built-in defaults; they point at local daemons and are not worth memorising.
 | `DUCKEYE_RERANK_ENDPOINT` | HTTP base URL instead of a socket. A URL containing `/v1`, or whose host equals `DUCKEYE_TIINY_HOST`, is treated as OpenAI-shaped (`/embeddings`); anything else gets `<endpoint>/v1/rerank` |
 | `DUCKEYE_RERANK_MODEL` | Model name to request for `-R` |
 | `DUCKEYE_TIINY_HOST` | `<host>[:<port>]` of a Tiiny Pocket. Unset (the default), nothing is probed. A lowercase `http://` prefix is accepted; any other form refuses. Set, `-F` and `-R` probe `http://<host>/v1` only when no socket file exists, the endpoint variable is empty, the local default port (11434 for `-F`, 8001 for `-R`) does not answer, and a key is found. A device URL in an endpoint variable needs `/v1`, unless its host equals this |
-| `DUCKEYE_LLM_KEY` / `DUCKEYE_API_KEY` | Bearer token for `-F` and `-R`. Goes only to an endpoint or socket you name: the default local ports and default socket paths get no key. A discovered Tiiny key goes only to `http://<DUCKEYE_TIINY_HOST>` |
+| `DUCKEYE_LLM_KEY` / `DUCKEYE_API_KEY` | Bearer token for `-F` and `-R`. Goes only to an endpoint, socket or `DUCKEYE_TIINY_HOST` you name: the default local ports and default socket paths get no key. A discovered Tiiny key goes only to `http://<DUCKEYE_TIINY_HOST>` |
 
 `-F` and `-R` are independent: configuring one does not configure the other, and a selector
 query (`-Q`) needs neither.

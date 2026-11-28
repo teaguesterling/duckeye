@@ -841,7 +841,7 @@ it to `DUCKEYE_EXTS`.
 | `DUCKEYE_RERANK_SOCKET` | Unix socket path for cross-encoder reranker daemon (default `/tmp/reranker.sock`, only when the endpoint variable is empty too) |
 | `DUCKEYE_RERANK_ENDPOINT` | HTTP endpoint URL for cross-encoder reranker (e.g. `http://localhost:8001`) |
 | `DUCKEYE_TIINY_HOST` | `<host>[:<port>]` of a Tiiny Pocket (default: none, no probe; a lowercase `http://` prefix is accepted, any other form refuses). `-F` and `-R` probe `http://<host>/v1` only when no socket file exists, the endpoint variable is empty, the local default port (11434 for `-F`, 8001 for `-R`) does not answer, and a key is found. An endpoint for the device itself needs `/v1`, such as `http://<device>/v1`, unless its host equals this |
-| `DUCKEYE_LLM_KEY` / `DUCKEYE_API_KEY` | Bearer token for `-F` and `-R`. Goes only to an endpoint or socket you name: the default local ports and default socket paths get no key. A discovered Tiiny key goes only to `http://<DUCKEYE_TIINY_HOST>` |
+| `DUCKEYE_LLM_KEY` / `DUCKEYE_API_KEY` | Bearer token for `-F` and `-R`. Goes only to an endpoint, socket or `DUCKEYE_TIINY_HOST` you name: the default local ports and default socket paths get no key. A discovered Tiiny key goes only to `http://<DUCKEYE_TIINY_HOST>` |
 | `COLUMNS` | overrides terminal column width for table rendering and profiling |
 
 ## Tests

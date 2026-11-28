@@ -94,6 +94,17 @@ no() { local n=$1 m; shift
   if (( _rc == 0 )); then fail=$((fail+1)); printf '  FAIL %s (expected nonzero)\n' "$n"
   elif m=$(missing_ext "$_err$_out"); then skipping "$n" "$m unavailable (exit status would be vacuous)"
   else pass=$((pass+1)); printf '  ok   %s\n' "$n"; fi; }
+# pdf has no loadable build on every DuckDB. The same check as test.sh, copied because
+# test.sh runs its cases at top level and cannot be sourced: a case that needs pdf is
+# skipped ONLY when this LOAD fails -- never because the case failed.
+ddb_ver=$(duckdb -version | awk '{print $1}')
+absent=
+duckdb -c 'LOAD pdf;' >/dev/null 2>&1 || absent="$absent pdf"
+lacks() { [[ " $absent " == *" $1 "* ]]; }
+# needs EXT HELPER NAME ARGS... -- run HELPER only while EXT loads, else skip by name.
+needs() { local e=$1; shift
+  if lacks "$e"; then skipping "$2" "$e: LOAD fails on $ddb_ver"; else "$@"; fi; }
+
 # bash runs command_not_found_handle in a SUBSHELL, so a counter incremented here is
 # discarded -- measured. The marker file is what survives, and the summary turns it
 # into a non-zero exit. Without this a misspelled or missing helper is a silent no-op:
@@ -200,9 +211,9 @@ exec(m.group(1), ns)
 open(sys.argv[1], 'wb').write(ns['pdf'])
 PY
 if [[ -s $TMP/d.pdf ]]; then
-  has 'pdf renders'        'First PDF Page'  $DUCKEYE "$TMP/d.pdf"
-  has 'pdf page marker'    'page 1'          $DUCKEYE "$TMP/d.pdf"
-  has 'pdf page range'     'Second PDF Page' $DUCKEYE -P 2 "$TMP/d.pdf"
+  needs pdf has 'pdf renders'        'First PDF Page'  $DUCKEYE "$TMP/d.pdf"
+  needs pdf has 'pdf page marker'    'page 1'          $DUCKEYE "$TMP/d.pdf"
+  needs pdf has 'pdf page range'     'Second PDF Page' $DUCKEYE -P 2 "$TMP/d.pdf"
 else
   skipping 'pdf' 'could not extract the fixture from test.sh'
 fi

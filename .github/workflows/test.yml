@@ -92,8 +92,10 @@ jobs:
       # one tree: exit 0 with that rc, exit 1 without it.
       #
       # Two checks, because a check of the rule alone let that through:
-      #   1. the rule is LIVE -- a single-arrow lambda must fail. If it runs, both
-      #      suites would pass under the old rule, measuring nothing.
+      #   1. the rule is LIVE -- a single-arrow lambda must report DuckDB's deprecation
+      #      error. If it runs, both suites would pass under the old rule, measuring
+      #      nothing. A missing binary or a crash does not count, and neither does
+      #      1.5.x, which prints the same words as a warning and runs the query.
       #   2. startup is SILENT on stdout -- a warning there is indistinguishable from a
       #      result to every caller in this repo, which is how a rule check stayed green
       #      while the step measured garbage.
@@ -102,7 +104,8 @@ jobs:
           H=$(mktemp -d)
           ln -s "$HOME/.duckdb" "$H/.duckdb"
           cp "$HOME/.gitconfig" "$H/" 2>/dev/null || true
-          if HOME="$H" duckdb -c "SELECT list_transform([1], x -> x+1)" >/dev/null 2>&1; then
+          if out=$(HOME="$H" duckdb -c "SELECT list_transform([1], x -> x+1)" 2>&1) \
+              || ! grep -q "Deprecated lambda arrow" <<<"$out"; then
             echo "2.0 lambda rule NOT active"; exit 1
           fi
           noise=$(HOME="$H" duckdb -list -noheader -c "SELECT 1" 2>/dev/null | grep -vx '1' || true)

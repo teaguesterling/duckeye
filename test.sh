@@ -497,6 +497,73 @@ refuses64 'a second --sheet is refused'         'only one --sheet'  $DUCKEYE --s
 refuses64 '--sheet on an archive listing is refused' '--sheet applies to documents' $DUCKEYE --sheet "$TMP/prune.dcs" -T fixtures/test.zim
 refuses64 '--sheet with -R on code is refused'  '--sheet does not apply to -R' $DUCKEYE --sheet "$TMP/prune.dcs" -R x "$TMP/sheet.py"
 has 'help names --sheet' '--sheet' $DUCKEYE --help
+has 'help lists what refuses --sheet' '-x, -E, -w, -c' $DUCKEYE --help
+has 'help says what a non-UTF-8 sheet does' 'not UTF-8: exit 1' $DUCKEYE --help
+for _f in '-E table:1' '-w 1=1' '-c content'; do
+  refuses64 "--sheet with ${_f%% *} is refused" "--sheet changes a document" $DUCKEYE --sheet "$TMP/prune.dcs" $_f "$TMP/sheet.md"
+done
+
+# applied NAME CMD... -- exit 0, the kept text on stdout and the pruned text gone. Empty
+# output fails, and so does a sheet that matched nothing.
+applied() { local n=$1; shift
+  _run "$@"
+  if (( _rc == 0 )) && [[ $_out == *kumquat* && $_out != *persimmon* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  else fail=$((fail+1)); printf '  FAIL %s (rc %s, stdout %q, stderr %q)\n' "$n" "$_rc" "${_out:0:160}" "${_err:0:160}"; fi; }
+# A relative sheet name is a local file, even when DuckDB would read the bare name as HOME,
+# as a file: URL or as an http: URL. The scratch HOME shares only the installed extensions.
+SD=$TMP/names; mkdir -p "$SD/home" "$SD/cwd/~" "$SD/decoy" "$SD/cwd/file:$SD/decoy"
+ln -s "$HOME/.duckdb" "$SD/home/.duckdb"
+duck_abs=$DUCKEYE; [[ $duck_abs == */* && $duck_abs != /* ]] && duck_abs=$PWD/$duck_abs
+from_cwd() { ( cd "$SD/cwd" && HOME="$SD/home" "$@" ); }
+cp "$TMP/prune.dcs" "$SD/cwd/~/t.dcs"
+cp "$TMP/prune.dcs" "$SD/cwd/file:$SD/decoy/x.dcs"
+printf '#keep-me { -dcs-prune: section; }\n' >"$SD/decoy/x.dcs"
+sheeted applied 'a local ~/ sheet name is not HOME' from_cwd $duck_abs --sheet '~/t.dcs' -t text "$TMP/sheet.md"
+sheeted applied 'a local file: sheet name is not a URL' from_cwd $duck_abs --sheet "file:$SD/decoy/x.dcs" -t text "$TMP/sheet.md"
+# The listener records every connection, so a fetch cannot pass unseen.
+python3 -c 'import socket, sys
+s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen()
+open(sys.argv[1], "w").write("%d" % s.getsockname()[1])
+while True:
+    c = s.accept()[0]; open(sys.argv[2], "a").write("hit\n"); c.close()' "$SD/port" "$SD/hits" &
+_listener=$!
+for _i in {1..100}; do [[ -s $SD/port ]] && break; sleep 0.1; done
+_url="http:/127.0.0.1:$(cat "$SD/port")/x.dcs"
+mkdir -p "$SD/cwd/${_url%/*}"; cp "$TMP/prune.dcs" "$SD/cwd/$_url"
+sheeted applied 'a local http: sheet name is not a URL' from_cwd $duck_abs --sheet "$_url" -t text "$TMP/sheet.md"
+sheeted ok 'a local http: sheet name makes no connection' test -s "$SD/port" -a ! -e "$SD/hits"
+kill "$_listener" 2>/dev/null; wait "$_listener" 2>/dev/null
+
+# sheet_fails NAME SHEET CMD... -- exit 1, no document, and stderr names SHEET as the user
+# typed it, never the temporary link duckeye reads a glob-like name through.
+sheet_fails() { local n=$1 s=$2; shift 2
+  _run "$@"
+  if (( _rc == 1 )) && [[ -z $_out && $_err == *"cannot use sheet $s"* && $_err != *"/sheet.dcs"* ]]; then
+    pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  else fail=$((fail+1)); printf '  FAIL %s (rc %s, stderr %q)\n' "$n" "$_rc" "${_err:0:300}"; fi; }
+# DuckDB gets this name without its final newline, finds no file and returns no row. That
+# left the sheet NULL, and the document empty with exit 0.
+cp "$TMP/prune.dcs" "$SD/cwd/nl.dcs"$'\n'
+sheeted sheet_fails 'a sheet that reads as NULL is an error' nl.dcs from_cwd $duck_abs --sheet $'nl.dcs\n' "$TMP/sheet.md"
+printf '\xff\n' >"$SD/cwd/u.dcs"; cp "$SD/cwd/u.dcs" "$SD/cwd/u[1].dcs"
+sheeted sheet_fails 'a non-UTF-8 sheet exits 1 and is named' u.dcs from_cwd $duck_abs --sheet u.dcs "$TMP/sheet.md"
+sheeted sheet_fails 'a non-UTF-8 [ ] sheet is named, not its link' 'u[1].dcs' from_cwd $duck_abs --sheet 'u[1].dcs' "$TMP/sheet.md"
+
+# ESC, BEL and the C1 control U+009B from a sheet must not reach the terminal in a warning.
+printf '#drop-me { -dcs-prune: \033]0;X\007\302\233; }\n' >"$TMP/ctrl.dcs"
+no_ctrl() { local n=$1; shift
+  _run "$@"
+  if (( _rc == 0 )) && [[ $_err == *'ctrl.dcs:1:'* && $_err != *$'\033'* && $_err != *$'\007'* && $_err != *$'\302\233'* ]]; then
+    pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  else fail=$((fail+1)); printf '  FAIL %s (rc %s, stderr %q)\n' "$n" "$_rc" "${_err:0:300}"; fi; }
+sheeted no_ctrl 'sheet warnings carry no control bytes' $DUCKEYE --sheet "$TMP/ctrl.dcs" -t text "$TMP/sheet.md"
+
+# webbed leaves class out unless asked, so a class selector matched nothing in HTML.
+printf '<html><body><h1>Page</h1><section class="c"><p>persimmon one</p></section><p class="c">persimmon two</p><p>kumquat</p></body></html>\n' >"$TMP/class.html"
+printf '.c { display: none; }\n' >"$TMP/class.dcs"
+sheeted applied 'a class selector matches HTML' $DUCKEYE --sheet "$TMP/class.dcs" -t text "$TMP/class.html"
+has   'HTML blocks render without --sheet'  'persimmon two' $DUCKEYE -t blocks "$TMP/class.html"
+drops 'HTML without --sheet leaves class out' '"class"' $DUCKEYE -t blocks "$TMP/class.html"
 
 echo 'sections'
 # a parent section carries its children, and stops before the next same-level heading

@@ -450,33 +450,39 @@ quiet() { local n=$1; shift
   _run "$@"
   if (( _rc == 0 )) && [[ -z $_err ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
   else fail=$((fail+1)); printf '  FAIL %s (rc %s, stderr %q)\n' "$n" "$_rc" "${_err:0:200}"; fi; }
+# drops NAME PATTERN CMD... -- exit 0 AND no PATTERN on stdout. no_leak would pass on a
+# command that refused the flag and printed nothing.
+drops() { local n=$1 pat=$2; shift 2
+  _run "$@"
+  if (( _rc == 0 )) && [[ $_out != *"$pat"* ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  else fail=$((fail+1)); printf '  FAIL %s (rc %s, or leaked %q)\n' "$n" "$_rc" "$pat"; fi; }
 # sheeted HELPER NAME ARGS... -- needs dmb. sheeted_q also needs sitting_duck, for -Q.
 sheeted() { needs dmb "$@"; }
 sheeted_q() { local h=$1; shift
   if lacks dmb; then skipping "$1" "dmb: LOAD fails on $ddb_ver"; else gated sitting_duck "$h" "$@"; fi; }
 sheeted has     'sheet keeps the other section'     'keep body kumquat' $DUCKEYE --sheet "$TMP/prune.dcs" -t text "$TMP/sheet.md"
-sheeted no_leak 'sheet prunes a section'            'persimmon'         $DUCKEYE --sheet "$TMP/prune.dcs" -t text "$TMP/sheet.md"
-sheeted no_leak 'sheet prunes in the ansi view'     'persimmon'         $DUCKEYE --sheet="$TMP/prune.dcs" "$TMP/sheet.md"
+sheeted drops 'sheet prunes a section'            'persimmon'         $DUCKEYE --sheet "$TMP/prune.dcs" -t text "$TMP/sheet.md"
+sheeted drops 'sheet prunes in the ansi view'     'persimmon'         $DUCKEYE --sheet="$TMP/prune.dcs" "$TMP/sheet.md"
 sheeted quiet   'a good sheet is silent on stderr'                      $DUCKEYE --sheet "$TMP/prune.dcs" "$TMP/sheet.md"
 sheeted has     'sheet adds a heading id (-t html)' 'id="anchored"'     $DUCKEYE --sheet "$TMP/id.dcs" -t html "$TMP/sheet.md"
 sheeted has     'sheet then -S finds the new id'    'kumquat'           $DUCKEYE --sheet "$TMP/id.dcs" -S anchored -t text "$TMP/sheet.md"
 sheeted has     'sheet then -T keeps a heading'     'Keep Me'           $DUCKEYE --sheet "$TMP/prune.dcs" -T "$TMP/sheet.md"
-sheeted no_leak 'sheet then -T drops the pruned'    'Drop Me'           $DUCKEYE --sheet "$TMP/prune.dcs" -T "$TMP/sheet.md"
+sheeted drops 'sheet then -T drops the pruned'    'Drop Me'           $DUCKEYE --sheet "$TMP/prune.dcs" -T "$TMP/sheet.md"
 sheeted dies_with 'sheet then -S cannot find a pruned section' 'no section matching' $DUCKEYE --sheet "$TMP/prune.dcs" -S 'Drop Me' "$TMP/sheet.md"
 sheeted has     'sheet then -s searches the rest'   'kumquat'           $DUCKEYE --sheet "$TMP/prune.dcs" -s 'Keep' -t text "$TMP/sheet.md"
 sheeted has     'sheet then -t md writes markdown'  '## Keep Me'        $DUCKEYE --sheet "$TMP/prune.dcs" -t md "$TMP/sheet.md"
-sheeted no_leak 'sheet then -t md drops the pruned' 'Drop Me'           $DUCKEYE --sheet "$TMP/prune.dcs" -t md "$TMP/sheet.md"
+sheeted drops 'sheet then -t md drops the pruned' 'Drop Me'           $DUCKEYE --sheet "$TMP/prune.dcs" -t md "$TMP/sheet.md"
 sheeted_q has     'sheet then -Q selects from the rest' 'kumquat'   $DUCKEYE --sheet "$TMP/prune.dcs" -Q p -t text "$TMP/sheet.md"
-sheeted_q no_leak 'sheet then -Q cannot select the pruned' 'persimmon' $DUCKEYE --sheet "$TMP/prune.dcs" -Q p -t text "$TMP/sheet.md"
+sheeted_q drops 'sheet then -Q cannot select the pruned' 'persimmon' $DUCKEYE --sheet "$TMP/prune.dcs" -Q p -t text "$TMP/sheet.md"
 # The empty-result probe re-runs the span, so it needs the sheet too: the section is there.
 sheeted_q dies_with 'sheet -S -Q names the empty half' "inside 'Keep Me'" $DUCKEYE --sheet "$TMP/prune.dcs" -S 'Keep Me' -Q table "$TMP/sheet.md"
 sheeted warns 'a broken sheet renders unchanged and warns' 'broken.dcs:2:3: error:' $DUCKEYE --sheet "$TMP/broken.dcs" -t text "$TMP/sheet.md"
 sheeted warns 'a bad value renders unchanged and warns'    'takes section, not self' $DUCKEYE --sheet "$TMP/badvalue.dcs" -t text "$TMP/sheet.md"
 sheeted has     "a ' in the sheet path and text works"     'kumquat'   $DUCKEYE --sheet "$qsheet" -t text "$TMP/sheet.md"
-sheeted no_leak "a ' in the sheet applies the sheet"       'persimmon' $DUCKEYE --sheet "$qsheet" -t text "$TMP/sheet.md"
-sheeted no_leak "a ' in the sheet changes no query"        'PWNED'     $DUCKEYE --sheet "$qsheet" -t text "$TMP/sheet.md"
+sheeted drops "a ' in the sheet applies the sheet"       'persimmon' $DUCKEYE --sheet "$qsheet" -t text "$TMP/sheet.md"
+sheeted drops "a ' in the sheet changes no query"        'PWNED'     $DUCKEYE --sheet "$qsheet" -t text "$TMP/sheet.md"
 sheeted has     'a [ ] sheet path reads that file'         'kumquat'   $DUCKEYE --sheet "$TMP/glob[1].dcs" -t text "$TMP/sheet.md"
-sheeted no_leak 'a [ ] sheet path is not a glob'           'persimmon' $DUCKEYE --sheet "$TMP/glob[1].dcs" -t text "$TMP/sheet.md"
+sheeted drops 'a [ ] sheet path is not a glob'           'persimmon' $DUCKEYE --sheet "$TMP/glob[1].dcs" -t text "$TMP/sheet.md"
 # Usage errors. A flag that was accepted and did nothing would be worse than a refusal.
 printf 'a,b\n1,2\n' >"$TMP/sheet.csv"; printf 'def f():\n    return 1\n' >"$TMP/sheet.py"
 for _f in -d -z -Z -x; do

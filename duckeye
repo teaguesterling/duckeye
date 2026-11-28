@@ -133,12 +133,9 @@ DUCKEYE_VERSION=0.25.0
 # downgrades a real 404 to a warning, so keeping a published name on it would hide the
 # next outage of the extension every `-Q` and code-AST path depends on, which is the one
 # failure this list must not cause.
-# pdf was listed here and is NOT any more. The registry had no 2.0.0 build on
-# 2026-10-27; it serves one on 2026-10-29, MEASURED by INSTALL+LOAD on both lines.
-# `--init` said so itself -- an allowlisted name that loads prints NOW AVAILABLE --
-# which is what this entry was told to wait for. NOTE: duckdb/community-extensions#3425,
-# the build this fleet opened for it, was CLOSED unmerged; the binary arrived another
-# way, so do not read its availability as that PR landing.
+#   pdf           no build for DuckDB v2.0.1. Without it, `.pdf` does not read and a PDF
+#                 inside a `.zim` does not render. It loaded on 2.0.0, so drop this entry
+#                 when `--init` prints NOW AVAILABLE.
 # textplot was listed here and is NOT any more either: it is reachable, from
 # Query.Farm's repository rather than the community one. See DUCKEYE_QUERYFARM above.
 # "Unpublished" means NOT USABLE on this DuckDB version, which is wider than a 404:
@@ -147,11 +144,11 @@ DUCKEYE_VERSION=0.25.0
 # Measured on DuckDB 1.5.6 (2026-10-03): toml alone 404s at community-extensions.duckdb.org,
 # while the other twelve duckeye needs serve normally.
 # Re-measured on DuckDB 2.0.0 (2026-10-29) by calling LOAD on every name rather than
-# reading INSTALL's exit code: `toml` alone 404s. `pdf` now installs and loads. The
+# reading INSTALL's exit code: `toml` alone 404s on that version. The
 # community `textplot` still installs and then throws on LOAD, so it is served from
 # Query.Farm instead -- not tolerated, REDIRECTED, which is why it is not listed here.
 # toml is unavailable on 1.5.6 too.
-: "${DUCKEYE_UNPUBLISHED:=toml}"
+: "${DUCKEYE_UNPUBLISHED:=toml pdf}"
 
 # ---------------------------------------------------------------- the SQL core
 # duckeye's flag-to-SQL logic lives here as macros, ONCE, so that a host that cannot
@@ -524,6 +521,20 @@ duckeye_load_sql() {
     out+="LOAD $e; "
   done
   printf '%s' "$out"
+}
+
+# pdf and textplot are the two extensions a DuckDB version can be without. They are
+# checked before the query, so the user gets one line that names the extension instead
+# of DuckDB's IO Error. Autoload is off as it is for the -Z load (Query-farm/textplot#4):
+# a crash at exit would read as "not available".
+duckeye_need_exts() {
+  local e ver
+  for e in "$@"; do
+    [[ $e == pdf || $e == textplot ]] || continue
+    duckdb -c "SET autoload_known_extensions=false; $(duckeye_load_sql "$e")" >/dev/null 2>&1 && continue
+    ver=$(duckdb -version 2>/dev/null)
+    die "extension $e is not available on this DuckDB (${ver%% *})" 2
+  done
 }
 
 # Each extension is named alongside the repository it comes from, so a failure
@@ -1486,15 +1497,12 @@ zim_macro_template="CREATE OR REPLACE TEMP MACRO zim_to_blocks(archive, entry) A
 # in a subshell where an assignment to zim_exts would be discarded.
 build_zim_macro() {
   local fn='' arm=''
-  # A declared-unavailable pdf skips the probe entirely, so a build that cannot have
-  # the extension pays nothing and prints nothing.
-  if [[ " ${DUCKEYE_UNPUBLISHED-} " != *" pdf "* ]]; then
-    fn=$(duckdb -list -noheader -c "LOAD pdf;
-      SELECT arg_min(function_name, CASE function_name WHEN 'pdf_text' THEN 0 ELSE 1 END)
-      FROM duckdb_functions()
-      WHERE function_type = 'scalar' AND function_name IN ('pdf_text', 'pdf_to_text');" \
-      2>/dev/null) || fn=''
-  fi
+  # Probed even though pdf is in DUCKEYE_UNPUBLISHED: where it loads, a PDF still renders.
+  fn=$(duckdb -list -noheader -c "LOAD pdf;
+    SELECT arg_min(function_name, CASE function_name WHEN 'pdf_text' THEN 0 ELSE 1 END)
+    FROM duckdb_functions()
+    WHERE function_type = 'scalar' AND function_name IN ('pdf_text', 'pdf_to_text');" \
+    2>/dev/null) || fn=''
   # Whitelist the answer rather than trust it: this string is interpolated into SQL.
   case $fn in
     pdf_text|pdf_to_text) ;;
@@ -1968,6 +1976,7 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
     # local source. Forcing panduck here made `-d -Q` need panduck for no reason.
     probe_load=
     case $f in http://*|https://*|s3://*) ;; *) probe_load="SET autoload_known_extensions=false; " ;; esac
+    duckeye_need_exts $exts $DUCKEYE_EXTS
     probe_load+=$(duckeye_load_sql $exts $DUCKEYE_EXTS)
     probe=$(duckdb -noheader -list -separator $'\t' -c "$probe_load $data_pre
       SELECT count(*), count(*) FILTER (WHERE b.element_type = 'table'),
@@ -2032,6 +2041,10 @@ if [[ $mode == raw || $mode == summary || $mode == profile ]]; then
 
   term_cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
   [[ $term_cols =~ ^[0-9]+$ && $term_cols -gt 0 ]] || term_cols=120
+
+  # -Z draws with textplot, which joins $exts only after the profile query is built.
+  need_textplot=; [[ $mode == profile ]] && need_textplot=textplot
+  duckeye_need_exts $exts $need_textplot $DUCKEYE_EXTS
 
   if [[ $mode == summary ]]; then
     sql="SUMMARIZE ($target_query);"
@@ -2767,6 +2780,7 @@ load="${prethreads:-}"
 # A Query.Farm extension is installed into its own repository subdirectory, so every
 # session must name the repo on LOAD as well as on INSTALL. No registration is needed
 # here -- MEASURED 2026-10-29, a fresh session loads it with FROM alone.
+duckeye_need_exts $DUCKEYE_BASE $exts $DUCKEYE_EXTS
 load+=$(duckeye_load_sql $DUCKEYE_BASE $exts $DUCKEYE_EXTS)
 
 duck=(duckdb $(duckdb_color_mode) -list -noheader -s "$load")

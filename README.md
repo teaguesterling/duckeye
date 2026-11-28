@@ -243,15 +243,17 @@ where the AST loses content, which is why `-t md` no longer goes through one.
 > [community-extensions#2855](https://github.com/duckdb/community-extensions/pull/2855)
 > merged 2026-09-30. This paragraph said the opposite for a month.
 >
-> **One** extension is not usable on 2.0.0: `toml` returns HTTP 404, so `.toml`
-> does not read, and `duckeye --init` prints it as `UNAVAILABLE for this DuckDB
-> version` with the capability you lose rather than failing.
+> **Two** extensions have no build for DuckDB v2.0.1: `toml`, so `.toml` does not
+> read, and `pdf`, so `.pdf` does not read and a PDF inside a `.zim` does not render.
+> `duckeye --init` prints each as `UNAVAILABLE for this DuckDB version` with the
+> capability you lose rather than failing. Reading a `.pdf` without the extension
+> prints `extension pdf is not available on this DuckDB (VERSION)` and exits 2; `-Z`
+> does the same for `textplot`.
 >
-> Two names that used to be listed here are not any more, measured 2026-10-29.
-> **`pdf`** now installs and loads on 2.0.0, so `.pdf` reads and a PDF inside a
-> `.zim` renders. The scalar it exposes was RENAMED between DuckDB lines --
-> `pdf_to_text` before 2.0.0, `pdf_text` on 2.0.0 -- which is why the `.zim` reader
-> still resolves the name from the loaded catalog instead of naming one. **`textplot`** is served
+> Where `pdf` loads, `.pdf` reads and a PDF inside a `.zim` renders. The scalar it
+> exposes was RENAMED between DuckDB lines -- `pdf_to_text` before 2.0.0, `pdf_text`
+> on 2.0.0 -- which is why the `.zim` reader resolves the name from the loaded catalog
+> instead of naming one. **`textplot`** is served
 > from [Query.Farm's own repository](https://query.farm/products/extensions/),
 > which `--init` now registers; the community registry still serves a copy whose
 > init throws. That is a THIRD-PARTY binary source: set `DUCKEYE_QUERYFARM=` to

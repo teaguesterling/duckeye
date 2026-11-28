@@ -100,6 +100,7 @@ ddb_ver=$(duckdb -version | awk '{print $1}')
 absent=
 duckdb -c 'LOAD pdf;' >/dev/null 2>&1 || absent="$absent pdf"
 duckdb -c 'LOAD textplot FROM query_farm;' >/dev/null 2>&1 || absent="$absent textplot"
+duckdb -c 'LOAD dmb;' >/dev/null 2>&1 || absent="$absent dmb"
 if [[ -n $absent ]]; then printf 'note: LOAD fails on %s:%s\n' "$ddb_ver" "$absent"; fi
 lacks() { [[ " $absent " == *" $1 "* ]]; }
 
@@ -422,6 +423,74 @@ has     'reader toc has the article'      'Second part'        $DUCKEYE --reader
 has     'no reader keeps the nav'         'Sign in here'       $DUCKEYE "$TMP/chrome.html"
 # A page with no named sections passes through whole.
 has     'reader on a plain page'          'html body text'     $DUCKEYE --reader "$TMP/doc.html"
+
+echo 'DCS sheets (--sheet)'
+# dmb applies the sheet to the blocks before -T, -S, -Q and the writer see them.
+printf '# Sheet Title\n\n## Keep Me\n\nkeep body kumquat\n\n## Drop Me\n\ndropped body persimmon\n' >"$TMP/sheet.md"
+printf '#drop-me { -dcs-prune: section; }\n' >"$TMP/prune.dcs"
+printf 'h2#keep-me { -dcs-id: anchored; }\n' >"$TMP/id.dcs"
+# Nothing here parses, so dmb has no rule to apply: line 2, column 3.
+printf '\n  oops {{{\n' >"$TMP/broken.dcs"
+# `self` parses but is not a value dmb takes.
+printf '#drop-me { -dcs-prune: self; }\n' >"$TMP/badvalue.dcs"
+# A quote in the path, SQL-shaped text behind it, and the same inside the sheet. If either
+# reached the query text, the quote would end the literal and PWNED would run.
+qsheet="$TMP/it's'); SELECT 'PWNED'; --.dcs"
+printf "/* it's'); SELECT 'PWNED'; -- */\n#drop-me { -dcs-prune: section; }\n" >"$qsheet"
+# DuckDB reads a path with [ ] as a glob, and the decoy is what that glob matches.
+cp "$TMP/prune.dcs" "$TMP/glob[1].dcs"; printf '#keep-me { -dcs-prune: section; }\n' >"$TMP/glob1.dcs"
+# warns NAME STDERR-PATTERN CMD... -- exit 0, the whole document on stdout, PATTERN on stderr.
+warns() { local n=$1 pat=$2; shift 2
+  _run "$@"
+  if (( _rc == 0 )) && [[ $_err == *"$pat"* && $_out == *kumquat* && $_out == *persimmon* ]]; then
+    pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  else fail=$((fail+1)); printf '  FAIL %s (rc %s, stderr %q)\n' "$n" "$_rc" "${_err:0:200}"; fi; }
+# quiet NAME CMD... -- exit 0 and nothing on stderr: a good sheet draws no warning.
+quiet() { local n=$1; shift
+  _run "$@"
+  if (( _rc == 0 )) && [[ -z $_err ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  else fail=$((fail+1)); printf '  FAIL %s (rc %s, stderr %q)\n' "$n" "$_rc" "${_err:0:200}"; fi; }
+# sheeted HELPER NAME ARGS... -- needs dmb. sheeted_q also needs sitting_duck, for -Q.
+sheeted() { needs dmb "$@"; }
+sheeted_q() { local h=$1; shift
+  if lacks dmb; then skipping "$1" "dmb: LOAD fails on $ddb_ver"; else gated sitting_duck "$h" "$@"; fi; }
+sheeted has     'sheet keeps the other section'     'keep body kumquat' $DUCKEYE --sheet "$TMP/prune.dcs" -t text "$TMP/sheet.md"
+sheeted no_leak 'sheet prunes a section'            'persimmon'         $DUCKEYE --sheet "$TMP/prune.dcs" -t text "$TMP/sheet.md"
+sheeted no_leak 'sheet prunes in the ansi view'     'persimmon'         $DUCKEYE --sheet="$TMP/prune.dcs" "$TMP/sheet.md"
+sheeted quiet   'a good sheet is silent on stderr'                      $DUCKEYE --sheet "$TMP/prune.dcs" "$TMP/sheet.md"
+sheeted has     'sheet adds a heading id (-t html)' 'id="anchored"'     $DUCKEYE --sheet "$TMP/id.dcs" -t html "$TMP/sheet.md"
+sheeted has     'sheet then -S finds the new id'    'kumquat'           $DUCKEYE --sheet "$TMP/id.dcs" -S anchored -t text "$TMP/sheet.md"
+sheeted has     'sheet then -T keeps a heading'     'Keep Me'           $DUCKEYE --sheet "$TMP/prune.dcs" -T "$TMP/sheet.md"
+sheeted no_leak 'sheet then -T drops the pruned'    'Drop Me'           $DUCKEYE --sheet "$TMP/prune.dcs" -T "$TMP/sheet.md"
+sheeted dies_with 'sheet then -S cannot find a pruned section' 'no section matching' $DUCKEYE --sheet "$TMP/prune.dcs" -S 'Drop Me' "$TMP/sheet.md"
+sheeted has     'sheet then -s searches the rest'   'kumquat'           $DUCKEYE --sheet "$TMP/prune.dcs" -s 'Keep' -t text "$TMP/sheet.md"
+sheeted has     'sheet then -t md writes markdown'  '## Keep Me'        $DUCKEYE --sheet "$TMP/prune.dcs" -t md "$TMP/sheet.md"
+sheeted no_leak 'sheet then -t md drops the pruned' 'Drop Me'           $DUCKEYE --sheet "$TMP/prune.dcs" -t md "$TMP/sheet.md"
+sheeted_q has     'sheet then -Q selects from the rest' 'kumquat'   $DUCKEYE --sheet "$TMP/prune.dcs" -Q p -t text "$TMP/sheet.md"
+sheeted_q no_leak 'sheet then -Q cannot select the pruned' 'persimmon' $DUCKEYE --sheet "$TMP/prune.dcs" -Q p -t text "$TMP/sheet.md"
+# The empty-result probe re-runs the span, so it needs the sheet too: the section is there.
+sheeted_q dies_with 'sheet -S -Q names the empty half' "inside 'Keep Me'" $DUCKEYE --sheet "$TMP/prune.dcs" -S 'Keep Me' -Q table "$TMP/sheet.md"
+sheeted warns 'a broken sheet renders unchanged and warns' 'broken.dcs:2:3: error:' $DUCKEYE --sheet "$TMP/broken.dcs" -t text "$TMP/sheet.md"
+sheeted warns 'a bad value renders unchanged and warns'    'takes section, not self' $DUCKEYE --sheet "$TMP/badvalue.dcs" -t text "$TMP/sheet.md"
+sheeted has     "a ' in the sheet path and text works"     'kumquat'   $DUCKEYE --sheet "$qsheet" -t text "$TMP/sheet.md"
+sheeted no_leak "a ' in the sheet applies the sheet"       'persimmon' $DUCKEYE --sheet "$qsheet" -t text "$TMP/sheet.md"
+sheeted no_leak "a ' in the sheet changes no query"        'PWNED'     $DUCKEYE --sheet "$qsheet" -t text "$TMP/sheet.md"
+sheeted has     'a [ ] sheet path reads that file'         'kumquat'   $DUCKEYE --sheet "$TMP/glob[1].dcs" -t text "$TMP/sheet.md"
+sheeted no_leak 'a [ ] sheet path is not a glob'           'persimmon' $DUCKEYE --sheet "$TMP/glob[1].dcs" -t text "$TMP/sheet.md"
+# Usage errors. A flag that was accepted and did nothing would be worse than a refusal.
+printf 'a,b\n1,2\n' >"$TMP/sheet.csv"; printf 'def f():\n    return 1\n' >"$TMP/sheet.py"
+for _f in -d -z -Z -x; do
+  refuses64 "--sheet with $_f is refused" "--sheet changes a document" $DUCKEYE --sheet "$TMP/prune.dcs" $_f "$TMP/sheet.md"
+done
+refuses64 '--sheet on a data file is refused'   '--sheet changes a document' $DUCKEYE --sheet "$TMP/prune.dcs" "$TMP/sheet.csv"
+refuses64 'a missing sheet is a usage error'    'cannot read sheet' $DUCKEYE --sheet "$TMP/nosuch.dcs" "$TMP/sheet.md"
+refuses64 'a directory is not a sheet'          'cannot read sheet' $DUCKEYE --sheet "$TMP" "$TMP/sheet.md"
+refuses64 '--sheet needs a file'                '--sheet needs'     $DUCKEYE "$TMP/sheet.md" --sheet
+refuses64 'an empty --sheet= is refused'        '--sheet needs'     $DUCKEYE --sheet= "$TMP/sheet.md"
+refuses64 'a second --sheet is refused'         'only one --sheet'  $DUCKEYE --sheet "$TMP/prune.dcs" --sheet "$TMP/id.dcs" "$TMP/sheet.md"
+refuses64 '--sheet on an archive listing is refused' '--sheet applies to documents' $DUCKEYE --sheet "$TMP/prune.dcs" -T fixtures/test.zim
+refuses64 '--sheet with -R on code is refused'  '--sheet does not apply to -R' $DUCKEYE --sheet "$TMP/prune.dcs" -R x "$TMP/sheet.py"
+has 'help names --sheet' '--sheet' $DUCKEYE --help
 
 echo 'sections'
 # a parent section carries its children, and stops before the next same-level heading
@@ -996,7 +1065,7 @@ fi
 mkdir -p "$TMP/noext"
 cat >"$TMP/noext/duckdb" <<SHIM
 #!/usr/bin/env bash
-for a in "\$@"; do case \$a in *'LOAD pdf'*|*'LOAD textplot'*) printf 'IO Error: Extension not found\\n\\nCandidate extensions: "md"\\n' >&2; exit 1 ;; esac; done
+for a in "\$@"; do case \$a in *'LOAD pdf'*|*'LOAD textplot'*|*'LOAD dmb'*) printf 'IO Error: Extension not found\\n\\nCandidate extensions: "md"\\n' >&2; exit 1 ;; esac; done
 exec '$(command -v duckdb)' "\$@"
 SHIM
 chmod +x "$TMP/noext/duckdb"
@@ -1008,6 +1077,8 @@ says_only 'missing pdf: a document says so, exit 2' 2 "$(missing_msg pdf)" \
     env PATH="$TMP/noext:$PATH" $DUCKEYE "$TMP/doc.pdf"
 says_only 'missing pdf: -d says so, exit 2' 2 "$(missing_msg pdf)" \
     env PATH="$TMP/noext:$PATH" $DUCKEYE -d "$TMP/doc.pdf"
+says_only 'missing dmb: --sheet says so, exit 2' 2 "$(missing_msg dmb)" \
+    env PATH="$TMP/noext:$PATH" $DUCKEYE --sheet "$TMP/prune.dcs" "$TMP/sheet.md"
 says_only 'missing textplot: -Z says so, exit 2' 2 "$(missing_msg textplot)" \
     env PATH="$TMP/noext:$PATH" $DUCKEYE -Z "$TMP/d.parquet"
 # No shim: a HOME with nothing installed is the ordinary way to lack textplot, and the
@@ -2243,6 +2314,9 @@ fi
 # user's real ~/.claude skill files on every run.
 mkdir -p "$TMP/home"
 ok  'init'                       env HOME="$TMP/home" $DUCKEYE --init
+if [[ $_out =~ dmb[[:space:]]+community[[:space:]]+installed ]]; then pass=$((pass+1)); echo '  ok   init installs dmb'
+elif lacks dmb; then skipping 'init installs dmb' "dmb: LOAD fails on $ddb_ver"
+else fail=$((fail+1)); echo '  FAIL init installs dmb'; fi
 cp "$(canonical_path "$DUCKEYE")" "$TMP/upd" && chmod +x "$TMP/upd"
 # Outside a git checkout --update downloads duckeye and install.sh from the published
 # main and runs THAT --init. A stub curl serves this checkout instead, so the case

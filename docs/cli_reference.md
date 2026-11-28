@@ -30,6 +30,7 @@ usage: duckeye [OPTION]... [FILE]
 | | `--top-k N` | Limit output to top N highest-scoring results |
 | | `--dialect LANG` | Dialect hint for ASTCSS compilation (`auto`, `python`, `rust`, `cpp`, `bash`, etc.) |
 | | `--json` | Emit machine-readable JSON array |
+| | `--sheet FILE` | Apply a DCS style sheet (dmb) to the document's blocks, after `--reader` and before `-T`, `-S`, `-s`, `-Q` and `-t`. See the README |
 | `-d` | `--data` | Read file as a data table (auto for parquet, csv, json, yaml, toml, xlsx, ...). Piped, emits JSONL |
 | `-D` | `--document` | Undo an earlier `-d`. Data files still route to data — use `-f` to name a document reader |
 | `-r` | `--raw` | Deprecated alias for `-d`; warns on stderr |
@@ -60,7 +61,7 @@ usage: duckeye [OPTION]... [FILE]
 | `DUCKEYE_EXTS` | `""` | Extra DuckDB extensions to `LOAD` on startup |
 | `DUCKEYE_PAGER`| `less -R` | Pager binary executed when `-p` is active |
 | `DUCKEYE_OFFICIAL` | `http aws excel` | Official extensions installed by `--init` |
-| `DUCKEYE_COMMUNITY` | `duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck panduck` | Community extensions installed by `--init` |
+| `DUCKEYE_COMMUNITY` | `duck_block_utils markdown webbed zim pdf yaml toml read_lines duck_tails zipfs textplot sitting_duck panduck dmb` | Community extensions installed by `--init` |
 | `DUCKEYE_THEME` | `auto` (`dark` / `light`) | Overrides terminal color scheme (default: probes OSC 11 with 50ms timeout) |
 | `DUCKEYE_LLM_SOCKET` | `/tmp/woollama.sock` | Unix domain socket path for ASTCSS compiler daemon; the default path is used only when the endpoint variable is empty too |
 | `DUCKEYE_LLM_API` | `ollama` | Request shape `-F` sends to a socket: `ollama` (`/api/generate`) or `openai` (`/v1/chat/completions`). `-F` sends a socket a Bearer token only from `DUCKEYE_LLM_KEY` or `DUCKEYE_API_KEY`, and only when `DUCKEYE_LLM_SOCKET` is set |

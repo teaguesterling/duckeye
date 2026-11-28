@@ -173,6 +173,28 @@ $ duckeye -d 'data/*.parquet'          # query across parquet shards
 For the AST selectors, consult the [sitting_duck](https://sitting-duck.readthedocs.io/en/latest/reference/css-selectors/) 
 documentation for syntax and supported features.
 
+## Style sheets (`--sheet`)
+
+`--sheet FILE` applies a DCS sheet to the document with the
+[dmb](https://github.com/teaguesterling/duckdb_dmb) extension, which `duckeye --init`
+installs. The sheet runs after `--reader` and before `-T`, `-S`, `-s`, `-Q` and `-t`,
+so every view shows the changed document.
+
+```console
+$ cat anchors.dcs
+#changelog { -dcs-prune: section; }   /* drop that section */
+h2#install { -dcs-id: setup; }        /* give a heading a new id */
+$ duckeye --sheet anchors.dcs -t md README.md
+```
+
+- A problem in the sheet goes to stderr as `duckeye: FILE:line:column: severity: message`.
+  The document still renders, with the rules that dmb accepted.
+- Only one sheet. It does not combine with `-d`, `-z`, `-Z` or a data file (exit 64),
+  and a sheet that cannot be read exits 64.
+- On source code, `-Q` selects from the syntax tree first, and the sheet applies to the
+  result. `-R` on source code refuses `--sheet`.
+- `-t md`, `-t html` and `-t text` write the changed document. The input file is not edited.
+
 ## Converting, not just reading
 
 `-t` writes the document through duck_blocks' own serializers rather than the terminal
@@ -799,6 +821,7 @@ it to `DUCKEYE_EXTS`.
     --threshold SCORE  minimum acceptable rank score cutoff (default: 0.0 with --top-k, else 0.70)
     --top-k N          limit output to top N highest-scoring results
     --dialect LANG     dialect hint for ASTCSS compilation (auto, python, rust, cpp, etc.)
+    --sheet FILE       apply a DCS style sheet (dmb) to the document's blocks
     --json             emit machine-readable JSON array
 -d, --data             read as data: SELECT * FROM FILE (AST on code, duck_blocks on a document)
 -D, --document         undo an earlier -d (data files still route to data)

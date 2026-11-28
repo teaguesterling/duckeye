@@ -185,6 +185,16 @@ duckeye -T 'zim://wiki.zim/Chlorophyll'  # TOC within one article
 duckeye 'zim://wiki.zim/_assets_/doc.pdf' # read embedded PDFs in ZIM
 ```
 
+### Style sheets (`--sheet`)
+
+```sh
+# Apply a DCS sheet (dmb extension) before -T, -S, -s, -Q and -t. The file is not edited.
+printf '#changelog { -dcs-prune: section; }\n' > trim.dcs
+duckeye --sheet trim.dcs -t md README.md
+# Sheet problems go to stderr with line:column; the document still renders.
+# One sheet only. Not with -d, -z, -Z or data files (exit 64).
+```
+
 ### Piping and scripting
 
 ```sh

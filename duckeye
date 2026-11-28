@@ -693,17 +693,19 @@ tiiny_url() { local re='^http://([^@/?#]+)(/|$)'
 
 compile_astcss() {
   local query=$1 dialect=${2:-auto}
-  local socket=${DUCKEYE_LLM_SOCKET:-/tmp/woollama.sock}
+  local socket=${DUCKEYE_LLM_SOCKET:-}
   local endpoint=${DUCKEYE_LLM_ENDPOINT:-}
+  # The default socket path counts only when you name neither a socket nor an endpoint.
+  [[ -z $socket && -z $endpoint ]] && socket=/tmp/woollama.sock
   local model=${DUCKEYE_LLM_MODEL:-}
   local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
   # The request shape for a socket. It is named, never probed.
   local api=${DUCKEYE_LLM_API:-ollama}
   [[ $api == ollama || $api == openai ]] || die "DUCKEYE_LLM_API='$api': give ollama or openai" 64
-  # A socket gets only a key you set, never the auto-discovered Tiiny key, so this is
-  # built before the discovery below.
+  # A socket gets only a key you set, and only when you name the socket: never the
+  # auto-discovered Tiiny key, so this is built before the discovery below.
   local sock_auth=()
-  [[ -n $key ]] && sock_auth=(-H "Authorization: Bearer $key")
+  [[ -n ${DUCKEYE_LLM_SOCKET:-} && -n $key ]] && sock_auth=(-H "Authorization: Bearer $key")
   # A Tiiny device is probed only at the address you give: a LAN address in a public
   # script would publish one network, and be wrong on every other.
   local tiiny; tiiny=$(tiiny_host) || exit $?
@@ -783,17 +785,20 @@ compile_astcss() {
 
 rerank_candidates() {
   local query=$1 threshold=$2 topk=$3 cand_file=$4
-  local socket=${DUCKEYE_RERANK_SOCKET:-/tmp/reranker.sock}
+  local socket=${DUCKEYE_RERANK_SOCKET:-}
   local endpoint=${DUCKEYE_RERANK_ENDPOINT:-}
+  # The default socket path counts only when you name neither a socket nor an endpoint.
+  [[ -z $socket && -z $endpoint ]] && socket=/tmp/reranker.sock
   local model=${DUCKEYE_RERANK_MODEL:-}
   local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
   # A Tiiny device is probed only at the address you give: a LAN address in a public
   # script would publish one network, and be wrong on every other.
   local tiiny; tiiny=$(tiiny_host) || exit $?
   local payload_file=$tmp/rerank_payload.json resp_file=$tmp/scored.json
-  # A socket gets only a key you set, so this is built before the discovery below.
+  # A socket gets only a key you set, and only when you name the socket, so this is
+  # built before the discovery below.
   local sock_auth=()
-  [[ -n $key ]] && sock_auth=(-H "Authorization: Bearer $key")
+  [[ -n ${DUCKEYE_RERANK_SOCKET:-} && -n $key ]] && sock_auth=(-H "Authorization: Bearer $key")
   # Each request below uses curl -f: an endpoint that answers an HTTP error (a 404 for a
   # route it lacks) then writes nothing, and the empty-response check at the end dies.
   # Without -f the error body was ranked, and -R exited 0 printing only NULL.

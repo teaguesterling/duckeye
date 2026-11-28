@@ -1257,7 +1257,12 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
     do_GET = do_POST = _any
     def log_message(self, *a): pass
-socketserver.UnixStreamServer(sock, H).serve_forever()
+if sock == "tcp":
+    s = http.server.HTTPServer(("127.0.0.1", 0), H)
+    print(s.server_address[1], flush=True)
+    s.serve_forever()
+else:
+    socketserver.UnixStreamServer(sock, H).serve_forever()
 PYEOF
 # The socket gets its own short folder: an AF_UNIX path holds at most 107 bytes, and a
 # long TMPDIR passes that.
@@ -1274,6 +1279,7 @@ mkdir -p "$TMP/llmhome/.local/share/tiiny-pcsvr/auth_data"
 printf '{"auth_key": "fake-tiiny-key"}\n' >"$TMP/llmhome/.local/share/tiiny-pcsvr/auth_data/k.json"
 ln -s "$HOME/.duckdb" "$TMP/llmhome/.duckdb"
 _llm_env=(env -u DUCKEYE_MOCK_ASTCSS -u DUCKEYE_LLM_ENDPOINT -u DUCKEYE_LLM_KEY -u DUCKEYE_API_KEY
+          -u DUCKEYE_MOCK_RERANK -u DUCKEYE_RERANK_ENDPOINT -u DUCKEYE_RERANK_MODEL
           -u DUCKEYE_TIINY_HOST -u DUCKEYE_LLM_API -u DUCKEYE_LLM_MODEL
           HOME="$TMP/llmhome" DUCKEYE_LLM_SOCKET="$_sockdir/llm.sock")
 socked() { local n=$1 h=$2; shift 2
@@ -1293,6 +1299,113 @@ socked 'ollama socket gets no Authorization without a key' has 'POST /api/genera
     sockreqs $DUCKEYE -F "level two headings" "$TMP/doc.md"
 socked 'find refuses a bad DUCKEYE_LLM_API' refuses64 'DUCKEYE_LLM_API' \
     "${_llm_env[@]}" DUCKEYE_LLM_API=bogus $DUCKEYE -F "level two headings" "$TMP/doc.md"
+# ---- key routing: a discovered key is sent only to its own endpoint. A default or
+# fallback port gets no key. A key you set goes to the endpoint or socket you name.
+socked 'key gate: -R socket gets no discovered key' has 'POST /v1/rerank auth=none' \
+    sockreqs DUCKEYE_RERANK_SOCKET="$_sockdir/llm.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
+socked 'key gate: -R socket gets the key that is set' has 'POST /v1/rerank auth=Bearer dummy' \
+    sockreqs DUCKEYE_RERANK_SOCKET="$_sockdir/llm.sock" DUCKEYE_LLM_KEY=dummy $DUCKEYE -R "alpha details" "$TMP/doc.md"
+# The HTTP cases put a curl wrapper first on PATH. It connects EVERY request to a TCP
+# stub, so no case touches a real port or host, the default ports included. It also
+# sends https:// as plain http, so the stub can record that request's headers.
+# KG_NOLOCAL=1 makes the local default ports look closed.
+mkdir -p "$TMP/kgbin"
+cat >"$TMP/kgbin/curl" <<'SHEOF'
+#!/usr/bin/env bash
+a=()
+for x; do
+  [[ -n ${KG_NOLOCAL:-} && ( $x == http://localhost:11434/api/tags || $x == http://localhost:8001/health ) ]] && exit 7
+  a+=("${x/#https:\/\//http://}")
+done
+exec "$KG_CURL" --noproxy '*' --connect-to "::127.0.0.1:$KG_PORT" "${a[@]}"
+SHEOF
+chmod +x "$TMP/kgbin/curl"
+: >"$TMP/kg.port"
+python3 -I "$TMP/llmsock.py" tcp "$TMP/kg.log" >"$TMP/kg.port" 2>"$TMP/kg.err" &
+_kgd=$!
+for _i in $(seq 1 25); do [[ -s $TMP/kg.port ]] && break; sleep 0.2; done
+_kg_env=("${_llm_env[@]}" DUCKEYE_LLM_SOCKET="$TMP/no.sock" DUCKEYE_RERANK_SOCKET="$TMP/no.sock"
+         PATH="$TMP/kgbin:$PATH" KG_CURL="$(command -v curl)" KG_PORT="$(<"$TMP/kg.port")" KG_NOLOCAL=)
+_kg_up=
+[[ $("${_kg_env[@]}" curl -s -o /dev/null -w '%{http_code}' http://stub-check.invalid:1/ 2>/dev/null) == 404 ]] && _kg_up=1
+kg() { local n=$1 h=$2; shift 2
+  if [[ -n $_kg_up ]]; then "$h" "$n" "$@"
+  else fail=$((fail+1)); printf '  FAIL %s (the TCP stub did not start: %s)\n' "$n" "$(tail -n 1 "$TMP/kg.err")"; fi; }
+# kgreqs ENV... CMD... -- run CMD, then print the requests the TCP stub saw.
+kgreqs() { : >"$TMP/kg.log"; "${_kg_env[@]}" "$@" >/dev/null 2>&1; cat "$TMP/kg.log"; }
+_th=tiiny.invalid:8080
+_kgF=($DUCKEYE -F "level two headings" "$TMP/doc.md")
+_kgR=($DUCKEYE -R "alpha details" "$TMP/doc.md")
+# No socket and no endpoint: the fallback port.
+kg 'key gate: -F fallback port gets no discovered key' has 'POST /api/generate auth=none' \
+    kgreqs "${_kgF[@]}"
+kg 'key gate: -R fallback port gets no discovered key' has 'POST /v1/rerank auth=none' \
+    kgreqs "${_kgR[@]}"
+kg 'key gate: -F fallback port gets no set key' has 'POST /api/generate auth=none' \
+    kgreqs DUCKEYE_LLM_KEY=dummy "${_kgF[@]}"
+kg 'key gate: -R fallback port gets no set key' has 'POST /v1/rerank auth=none' \
+    kgreqs DUCKEYE_LLM_KEY=dummy "${_kgR[@]}"
+# An endpoint that is not the Tiiny host.
+kg 'key gate: -F endpoint with no Tiiny host set gets no Tiiny key' has 'POST /api/generate auth=none' \
+    kgreqs DUCKEYE_LLM_ENDPOINT=http://other.invalid "${_kgF[@]}"
+kg 'key gate: -R endpoint with no Tiiny host set gets no Tiiny key' has 'POST /v1/rerank auth=none' \
+    kgreqs DUCKEYE_RERANK_ENDPOINT=http://other.invalid "${_kgR[@]}"
+kg 'key gate: -F other host gets no Tiiny key' has 'POST /api/generate auth=none' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_LLM_ENDPOINT=http://other.invalid "${_kgF[@]}"
+kg 'key gate: -R other host gets no Tiiny key' has 'POST /v1/rerank auth=none' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_RERANK_ENDPOINT=http://other.invalid "${_kgR[@]}"
+kg 'key gate: -F other /v1 endpoint gets no Tiiny key' has 'POST /v1/chat/completions auth=none' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_LLM_ENDPOINT=http://other.invalid/v1 "${_kgF[@]}"
+kg 'key gate: -R other /v1 endpoint gets no Tiiny key' has 'POST /v1/embeddings auth=none' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_RERANK_ENDPOINT=http://other.invalid/v1 "${_kgR[@]}"
+# Authority forms. With userinfo in the URL, curl sends its own Basic header.
+kg 'key gate: -F userinfo form gets no Tiiny key' has 'POST /api/generate auth=Basic ' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_LLM_ENDPOINT="http://$_th@other.invalid" "${_kgF[@]}"
+kg 'key gate: -R userinfo form gets no Tiiny key' has 'POST /v1/rerank auth=Basic ' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_RERANK_ENDPOINT="http://$_th@other.invalid" "${_kgR[@]}"
+kg 'key gate: -F scheme-less endpoint gets no Tiiny key' has 'POST /v1/chat/completions auth=none' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_LLM_ENDPOINT=$_th "${_kgF[@]}"
+kg 'key gate: -R scheme-less endpoint gets no Tiiny key' has 'POST /v1/embeddings auth=none' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_RERANK_ENDPOINT=$_th "${_kgR[@]}"
+kg 'key gate: -F query form gets no Tiiny key' has "POST /?h=$_th/api/generate auth=none" \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_LLM_ENDPOINT="http://other.invalid/?h=$_th" "${_kgF[@]}"
+kg 'key gate: -R query form gets no Tiiny key' has "POST /?h=$_th/v1/rerank auth=none" \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_RERANK_ENDPOINT="http://other.invalid/?h=$_th" "${_kgR[@]}"
+# Scheme: the Tiiny host is plain http, so an https URL on the same name gets no key,
+# and an https Tiiny host refuses before an http endpoint can get one.
+kg 'key gate: -F https endpoint on the Tiiny host gets no Tiiny key' has 'POST /v1/chat/completions auth=none' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_LLM_ENDPOINT="https://$_th" "${_kgF[@]}"
+kg 'key gate: -R https endpoint on the Tiiny host gets no Tiiny key' has 'POST /v1/embeddings auth=none' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_RERANK_ENDPOINT="https://$_th" "${_kgR[@]}"
+kg 'key gate: -F https Tiiny host with http endpoint refuses' refuses64 'DUCKEYE_TIINY_HOST' \
+    "${_kg_env[@]}" DUCKEYE_TIINY_HOST="https://$_th" DUCKEYE_LLM_ENDPOINT="http://$_th" "${_kgF[@]}"
+kg 'key gate: -F https Tiiny host with http endpoint sends nothing' no_leak 'auth=' \
+    kgreqs DUCKEYE_TIINY_HOST="https://$_th" DUCKEYE_LLM_ENDPOINT="http://$_th" "${_kgF[@]}"
+# A scheme name is not a host.
+for _v in https HTTP; do
+  kg "key gate: -F refuses Tiiny host '$_v'" refuses64 'is a URL scheme' \
+      "${_kg_env[@]}" DUCKEYE_TIINY_HOST=$_v "${_kgF[@]}"
+  kg "key gate: -R refuses Tiiny host '$_v'" refuses64 'is a URL scheme' \
+      "${_kg_env[@]}" DUCKEYE_TIINY_HOST=$_v "${_kgR[@]}"
+done
+# Controls: the keys that must still arrive.
+kg 'key gate: -F named endpoint gets the key that is set' has 'POST /api/generate auth=Bearer dummy' \
+    kgreqs DUCKEYE_LLM_KEY=dummy DUCKEYE_LLM_ENDPOINT=http://other.invalid "${_kgF[@]}"
+kg 'key gate: -R named endpoint gets the key that is set' has 'POST /v1/rerank auth=Bearer dummy' \
+    kgreqs DUCKEYE_LLM_KEY=dummy DUCKEYE_RERANK_ENDPOINT=http://other.invalid "${_kgR[@]}"
+kg 'key gate: -F named endpoint gets DUCKEYE_API_KEY' has 'POST /v1/chat/completions auth=Bearer dummy2' \
+    kgreqs DUCKEYE_API_KEY=dummy2 DUCKEYE_LLM_ENDPOINT=http://other.invalid/v1 "${_kgF[@]}"
+kg 'key gate: -F Tiiny endpoint gets the Tiiny key' has 'POST /v1/chat/completions auth=Bearer fake-tiiny-key' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_LLM_ENDPOINT="http://$_th" "${_kgF[@]}"
+kg 'key gate: -F Tiiny /v1 endpoint gets the Tiiny key' has 'POST /v1/chat/completions auth=Bearer fake-tiiny-key' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_LLM_ENDPOINT="http://$_th/v1/" "${_kgF[@]}"
+kg 'key gate: -R Tiiny endpoint gets the Tiiny key' has 'POST /v1/embeddings auth=Bearer fake-tiiny-key' \
+    kgreqs DUCKEYE_TIINY_HOST=$_th DUCKEYE_RERANK_ENDPOINT="http://$_th" "${_kgR[@]}"
+kg 'key gate: -F probed Tiiny device gets the Tiiny key' has 'POST /v1/chat/completions auth=Bearer fake-tiiny-key' \
+    kgreqs KG_NOLOCAL=1 DUCKEYE_TIINY_HOST=$_th "${_kgF[@]}"
+kg 'key gate: -R probed Tiiny device gets the Tiiny key' has 'POST /v1/embeddings auth=Bearer fake-tiiny-key' \
+    kgreqs KG_NOLOCAL=1 DUCKEYE_TIINY_HOST=$_th "${_kgR[@]}"
+kill "$_kgd" 2>/dev/null; wait "$_kgd" 2>/dev/null
 kill "$_llmd" 2>/dev/null; wait "$_llmd" 2>/dev/null
 has 'outline --json'            '"title":"Alpha"' $DUCKEYE -T --json "$TMP/doc.md"
 has 'section --json'              '"element_type":"heading"' $DUCKEYE -S Alpha --json "$TMP/doc.md"

@@ -257,3 +257,17 @@ Agents running in autonomous workflows can configure local daemon transport via 
 | `DUCKEYE_RERANK_SOCKET` | `/tmp/reranker.sock` | Unix domain socket for cross-encoder reranker daemon; the default path is used only when the endpoint variable is empty too |
 | `DUCKEYE_RERANK_ENDPOINT` | `http://localhost:8001` | HTTP endpoint for cross-encoder (`/v1/rerank`) or embedding similarity (`/v1/embeddings`) |
 | `DUCKEYE_RERANK_MODEL` | `Qwen3-Reranker-0.6B` / `Qwen/Qwen3-Embedding-0.6B` | Model identifier for cross-encoder scoring or dense vector embeddings |
+
+---
+
+## Style sheets (`--sheet`)
+
+Use `--sheet FILE.dcs` to change a document's blocks before reading or converting it. It
+needs the dmb extension (`duckeye --init`).
+
+```sh
+duckeye --sheet trim.dcs -T docs/architecture.md
+duckeye --sheet trim.dcs -t md docs/architecture.md > trimmed.md
+```
+
+Check stderr: a rule that dmb refuses is reported there, and the exit status stays 0.

@@ -1240,7 +1240,61 @@ for _v in "https:/127.0.0.1:$_port" "HTTPS:/127.0.0.1:$_port" "http:/127.0.0.1:$
       DUCKEYE_RERANK_SOCKET="$TMP/no.sock" $DUCKEYE -R "alpha details" "$TMP/doc.md"
 done
 kill "$_httpd" 2>/dev/null; wait "$_httpd" 2>/dev/null
-has 'outline --json'              '"title":"Alpha"' $DUCKEYE -T --json "$TMP/doc.md"
+# A stub OpenAI server on a Unix socket, for -F with DUCKEYE_LLM_API. It answers POST
+# /v1/chat/completions with the selector h2, every other request 404, and records
+# "METHOD PATH auth=<Authorization or none>" per request.
+cat >"$TMP/llmsock.py" <<'PYEOF'
+import http.server, socketserver, sys
+sock, log = sys.argv[1], sys.argv[2]
+class H(http.server.BaseHTTPRequestHandler):
+    def _any(self):
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        with open(log, "a") as f:
+            f.write(f"{self.command} {self.path} auth={self.headers.get('Authorization', 'none')}\n")
+        ok = self.command == "POST" and self.path == "/v1/chat/completions"
+        body = b'{"choices":[{"message":{"content":"h2"}}]}' if ok else b'{"detail":"Not Found"}'
+        self.send_response(200 if ok else 404); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    do_GET = do_POST = _any
+    def log_message(self, *a): pass
+socketserver.UnixStreamServer(sock, H).serve_forever()
+PYEOF
+# The socket gets its own short folder: an AF_UNIX path holds at most 107 bytes, and a
+# long TMPDIR passes that.
+_sockdir=$(mktemp -d /tmp/de.XXXXXX) || exit 1
+trap 'rm -rf "$TMP" "$_sockdir"' EXIT
+python3 -I "$TMP/llmsock.py" "$_sockdir/llm.sock" "$TMP/llmsock.log" 2>"$TMP/llmsock.err" &
+_llmd=$!
+for _i in $(seq 1 25); do [[ -S $_sockdir/llm.sock ]] && break; sleep 0.2; done
+_sock_up=
+[[ $(curl -s -o /dev/null -w '%{http_code}' --unix-socket "$_sockdir/llm.sock" http://localhost/) == 404 ]] && _sock_up=1
+# A HOME holding a FAKE Tiiny key, so "the Tiiny key never goes to a socket" is testable
+# and the real key file is never read. DuckDB still finds its extensions through the link.
+mkdir -p "$TMP/llmhome/.local/share/tiiny-pcsvr/auth_data"
+printf '{"auth_key": "fake-tiiny-key"}\n' >"$TMP/llmhome/.local/share/tiiny-pcsvr/auth_data/k.json"
+ln -s "$HOME/.duckdb" "$TMP/llmhome/.duckdb"
+_llm_env=(env -u DUCKEYE_MOCK_ASTCSS -u DUCKEYE_LLM_ENDPOINT -u DUCKEYE_LLM_KEY -u DUCKEYE_API_KEY
+          -u DUCKEYE_TIINY_HOST -u DUCKEYE_LLM_API -u DUCKEYE_LLM_MODEL
+          HOME="$TMP/llmhome" DUCKEYE_LLM_SOCKET="$_sockdir/llm.sock")
+socked() { local n=$1 h=$2; shift 2
+  if [[ -n $_sock_up ]]; then "$h" "$n" "$@"
+  else fail=$((fail+1)); printf '  FAIL %s (the socket stub did not start: %s)\n' "$n" "$(tail -n 1 "$TMP/llmsock.err")"; fi; }
+# sockreqs ENV... CMD... -- run CMD, then print the requests the socket stub saw.
+sockreqs() { : >"$TMP/llmsock.log"; "${_llm_env[@]}" "$@" >/dev/null 2>&1; cat "$TMP/llmsock.log"; }
+socked 'find over an openai socket uses the returned selector' has 'Alpha' \
+    "${_llm_env[@]}" DUCKEYE_LLM_API=openai $DUCKEYE -F "level two headings" "$TMP/doc.md"
+socked 'find over an openai socket posts to chat completions' has 'POST /v1/chat/completions' \
+    sockreqs DUCKEYE_LLM_API=openai $DUCKEYE -F "level two headings" "$TMP/doc.md"
+socked 'openai socket gets no Authorization without a key' has 'POST /v1/chat/completions auth=none' \
+    sockreqs DUCKEYE_LLM_API=openai $DUCKEYE -F "level two headings" "$TMP/doc.md"
+socked 'openai socket gets the key that is set' has 'POST /v1/chat/completions auth=Bearer dummy' \
+    sockreqs DUCKEYE_LLM_API=openai DUCKEYE_LLM_KEY=dummy $DUCKEYE -F "level two headings" "$TMP/doc.md"
+socked 'ollama socket gets no Authorization without a key' has 'POST /api/generate auth=none' \
+    sockreqs $DUCKEYE -F "level two headings" "$TMP/doc.md"
+socked 'find refuses a bad DUCKEYE_LLM_API' refuses64 'DUCKEYE_LLM_API' \
+    "${_llm_env[@]}" DUCKEYE_LLM_API=bogus $DUCKEYE -F "level two headings" "$TMP/doc.md"
+kill "$_llmd" 2>/dev/null; wait "$_llmd" 2>/dev/null
+has 'outline --json'            '"title":"Alpha"' $DUCKEYE -T --json "$TMP/doc.md"
 has 'section --json'              '"element_type":"heading"' $DUCKEYE -S Alpha --json "$TMP/doc.md"
 
 echo 'zim'

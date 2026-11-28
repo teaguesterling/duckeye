@@ -454,6 +454,8 @@ Env:
   DUCKEYE_BASE       extensions always loaded  (default: duck_block_utils)
   DUCKEYE_EXTS       extra extensions to LOAD  (space-separated)
   DUCKEYE_PAGER      pager used by -p          (default: less -R)
+  DUCKEYE_LLM_API    request shape -F sends to a socket: ollama or openai
+                     (default: ollama)
   DUCKEYE_OFFICIAL   --init installs these from the core repo
   DUCKEYE_COMMUNITY  --init installs these from the community repo
                      (default: duck_block_utils markdown webbed zim pdf yaml
@@ -687,6 +689,13 @@ compile_astcss() {
   local endpoint=${DUCKEYE_LLM_ENDPOINT:-}
   local model=${DUCKEYE_LLM_MODEL:-}
   local key=${DUCKEYE_LLM_KEY:-${DUCKEYE_API_KEY:-}}
+  # The request shape for a socket. It is named, never probed.
+  local api=${DUCKEYE_LLM_API:-ollama}
+  [[ $api == ollama || $api == openai ]] || die "DUCKEYE_LLM_API='$api': give ollama or openai" 64
+  # A socket gets only a key you set, never the auto-discovered Tiiny key, so this is
+  # built before the discovery below.
+  local sock_auth=()
+  [[ -n $key ]] && sock_auth=(-H "Authorization: Bearer $key")
   # A Tiiny device is probed only at the address you give: a LAN address in a public
   # script would publish one network, and be wrong on every other.
   local tiiny; tiiny=$(tiiny_host) || exit $?
@@ -725,18 +734,25 @@ compile_astcss() {
   local auth_hdr=()
   [[ -n $key ]] && auth_hdr=(-H "Authorization: Bearer $key")
 
-  if [[ $endpoint == *"/v1"* || ( -n $tiiny && $(url_host "$endpoint") == "$tiiny" ) ]]; then
-    local ep_clean="${endpoint%/}"
-    [[ $ep_clean != */v1 ]] && ep_clean+="/v1"
+  local via_endpoint=
+  [[ $endpoint == *"/v1"* || ( -n $tiiny && $(url_host "$endpoint") == "$tiiny" ) ]] && via_endpoint=1
+
+  if [[ -n $via_endpoint || ( $api == openai && -S $socket ) ]]; then
     payload=$(printf '{"model":"%s","messages":[{"role":"system","content":"You are an ASTCSS compiler for sitting_duck. Convert the user natural language request into a single CSS selector for source code ASTs or document blocks (e.g. .func#name, .class#name, h2, p, li, blockquote). Emit ONLY the bare CSS selector, with no quotes, markdown, or explanation.\\nLanguage: %s"},{"role":"user","content":"%s"}],"max_tokens":50,"chat_template_kwargs":{"enable_thinking":false}}' "${model:-default}" "$dialect" "$query")
-    resp=$(curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "$ep_clean/chat/completions" 2>/dev/null || true)
+    if [[ -n $via_endpoint ]]; then
+      local ep_clean="${endpoint%/}"
+      [[ $ep_clean != */v1 ]] && ep_clean+="/v1"
+      resp=$(curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "$ep_clean/chat/completions" 2>/dev/null || true)
+    else
+      resp=$(curl -s --unix-socket "$socket" -H "Content-Type: application/json" "${sock_auth[@]}" -d "$payload" "http://localhost/v1/chat/completions" 2>/dev/null || true)
+    fi
     if [[ -n $resp ]]; then
       compiled=$(printf '%s' "$resp" | sed -n 's/.*"content":[[:space:]]*"\([^"]*\)".*/\1/p' | tr -d '\n\r' | sed -E 's/^[[:space:]`]+|[[:space:]`]+$//g; s/\\n//g')
     fi
   else
     payload=$(printf '{"model":"%s","prompt":"<|im_start|>system\\nYou are an ASTCSS compiler for sitting_duck. Convert the user natural language request into a single CSS selector for source code ASTs. Emit only the selector.\\nLanguage: %s\\n<|im_end|>\\n<|im_start|>user\\n%s\\n<|im_end|>\\n<|im_start|>assistant\\n","stream":false}' "${model:-qwen3.5-0.8b-astcss}" "$dialect" "$query")
     if [[ -S "$socket" ]]; then
-      resp=$(curl -s --unix-socket "$socket" -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "http://localhost/api/generate" 2>/dev/null || true)
+      resp=$(curl -s --unix-socket "$socket" -H "Content-Type: application/json" "${sock_auth[@]}" -d "$payload" "http://localhost/api/generate" 2>/dev/null || true)
     elif [[ -n "$endpoint" ]]; then
       resp=$(curl -s -H "Content-Type: application/json" "${auth_hdr[@]}" -d "$payload" "$endpoint/api/generate" 2>/dev/null || true)
     elif curl -s --connect-timeout 0.3 "http://localhost:11434/api/tags" >/dev/null 2>&1; then

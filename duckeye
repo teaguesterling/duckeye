@@ -351,8 +351,12 @@ Options:
                          title, author and description from the page's metadata
       --sheet FILE       apply a DCS style sheet (dmb) to the document's blocks, after
                          --reader and before -T, -S, -s, -Q and -t (on source code,
-                         -Q selects first). Sheet problems go to stderr and the
-                         document still renders. One sheet; not with -d, -z or -Z
+                         -Q selects first). A rule dmb cannot use: a warning on
+                         stderr, and the document renders. A sheet that is missing
+                         or has no read permission: exit 64. One that DuckDB cannot
+                         read, or not UTF-8: exit 1, no document. Refused (exit 64)
+                         with a second --sheet, -d, -r, -z, -Z, -x, -E, -w, -c, a
+                         data file, an archive listing, and -R on source code
   -d, --data             read FILE as data, not prose: SELECT * FROM FILE
                          (parquet, csv, json, xlsx, ...). On a document it is
                          that document's duck_blocks, one row per block.
@@ -689,7 +693,7 @@ q() { printf '%s' "${1//\'/\'\'}"; }
 [[ ${0##*/} == der ]] && mode=raw || mode=full
 arg= where= limit= fmt= color=auto out_fmt=ansi pages=
 in_file= out_file= data_fmt= columns= as_data= extract= explicit_doc= positional=()
-find_query= rank_criterion= rank_threshold= top_k= dialect= json_out= number_lines= reader= sheet= sheet_sql=
+find_query= rank_criterion= rank_threshold= top_k= dialect= json_out= number_lines= reader= sheet= sheet_sql= html_args=
 
 # ---------------------------------------------------------------- intelligence layer
 # url_host URL -> its host[:port], no scheme and no path. DUCKEYE_TIINY_HOST is compared
@@ -1404,6 +1408,8 @@ if [[ -n $sheet ]]; then
   [[ $mode == raw || $mode == summary || $mode == profile ]] &&
     die "--sheet changes a document's blocks; it does not combine with -d, -z, -Z, -x, -E, -w, -c or a data file" 64
   [[ -f $sheet && -r $sheet ]] || die "cannot read sheet $sheet" 64
+  # webbed leaves class out unless asked, and a sheet selects by class.
+  html_args=", capture_attributes := 'classes'"
 fi
 
 # Some producers check the filename, not just the bytes — read_markdown_blocks and
@@ -2409,7 +2415,7 @@ case "$key" in                     # NB: patterns unquoted, or globbing is disab
     doc="SELECT list(b) AS blocks FROM read_markdown_blocks('$src') b" ;;
   *.htm|*.html)
     exts="webbed"
-    doc="SELECT list(b) AS blocks FROM read_html_blocks('$src') b" ;;
+    doc="SELECT list(b) AS blocks FROM read_html_blocks('$src'$html_args) b" ;;
   *.pdf)
     exts="markdown pdf"
     # Both paths go through read_pdf, which is the only reader that knows where the
@@ -2612,7 +2618,7 @@ CREATE OR REPLACE TEMP TABLE __sel AS SELECT * FROM __ast; "
   http*://*)
     # Assume http(s):// with no extension is HTML
     exts="webbed"
-    doc="SELECT list(b) AS blocks FROM read_html_blocks('$src') b" ;;
+    doc="SELECT list(b) AS blocks FROM read_html_blocks('$src'$html_args) b" ;;
   *)
     die "unsupported extension: ${f##*/}" 2 ;;
 esac
@@ -2700,13 +2706,16 @@ if [[ -n $sheet ]]; then
   [[ -n $rank_criterion && -n ${code_src:-} ]] &&
     die '--sheet does not apply to -R on source code, which ranks syntax tree nodes, not blocks' 64
   sheet_src=$sheet
+  # An absolute path, so DuckDB cannot read a local name as ~, file: or http:.
+  [[ $sheet == /* ]] || sheet_src=$PWD/$sheet
   # DuckDB reads *, ? and [ in a path as a glob, which can name a different file.
-  if [[ $sheet == *[\*\?\[]* ]]; then
-    [[ $sheet == /* ]] || sheet_src=$PWD/$sheet
+  if [[ $sheet_src == *[\*\?\[]* ]]; then
     ln -s "$sheet_src" "$tmp/sheet.dcs" || die "cannot read sheet $sheet"
     sheet_src=$tmp/sheet.dcs
   fi
-  sheet_sql="SET VARIABLE duckeye_sheet = (SELECT content FROM read_text('$(q "$sheet_src")')); "
+  # read_text returns no row for a path it cannot match: an error, never a NULL sheet.
+  sheet_sql="SET VARIABLE duckeye_sheet = coalesce((SELECT content FROM read_text('$(q "$sheet_src")')),
+    error('read_text found no sheet file')); "
   premacro+=$sheet_sql
   exts+=" dmb"
   doc="SELECT dcs_apply(blocks, getvariable('duckeye_sheet')) AS blocks FROM ($doc)"
@@ -2829,9 +2838,17 @@ load+=$(duckeye_load_sql $DUCKEYE_BASE $exts $DUCKEYE_EXTS)
 # dcs_apply never fails on a bad sheet, so dcs_check says what it skipped, on stderr.
 # Only duckeye's own lines pass: a ~/.duckdbrc may print to stdout.
 if [[ -n $sheet ]]; then
-  warnings=$(duckdb -list -noheader -s "$load" -s "$sheet_sql" -s "SELECT concat('duckeye: ',
-    '$(q "$sheet")', ':', line, ':', \"column\", ': ', severity, ': ', message)
-    FROM dcs_check(getvariable('duckeye_sheet'));") || exit $?
+  # A sheet's text can reach a message, so control bytes but tab and newline are removed.
+  sheet_rc=0
+  warnings=$(duckdb -list -noheader -s "$load" -s "$sheet_sql" -s "SELECT regexp_replace(concat('duckeye: ',
+    '$(q "$sheet")', ':', line, ':', \"column\", ': ', severity, ': ', message),
+    '[\x00-\x08\x0B-\x1F\x7F-\x9F]', '', 'g')
+    FROM dcs_check(getvariable('duckeye_sheet'));" 2>"$tmp/sheet.err") || sheet_rc=$?
+  # DuckDB names the path it was given, which may be the temporary link: show the user's name.
+  sheet_err=$(<"$tmp/sheet.err")
+  [[ -n $sheet_err ]] &&
+    printf '%s\n' "${sheet_err//"$sheet_src"/"$sheet"}" | tr -d '\000-\010\013-\037\177' >&2
+  (( sheet_rc == 0 )) || die "cannot use sheet $sheet: DuckDB could not read or check it" "$sheet_rc"
   grep '^duckeye: ' <<<"$warnings" >&2
 fi
 

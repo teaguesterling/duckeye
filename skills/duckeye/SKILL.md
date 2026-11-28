@@ -191,8 +191,10 @@ duckeye 'zim://wiki.zim/_assets_/doc.pdf' # read embedded PDFs in ZIM
 # Apply a DCS sheet (dmb extension) before -T, -S, -s, -Q and -t. The file is not edited.
 printf '#changelog { -dcs-prune: section; }\n' > trim.dcs
 duckeye --sheet trim.dcs -t md README.md
-# Sheet problems go to stderr with line:column; the document still renders.
-# One sheet only. Not with -d, -z, -Z or data files (exit 64).
+# A rule dmb cannot use warns on stderr with line:column; the document still renders.
+# Missing or no read permission: exit 64. Not UTF-8 or DuckDB cannot read it: exit 1.
+# Exit 64 with a second --sheet, -d, -r, -z, -Z, -x, -E, -w, -c, a data file,
+# an archive listing, or -R on source code.
 ```
 
 ### Piping and scripting

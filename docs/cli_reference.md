@@ -30,7 +30,7 @@ usage: duckeye [OPTION]... [FILE]
 | | `--top-k N` | Limit output to top N highest-scoring results |
 | | `--dialect LANG` | Dialect hint for ASTCSS compilation (`auto`, `python`, `rust`, `cpp`, `bash`, etc.) |
 | | `--json` | Emit machine-readable JSON array |
-| | `--sheet FILE` | Apply a DCS style sheet (dmb) to the document's blocks, after `--reader` and before `-T`, `-S`, `-s`, `-Q` and `-t`. See the README |
+| | `--sheet FILE` | Apply a DCS style sheet (dmb) to the document's blocks, after `--reader` and before `-T`, `-S`, `-s`, `-Q` and `-t`. Exit 64: missing or unreadable by permission. Exit 1: not UTF-8 or DuckDB cannot read it. Refused (64) with a second `--sheet`, `-d`, `-r`, `-z`, `-Z`, `-x`, `-E`, `-w`, `-c`, a data file, an archive listing, `-R` on code. See the README |
 | `-d` | `--data` | Read file as a data table (auto for parquet, csv, json, yaml, toml, xlsx, ...). Piped, emits JSONL |
 | `-D` | `--document` | Undo an earlier `-d`. Data files still route to data — use `-f` to name a document reader |
 | `-r` | `--raw` | Deprecated alias for `-d`; warns on stderr |

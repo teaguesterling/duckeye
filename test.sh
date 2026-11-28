@@ -1000,7 +1000,7 @@ for a in "\$@"; do case \$a in *'LOAD pdf'*|*'LOAD textplot'*) printf 'IO Error:
 exec '$(command -v duckdb)' "\$@"
 SHIM
 chmod +x "$TMP/noext/duckdb"
-missing_line() { printf 'duckeye: extension %s is not available on this DuckDB (%s)' "$1" "$ddb_ver"; }
+missing_line() { printf 'duckeye: extension %s did not load on this DuckDB (%s)' "$1" "$ddb_ver"; }
 init_hint='  run `duckeye --init` to install extensions or see why one cannot be installed'
 # The line, then DuckDB's own reason cut to one line, then what to do about it.
 missing_msg() { printf '%s\n  IO Error: Extension not found\n%s' "$(missing_line "$1")" "$init_hint"; }

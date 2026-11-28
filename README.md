@@ -247,7 +247,7 @@ where the AST loses content, which is why `-t md` no longer goes through one.
 > read, and `pdf`, so `.pdf` does not read and a PDF inside a `.zim` does not render.
 > `duckeye --init` prints each as `UNAVAILABLE for this DuckDB version` with the
 > capability you lose rather than failing. Reading a `.pdf` without the extension
-> prints `extension pdf is not available on this DuckDB (VERSION)` and exits 2; `-Z`
+> prints `extension pdf did not load on this DuckDB (VERSION)` and exits 2; `-Z`
 > does the same for `textplot`.
 >
 > Where `pdf` loads, `.pdf` reads and a PDF inside a `.zim` renders. The scalar it

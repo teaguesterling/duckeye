@@ -541,7 +541,7 @@ duckeye_need_exts() {
       [[ $line == *Error:* || $line == '{"exception_type"'* ]] && { reason=$line; break; }
     done <<<"$err"
     ver=$(duckdb -version 2>/dev/null)
-    die "extension $e is not available on this DuckDB (${ver%% *})
+    die "extension $e did not load on this DuckDB (${ver%% *})
   $reason
   run \`duckeye --init\` to install extensions or see why one cannot be installed" 2
   done

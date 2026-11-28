@@ -996,17 +996,30 @@ fi
 mkdir -p "$TMP/noext"
 cat >"$TMP/noext/duckdb" <<SHIM
 #!/usr/bin/env bash
-for a in "\$@"; do case \$a in *'LOAD pdf'*|*'LOAD textplot'*) echo 'IO Error: Extension not found' >&2; exit 1 ;; esac; done
+for a in "\$@"; do case \$a in *'LOAD pdf'*|*'LOAD textplot'*) printf 'IO Error: Extension not found\\n\\nCandidate extensions: "md"\\n' >&2; exit 1 ;; esac; done
 exec '$(command -v duckdb)' "\$@"
 SHIM
 chmod +x "$TMP/noext/duckdb"
-missing_msg() { printf 'duckeye: extension %s is not available on this DuckDB (%s)' "$1" "$ddb_ver"; }
+missing_line() { printf 'duckeye: extension %s is not available on this DuckDB (%s)' "$1" "$ddb_ver"; }
+init_hint='  run `duckeye --init` to install extensions or see why one cannot be installed'
+# The line, then DuckDB's own reason cut to one line, then what to do about it.
+missing_msg() { printf '%s\n  IO Error: Extension not found\n%s' "$(missing_line "$1")" "$init_hint"; }
 says_only 'missing pdf: a document says so, exit 2' 2 "$(missing_msg pdf)" \
     env PATH="$TMP/noext:$PATH" $DUCKEYE "$TMP/doc.pdf"
 says_only 'missing pdf: -d says so, exit 2' 2 "$(missing_msg pdf)" \
     env PATH="$TMP/noext:$PATH" $DUCKEYE -d "$TMP/doc.pdf"
 says_only 'missing textplot: -Z says so, exit 2' 2 "$(missing_msg textplot)" \
     env PATH="$TMP/noext:$PATH" $DUCKEYE -Z "$TMP/d.parquet"
+# No shim: a HOME with nothing installed is the ordinary way to lack textplot, and the
+# reason is DuckDB's own, so only its shape is asserted.
+mkdir -p "$TMP/freshhome"
+_run env HOME="$TMP/freshhome" $DUCKEYE -Z "$TMP/d.parquet"
+if (( _rc == 2 )) && [[ -z $_out && $_err == "$(missing_line textplot)"$'\n  '*Error:*$'\n'"$init_hint" &&
+      $(grep -c '' <<<"$_err") == 3 ]]; then
+  pass=$((pass+1)); printf '  ok   %s\n' 'fresh HOME: -Z gives the reason and the --init hint'
+else
+  fail=$((fail+1)); printf '  FAIL %s (rc %s, stderr %q)\n' 'fresh HOME: -Z gives the reason and the --init hint' "$_rc" "${_err:0:300}"
+fi
 
 echo 'code AST (sitting_duck)'
 cat >"$TMP/test_code.py" <<'PY'

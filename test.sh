@@ -93,6 +93,16 @@ if [[ -n $unavailable ]]; then
   printf '      assertions that fail ONLY for that reason are skipped, not passed\n'
 fi
 
+# pdf and textplot have no loadable build on every DuckDB. A case that needs one is
+# skipped ONLY when this LOAD fails -- never because the case failed, so a real pdf bug
+# cannot hide as a skip. textplot is loaded the way duckeye loads it.
+ddb_ver=$(duckdb -version | awk '{print $1}')
+absent=
+duckdb -c 'LOAD pdf;' >/dev/null 2>&1 || absent="$absent pdf"
+duckdb -c 'LOAD textplot FROM query_farm;' >/dev/null 2>&1 || absent="$absent textplot"
+if [[ -n $absent ]]; then printf 'note: LOAD fails on %s:%s\n' "$ddb_ver" "$absent"; fi
+lacks() { [[ " $absent " == *" $1 "* ]]; }
+
 # missing_ext OUTPUT -> prints the unavailable extension the output blames, else fails.
 # Matched on DuckDB's own IO Error text, so a real failure that merely mentions the
 # extension still counts as a failure. An assertion that cannot run is a SKIP: counting
@@ -165,6 +175,16 @@ gated() { local e=$1 h=$2 n=$3; shift 3
   if [[ " $unavailable " == *" $e "* ]]; then
     skipping "$n" "$e unavailable (the assertion's own construction hides the error)"
   else "$h" "$n" "$@"; fi; }
+
+# needs EXT HELPER NAME ARGS... -- run HELPER only while EXT loads, else skip by name.
+needs() { local e=$1; shift
+  if lacks "$e"; then skipping "$2" "$e: LOAD fails on $ddb_ver"; else "$@"; fi; }
+# says_only NAME CODE LINE CMD... -- exit status EXACTLY CODE, stderr EXACTLY the one
+# LINE, and nothing on stdout.
+says_only() { local n=$1 code=$2 line=$3; shift 3
+  _run "$@"
+  if (( _rc == code )) && [[ $_err == "$line" && -z $_out ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$n"
+  else fail=$((fail+1)); printf '  FAIL %s (rc %s, stderr %q)\n' "$n" "$_rc" "${_err:0:200}"; fi; }
 
 # no_leak NAME PATTERN CMD... — output must NOT contain PATTERN. The negative half
 # of an assertion pair: "the prose is present" and "the raw AST is absent" are
@@ -459,7 +479,7 @@ has 'explicit - reads stdin'   'alpha body' bash -c "$DUCKEYE -S Alpha - <'$TMP/
 has 'bare pipe reads stdin'    'alpha body' bash -c "$DUCKEYE -S Alpha <'$TMP/doc.md'"
 has 'sniffs markdown'          '  Alpha'    bash -c "$DUCKEYE -T - <'$TMP/doc.md'"
 has 'sniffs html'              'Head'       bash -c "$DUCKEYE -T - <'$TMP/doc.html'"
-has 'sniffs pdf by magic'      'alpha body' bash -c "$DUCKEYE - <'$TMP/doc.pdf'"
+needs pdf has 'sniffs pdf by magic'      'alpha body' bash -c "$DUCKEYE - <'$TMP/doc.pdf'"
 # -f must beat the filename, or it isn't an override
 cp "$TMP/doc.html" "$TMP/liar.md"
 has '-f overrides extension'   'Head'       $DUCKEYE -T -f html "$TMP/liar.md"
@@ -565,9 +585,9 @@ has 'raw reads a named parquet from stdin' 'name_1' \
 has 'raw reads a named csv from stdin'     'name_4' \
     bash -c "$DUCKEYE -f csv -w 'id > 3' - <'$TMP/d.csv'"
 has 'summary with -z' 'null_percentage' $DUCKEYE -z "$TMP/d.parquet"
-has 'profile with -Z' 'distribution'    $DUCKEYE -Z "$TMP/d.parquet"
-has 'profile with -Z and -w' '33.3%'     $DUCKEYE -Z -w 'score > 6' "$TMP/d.parquet"
-has 'profile temporal date' 'created_date' $DUCKEYE -Z "$TMP/d.parquet"
+needs textplot has 'profile with -Z' 'distribution'    $DUCKEYE -Z "$TMP/d.parquet"
+needs textplot has 'profile with -Z and -w' '33.3%'     $DUCKEYE -Z -w 'score > 6' "$TMP/d.parquet"
+needs textplot has 'profile temporal date' 'created_date' $DUCKEYE -Z "$TMP/d.parquet"
 
 # Piped data output is read by programs, not people, so it leaves the box behind.
 # These assertions exist because the box->JSONL switch passed this entire suite
@@ -593,7 +613,7 @@ ok  'piped -r keeps a record on one line' \
 has 'piped -z emits JSONL'        '{"'     $DUCKEYE -z "$TMP/d.parquet"
 # -Z is textplot ANSI histograms and the picture IS the output, so it keeps the box
 # on every path; as JSON it would be a table of bar-chart strings.
-has 'piped -Z stays visual'       '│'      $DUCKEYE -Z "$TMP/d.parquet"
+needs textplot has 'piped -Z stays visual'       '│'      $DUCKEYE -Z "$TMP/d.parquet"
 # A pager means a person is reading, so -p keeps the box even though stdout is a pipe.
 has '-p keeps the box'            '│'      env DUCKEYE_PAGER=cat $DUCKEYE -p -r "$TMP/d.parquet"
 
@@ -643,7 +663,7 @@ ok  '-t tsv is an alias for tabs' \
     bash -c "[[ \"\$($DUCKEYE -t tsv -d '$TMP/d.csv')\" == \"\$($DUCKEYE -t tabs -d '$TMP/d.csv')\" ]]"
 # -Z keeps the box by default because the picture is the output, but an explicit -t is
 # the user saying otherwise.
-has '-t csv overrides the -Z box' 'column,type' $DUCKEYE -t csv -Z "$TMP/d.parquet"
+needs textplot has '-t csv overrides the -Z box' 'column,type' $DUCKEYE -t csv -Z "$TMP/d.parquet"
 
 # --color decides ESCAPES, never which format the output is in. These two are the
 # pipe-side halves of that: a program must not receive box drawing just because
@@ -695,19 +715,22 @@ if [[ -n $pty_kind ]]; then
 else
   skipping '-o from a tty writes data, not the box' 'no usable script(1) for a pty'
 fi
-has 'profile temporal span' 'days' $DUCKEYE -Z "$TMP/d.parquet"
-has 'profile list len' 'len' $DUCKEYE -Z "$TMP/d.parquet"
-has 'profile map entries' 'entries' $DUCKEYE -Z "$TMP/d.parquet"
+needs textplot has 'profile temporal span' 'days' $DUCKEYE -Z "$TMP/d.parquet"
+needs textplot has 'profile list len' 'len' $DUCKEYE -Z "$TMP/d.parquet"
+needs textplot has 'profile map entries' 'entries' $DUCKEYE -Z "$TMP/d.parquet"
 # BLOB is bytes, so it profiles by size like a list profiles by length -- not as a
 # category histogram over the escaped byte string, which is what the catch-all
 # branch would otherwise do to it.
-has 'profile blob bytes' 'bytes min:' $DUCKEYE -Z "$TMP/d.parquet"
+needs textplot has 'profile blob bytes' 'bytes min:' $DUCKEYE -Z "$TMP/d.parquet"
+if lacks textplot; then skipping 'profile scales with terminal width' "textplot: LOAD fails on $ddb_ver"
+else
 w80=$(COLUMNS=80 $DUCKEYE -Z "$TMP/d.parquet" | wc -L)
 w140=$(COLUMNS=140 $DUCKEYE -Z "$TMP/d.parquet" | wc -L)
 if [[ $w80 -le $w140 ]]; then
   pass=$((pass+1)); echo '  ok   profile scales with terminal width'
 else
   fail=$((fail+1)); echo "  FAIL profile width scaling: w80=$w80 > w140=$w140"
+fi
 fi
 no  'raw stdin refuses to guess'           bash -c "$DUCKEYE -r - <'$TMP/d.parquet'"
 
@@ -744,10 +767,10 @@ echo 'summary and profile on documents (-z, -Z)'
 has 'doc -z summarizes the blocks'       'element_order'  $DUCKEYE -z -t csv "$TMP/doc.md"
 has 'doc -z names SUMMARIZE columns'     'approx_unique'  $DUCKEYE -z -t csv "$TMP/doc.md"
 has 'doc -z html summarizes'             'element_order'  $DUCKEYE -z -t csv "$TMP/doc.html"
-has 'doc -Z profiles the blocks'         'null_pct'       $DUCKEYE -Z -t csv "$TMP/doc.md"
+needs textplot has 'doc -Z profiles the blocks'         'null_pct'       $DUCKEYE -Z -t csv "$TMP/doc.md"
 # attributes is MAP(VARCHAR, VARCHAR). A profile over a MAP column is the one thing here
 # that could have needed new code; it does not -- the profile reports entry counts.
-has 'doc -Z handles the MAP column'      'attributes'     $DUCKEYE -Z -t csv "$TMP/doc.md"
+needs textplot has 'doc -Z handles the MAP column'      'attributes'     $DUCKEYE -Z -t csv "$TMP/doc.md"
 # -D still wins: it undoes the implied -d, so a document renders as prose.
 has 'doc -z -D is still prose'           'alpha body'     $DUCKEYE -z -D -t text "$TMP/doc.md"
 
@@ -913,41 +936,41 @@ else
 fi
 
 echo 'pdf'
-has 'pdf renders'           'First PDF Page'   $DUCKEYE "$TMP/doc.pdf"
-has 'pdf search'            'beta body'        $DUCKEYE -s 'beta body' "$TMP/doc.pdf"
-has 'pdf page range'        'Second PDF Page'  $DUCKEYE -P 2 "$TMP/doc.pdf"
-has 'pdf page range 1-2'    'First PDF Page'   $DUCKEYE -P 1-2 "$TMP/doc.pdf"
+needs pdf has 'pdf renders'           'First PDF Page'   $DUCKEYE "$TMP/doc.pdf"
+needs pdf has 'pdf search'            'beta body'        $DUCKEYE -s 'beta body' "$TMP/doc.pdf"
+needs pdf has 'pdf page range'        'Second PDF Page'  $DUCKEYE -P 2 "$TMP/doc.pdf"
+needs pdf has 'pdf page range 1-2'    'First PDF Page'   $DUCKEYE -P 1-2 "$TMP/doc.pdf"
 # Pages are a separate axis from the heading outline. A page_break is a marker --
 # an hr with a number, not a section -- so -t must NOT list pages. duckeye used to
 # synthesise "## Page N" as a real markdown heading, which put physical pagination
 # into the semantic outline: -t reported "Page 1, Page 2" as though an author had
 # written them, and -S would slice on one. Asserted as an absence, because that is
 # what regressing back to headings would look like.
-no_leak 'pdf pages stay out of the toc'  'Page 1' $DUCKEYE -P 1-2 -t "$TMP/doc.pdf"
-has     'pdf page marker renders'        'page 1' $DUCKEYE -P 1-2 "$TMP/doc.pdf"
+needs pdf no_leak 'pdf pages stay out of the toc'  'Page 1' $DUCKEYE -P 1-2 -t "$TMP/doc.pdf"
+needs pdf has     'pdf page marker renders'        'page 1' $DUCKEYE -P 1-2 "$TMP/doc.pdf"
 # markers appear without -P too: the page axis is not conditional on a flag about
 # ranges, which is what it used to be
-has     'pdf page marker without -P'     'page 2' $DUCKEYE "$TMP/doc.pdf"
+needs pdf has     'pdf page marker without -P'     'page 2' $DUCKEYE "$TMP/doc.pdf"
 # -P pushes down into read_pdf rather than slicing after the fact, so the pages
 # outside the range are never read at all
-no_leak 'pdf page range excludes others' 'First PDF Page' $DUCKEYE -P 2 "$TMP/doc.pdf"
-has 'pdf raw'               'First PDF Page'   $DUCKEYE -r "$TMP/doc.pdf"
-has 'pdf -t text'           'alpha body'       $DUCKEYE -t text "$TMP/doc.pdf"
+needs pdf no_leak 'pdf page range excludes others' 'First PDF Page' $DUCKEYE -P 2 "$TMP/doc.pdf"
+needs pdf has 'pdf raw'               'First PDF Page'   $DUCKEYE -r "$TMP/doc.pdf"
+needs pdf has 'pdf -t text'           'alpha body'       $DUCKEYE -t text "$TMP/doc.pdf"
 no  'pdf invalid page range'                   $DUCKEYE -P abc "$TMP/doc.pdf"
 
 # Many pages, run repeatedly: the failure this guards was a RATE, not a verdict.
 # Rendering 40 pages aborted 3 times in 5 at v0.17.0 because each page is parsed
 # separately and cmark's global registration is not thread-safe. One pass would
 # have passed more often than not.
-ok  'pdf many pages renders'   $DUCKEYE -t text "$TMP/many.pdf"
-has 'pdf many pages last page' 'kumquat40' $DUCKEYE -t text "$TMP/many.pdf"
+needs pdf ok  'pdf many pages renders'   $DUCKEYE -t text "$TMP/many.pdf"
+needs pdf has 'pdf many pages last page' 'kumquat40' $DUCKEYE -t text "$TMP/many.pdf"
 
 # fixtures/multiline.pdf wraps one sentence across three lines with a HYPHENATED break
 # ("contin-" / "ues"). pdftotext keeps both the lines and the hyphen; duckeye must give
 # one paragraph with a space at the soft break and no hyphen at the hard one.
-has     'pdf joins a hyphenated line break'    'continues onto a third line' $DUCKEYE -t text fixtures/multiline.pdf
-has     'pdf joins wrapped lines with a space' 'over the lazy dog'           $DUCKEYE -t text fixtures/multiline.pdf
-no_leak 'pdf leaves no hyphen at the break'    'contin-'                     $DUCKEYE -t text fixtures/multiline.pdf
+needs pdf has     'pdf joins a hyphenated line break'    'continues onto a third line' $DUCKEYE -t text fixtures/multiline.pdf
+needs pdf has     'pdf joins wrapped lines with a space' 'over the lazy dog'           $DUCKEYE -t text fixtures/multiline.pdf
+needs pdf no_leak 'pdf leaves no hyphen at the break'    'contin-'                     $DUCKEYE -t text fixtures/multiline.pdf
 
 # Every PDF duckeye produced used to FAIL duck_block_utils' own validator: the
 # page_break marker had a NULL level and shared its element_order with the next block.
@@ -959,11 +982,44 @@ blocks_valid() {  # FILE -> "true"/"false" from duck_blocks_validate over duckey
   duckdb -noheader -list -c "LOAD duck_block_utils; SELECT (duck_blocks_validate(from_json(content, '[{\"kind\":\"VARCHAR\",\"element_type\":\"VARCHAR\",\"content\":\"VARCHAR\",\"level\":\"INTEGER\",\"encoding\":\"VARCHAR\",\"attributes\":\"MAP(VARCHAR,VARCHAR)\",\"element_order\":\"INTEGER\"}]'))).valid FROM read_text('$j');" 2>/dev/null
   rm -f "$j"
 }
-has 'pdf blocks pass the spec validator (1 page)'  'true' blocks_valid fixtures/multiline.pdf
-has 'pdf blocks pass the spec validator (2 pages)' 'true' blocks_valid "$TMP/doc.pdf"
+needs pdf has 'pdf blocks pass the spec validator (1 page)'  'true' blocks_valid fixtures/multiline.pdf
+needs pdf has 'pdf blocks pass the spec validator (2 pages)' 'true' blocks_valid "$TMP/doc.pdf"
+if lacks pdf; then skipping 'pdf many pages is stable over 5 runs' "pdf: LOAD fails on $ddb_ver"
+else
 f=0; for _ in 1 2 3 4 5; do $DUCKEYE -t text "$TMP/many.pdf" >/dev/null 2>&1 || f=$((f+1)); done
 if (( f == 0 )); then pass=$((pass+1)); echo '  ok   pdf many pages is stable over 5 runs'
 else fail=$((fail+1)); printf '  FAIL %s (%d/5 failed)\n' 'pdf many pages is stable over 5 runs' "$f"; fi
+fi
+
+# The message a user gets when either extension cannot LOAD. A duckdb shim refuses those
+# two LOADs and passes everything else on, so these run on every DuckDB.
+mkdir -p "$TMP/noext"
+cat >"$TMP/noext/duckdb" <<SHIM
+#!/usr/bin/env bash
+for a in "\$@"; do case \$a in *'LOAD pdf'*|*'LOAD textplot'*) printf 'IO Error: Extension not found\\n\\nCandidate extensions: "md"\\n' >&2; exit 1 ;; esac; done
+exec '$(command -v duckdb)' "\$@"
+SHIM
+chmod +x "$TMP/noext/duckdb"
+missing_line() { printf 'duckeye: extension %s did not load on this DuckDB (%s)' "$1" "$ddb_ver"; }
+init_hint='  run `duckeye --init` to install extensions or see why one cannot be installed'
+# The line, then DuckDB's own reason cut to one line, then what to do about it.
+missing_msg() { printf '%s\n  IO Error: Extension not found\n%s' "$(missing_line "$1")" "$init_hint"; }
+says_only 'missing pdf: a document says so, exit 2' 2 "$(missing_msg pdf)" \
+    env PATH="$TMP/noext:$PATH" $DUCKEYE "$TMP/doc.pdf"
+says_only 'missing pdf: -d says so, exit 2' 2 "$(missing_msg pdf)" \
+    env PATH="$TMP/noext:$PATH" $DUCKEYE -d "$TMP/doc.pdf"
+says_only 'missing textplot: -Z says so, exit 2' 2 "$(missing_msg textplot)" \
+    env PATH="$TMP/noext:$PATH" $DUCKEYE -Z "$TMP/d.parquet"
+# No shim: a HOME with nothing installed is the ordinary way to lack textplot, and the
+# reason is DuckDB's own, so only its shape is asserted.
+mkdir -p "$TMP/freshhome"
+_run env HOME="$TMP/freshhome" $DUCKEYE -Z "$TMP/d.parquet"
+if (( _rc == 2 )) && [[ -z $_out && $_err == "$(missing_line textplot)"$'\n  '*Error:*$'\n'"$init_hint" &&
+      $(grep -c '' <<<"$_err") == 3 ]]; then
+  pass=$((pass+1)); printf '  ok   %s\n' 'fresh HOME: -Z gives the reason and the --init hint'
+else
+  fail=$((fail+1)); printf '  FAIL %s (rc %s, stderr %q)\n' 'fresh HOME: -Z gives the reason and the --init hint' "$_rc" "${_err:0:300}"
+fi
 
 echo 'code AST (sitting_duck)'
 cat >"$TMP/test_code.py" <<'PY'
@@ -1604,7 +1660,7 @@ fi
 # pdf_to_text was removed. Keep this small checked-in fixture independent of the
 # optional external archive above; run it against both pdf API generations.
 if [[ -f fixtures/test.zim ]]; then
-  has 'ZIM PDF scalar binds with either pdf API' 'Plants convert light.' \
+  needs pdf has 'ZIM PDF scalar binds with either pdf API' 'Plants convert light.' \
       $DUCKEYE -t text 'zim://fixtures/test.zim/A/Photosynthesis'
 fi
 
@@ -2188,7 +2244,17 @@ fi
 mkdir -p "$TMP/home"
 ok  'init'                       env HOME="$TMP/home" $DUCKEYE --init
 cp "$(canonical_path "$DUCKEYE")" "$TMP/upd" && chmod +x "$TMP/upd"
-ok  'update'                     env HOME="$TMP/home" "$TMP/upd" --update
+# Outside a git checkout --update downloads duckeye and install.sh from the published
+# main and runs THAT --init. A stub curl serves this checkout instead, so the case
+# measures the code under test, not the last release.
+mkdir -p "$TMP/curlstub"
+cat >"$TMP/curlstub/curl" <<'STUB'
+#!/usr/bin/env bash
+# called as: curl -fsSL URL -o FILE
+cp "$STUB_SRC/${2##*/}" "$4"
+STUB
+chmod +x "$TMP/curlstub/curl"
+ok  'update'                     env HOME="$TMP/home" PATH="$TMP/curlstub:$PATH" STUB_SRC="$PWD" "$TMP/upd" --update
 no  'mode exclusivity'           $DUCKEYE -r -t "$TMP/d.parquet"
 no  'limit validates'            $DUCKEYE -n abc "$TMP/d.parquet"
 # This was `-z "$TMP/doc.md"` and was named for a refusal it never measured: -z is a

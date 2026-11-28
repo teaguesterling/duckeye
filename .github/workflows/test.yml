@@ -29,7 +29,7 @@ jobs:
       # change the step below was built to catch. An exact tag is a version someone chose.
       - name: Install DuckDB
         run: |
-          curl -fsSL "https://github.com/duckdb/duckdb/releases/download/v2.0.0/duckdb-cli-linux-amd64.tar.gz" \
+          curl -fsSL "https://github.com/duckdb/duckdb/releases/download/v2.0.1/duckdb-cli-linux-amd64.tar.gz" \
             -o /tmp/duckdb.tar.gz
           tar -xzf /tmp/duckdb.tar.gz -C /tmp
           sudo install /tmp/duckdb /usr/local/bin/
@@ -76,13 +76,13 @@ jobs:
         run: ./integration.sh
 
       # DuckDB 2.0 makes single-arrow lambdas (`x -> ...`) a Binder Error; 1.5.x only
-      # warns. CI installs releases/latest, so 2.0 would reach this workflow on its
-      # release day with no warning. This runs both suites under 2.0's lambda rule now,
-      # reproduced on the current CLI with lambda_syntax='DISABLE_SINGLE_ARROW'.
+      # warns. On 2.0.1 that rule is the DEFAULT, and `SET lambda_syntax` is deprecated:
+      # it prints a warning on stdout, which check 2 rejects. So this step sets no
+      # lambda option. It tests the default rule under a separate HOME, with both suites.
       #
-      # The setting goes in a .duckdbrc under a throwaway HOME, which the CLI reads for
-      # every duckdb invocation duckeye makes. The real extension directory --init filled
-      # is reached by SYMLINK, and .gitconfig comes along for the git:// cases.
+      # The step runs under a throwaway HOME with no .duckdbrc, so no user rc can change
+      # the rule. The real extension directory --init filled is reached by SYMLINK, and
+      # .gitconfig comes along for the git:// cases.
       #
       # A SYMLINK AND NOT `SET extension_directory`, which is what this step used to do.
       # DuckDB 2.0 DEPRECATED that setting and its warning goes to STDOUT, three lines
@@ -91,20 +91,23 @@ jobs:
       # assertions failed in a step whose own subject is lambdas. MEASURED both ways on
       # one tree: exit 0 with that rc, exit 1 without it.
       #
-      # Two checks, because the first alone let that through:
-      #   1. the rule is LIVE -- if the CLI ever stopped reading .duckdbrc, both suites
-      #      would run under the DEFAULT rule and pass, measuring nothing.
-      #   2. the rc is SILENT on stdout -- a warning there is indistinguishable from a
-      #      result to every caller in this repo, which is how (1) stayed green while the
-      #      step measured garbage.
+      # Two checks, because a check of the rule alone let that through:
+      #   1. the rule is LIVE -- a single-arrow lambda must report DuckDB's deprecation
+      #      error. If it runs, both suites would pass under the old rule, measuring
+      #      nothing. A missing binary or a crash does not count, and neither does
+      #      1.5.x, which prints the same words as a warning and runs the query.
+      #   2. startup is SILENT on stdout -- a warning there is indistinguishable from a
+      #      result to every caller in this repo, which is how a rule check stayed green
+      #      while the step measured garbage.
       - name: Run tests under DuckDB 2.0's lambda rule
         run: |
           H=$(mktemp -d)
-          printf "SET lambda_syntax='DISABLE_SINGLE_ARROW';\n" > "$H/.duckdbrc"
           ln -s "$HOME/.duckdb" "$H/.duckdb"
           cp "$HOME/.gitconfig" "$H/" 2>/dev/null || true
-          HOME="$H" duckdb -list -noheader -c "SELECT current_setting('lambda_syntax')" | grep -q DISABLE_SINGLE_ARROW \
-            || { echo "lambda rule NOT active -- .duckdbrc was not read"; exit 1; }
+          if out=$(HOME="$H" duckdb -c "SELECT list_transform([1], x -> x+1)" 2>&1) \
+              || ! grep -q "Deprecated lambda arrow" <<<"$out"; then
+            echo "2.0 lambda rule NOT active"; exit 1
+          fi
           noise=$(HOME="$H" duckdb -list -noheader -c "SELECT 1" 2>/dev/null | grep -vx '1' || true)
           [ -z "$noise" ] \
             || { echo "the rc leaks onto stdout, which duckeye reads as data: $noise"; exit 1; }

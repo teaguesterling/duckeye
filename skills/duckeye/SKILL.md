@@ -188,7 +188,7 @@ duckeye 'zim://wiki.zim/_assets_/doc.pdf' # read embedded PDFs in ZIM
 ### Piping and scripting
 
 ```sh
-# Exit codes: 0=ok, 1=no match/error, 2=unsupported format, 64=usage
+# Exit codes: 0=ok, 1=no match/error, 2=unsupported format or a needed extension does not load, 64=usage
 duckeye -s 'BREAKING' CHANGELOG.md || echo 'safe to upgrade'
 
 # Interactive fuzzy section picker

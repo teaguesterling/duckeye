@@ -82,5 +82,5 @@ usage: duckeye [OPTION]... [FILE]
 |---|---|
 | `0` | Success |
 | `1` | General error (no section match, unreadable file, SQL error) |
-| `2` | Unsupported file format |
+| `2` | Unsupported format, or a needed extension does not load |
 | `64` | Command line usage error (invalid flag or argument) |

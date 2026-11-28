@@ -29,7 +29,7 @@ jobs:
       # change the step below was built to catch. An exact tag is a version someone chose.
       - name: Install DuckDB
         run: |
-          curl -fsSL "https://github.com/duckdb/duckdb/releases/download/v2.0.0/duckdb-cli-linux-amd64.tar.gz" \
+          curl -fsSL "https://github.com/duckdb/duckdb/releases/download/v2.0.1/duckdb-cli-linux-amd64.tar.gz" \
             -o /tmp/duckdb.tar.gz
           tar -xzf /tmp/duckdb.tar.gz -C /tmp
           sudo install /tmp/duckdb /usr/local/bin/

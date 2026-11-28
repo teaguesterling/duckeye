@@ -524,16 +524,26 @@ duckeye_load_sql() {
 }
 
 # pdf and textplot are the two extensions a DuckDB version can be without. They are
-# checked before the query, so the user gets one line that names the extension instead
-# of DuckDB's IO Error. Autoload is off as it is for the -Z load (Query-farm/textplot#4):
-# a crash at exit would read as "not available".
+# checked before the query, so the user gets a line that names the extension, then one
+# line of DuckDB's own reason: "no build" and "not installed" both end up here.
+# Autoload is off as it is for the -Z load (Query-farm/textplot#4): a crash at exit
+# would read as "not available".
 duckeye_need_exts() {
-  local e ver
+  local e ver err st line reason
   for e in "$@"; do
     [[ $e == pdf || $e == textplot ]] || continue
-    duckdb -c "SET autoload_known_extensions=false; $(duckeye_load_sql "$e")" >/dev/null 2>&1 && continue
+    # stderr only: a ~/.duckdbrc may write to stdout.
+    err=$(duckdb -c "SET autoload_known_extensions=false; $(duckeye_load_sql "$e")" 2>&1 >/dev/null) && continue
+    st=$?
+    reason="no error message (duckdb exit $st)"
+    while IFS= read -r line; do
+      # The second shape is agent mode's JSON error (DUCKEYE_AGENT).
+      [[ $line == *Error:* || $line == '{"exception_type"'* ]] && { reason=$line; break; }
+    done <<<"$err"
     ver=$(duckdb -version 2>/dev/null)
-    die "extension $e is not available on this DuckDB (${ver%% *})" 2
+    die "extension $e is not available on this DuckDB (${ver%% *})
+  $reason
+  run \`duckeye --init\` to install extensions or see why one cannot be installed" 2
   done
 }
 
